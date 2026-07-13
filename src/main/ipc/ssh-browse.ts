@@ -56,6 +56,7 @@ export function registerSshBrowseHandler(
   )
 }
 
+/** List a remote directory before a repository root has been registered with the SSH relay. */
 export async function browseSshDirectory(
   manager: SshConnectionManager | null,
   targetId: string,

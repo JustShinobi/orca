@@ -10,6 +10,7 @@ import {
   type SshWorkspaceForgetResolution
 } from './ssh-workspace-forget-resolution'
 
+/** Resolve workspace deletion behavior against the SSH state owned by its execution runtime. */
 export function resolveRuntimeAwareSshWorkspaceForget(
   state: AppState,
   repo: Pick<Repo, 'connectionId'> | null,

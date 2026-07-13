@@ -18,6 +18,7 @@ export async function browseRuntimeServerDirectory(
   )
 }
 
+/** Browse an SSH target through the paired runtime environment that owns it. */
 export async function browseRuntimeSshDirectory(
   environmentId: string,
   targetId: string,

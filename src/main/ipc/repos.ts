@@ -234,6 +234,7 @@ async function addLocalRepoFromPath(
   return { repo, alreadyExisted: false }
 }
 
+/** Add an SSH-hosted Git repository or folder to the persisted project catalog. */
 export async function addRemoteRepoFromPath(
   store: Store,
   args: {
@@ -1014,6 +1015,7 @@ async function resolveSshProjectGroupPath(connectionId: string, path: string): P
   return path
 }
 
+/** Scan a local or SSH-owned directory using the filesystem providers available to IPC callers. */
 export async function scanNestedReposForIpc(args: {
   path: string
   connectionId?: string

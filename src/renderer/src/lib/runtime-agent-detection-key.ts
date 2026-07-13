@@ -14,11 +14,13 @@ export function getRuntimeAgentDetectionKey(
   return targetId ? `${environmentId}${RUNTIME_SSH_AGENT_KEY_SEPARATOR}${targetId}` : environmentId
 }
 
+/** Extract the owning runtime environment from a direct or nested-SSH agent cache key. */
 export function getRuntimeAgentDetectionEnvironmentId(key: string): string {
   const separatorIndex = key.indexOf(RUNTIME_SSH_AGENT_KEY_SEPARATOR)
   return separatorIndex === -1 ? key : key.slice(0, separatorIndex)
 }
 
+/** Test whether an agent cache key belongs to a runtime host or one of its SSH targets. */
 export function runtimeAgentDetectionKeyMatches(
   key: string,
   environmentId: string,

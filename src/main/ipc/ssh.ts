@@ -101,6 +101,7 @@ export function listRegisteredRemovedSshTargetLabels(): Record<string, string> {
   return sshStore?.listRemovedTargetLabels() ?? {}
 }
 
+/** Drain repository re-adoptions produced by the most recent SSH target mutation. */
 function takeRegisteredRepoReadoptions(): SshRepoReadoption[] {
   if (!sshStore || sshStore.lastRepoReadoptions.length === 0) {
     return []
@@ -118,6 +119,7 @@ function takeRegisteredRepoReadoptions(): SshRepoReadoption[] {
   return repoReadoptions
 }
 
+/** Add an SSH target through the process-wide registry used by desktop and runtime RPC. */
 export function addRegisteredSshTarget(target: Omit<SshTarget, 'id'>): {
   target: SshTarget
   repoReadoptions: SshRepoReadoption[]
@@ -129,6 +131,7 @@ export function addRegisteredSshTarget(target: Omit<SshTarget, 'id'>): {
   return { target: added, repoReadoptions: takeRegisteredRepoReadoptions() }
 }
 
+/** Import OpenSSH hosts through the process-wide registry used by desktop and runtime RPC. */
 export function importRegisteredSshConfig(options?: { reAdopt?: boolean }): {
   targets: SshTarget[]
   repoReadoptions: SshRepoReadoption[]
