@@ -234,7 +234,7 @@ async function addLocalRepoFromPath(
   return { repo, alreadyExisted: false }
 }
 
-async function addRemoteRepoFromPath(
+export async function addRemoteRepoFromPath(
   store: Store,
   args: {
     connectionId: string
@@ -1014,7 +1014,7 @@ async function resolveSshProjectGroupPath(connectionId: string, path: string): P
   return path
 }
 
-async function scanNestedReposForIpc(args: {
+export async function scanNestedReposForIpc(args: {
   path: string
   connectionId?: string
   options?: unknown

@@ -670,6 +670,7 @@ import {
   WORKTREE_CREATE_MAX_SUFFIX_ATTEMPTS
 } from '../worktree-create-candidates'
 import { normalizeSparseDirectories } from '../ipc/sparse-checkout-directories'
+import { addRemoteRepoFromPath, scanNestedReposForIpc } from '../ipc/repos'
 import type { Store } from '../persistence'
 import type { StatsCollector } from '../stats/collector'
 import { AgentDetector } from '../stats/agent-detector'
@@ -3002,7 +3003,7 @@ export class OrcaRuntimeService {
     this.emitClientEvent({ type: 'worktreesChanged', repoId })
   }
 
-  private notifyReposChanged(): void {
+  notifyReposChanged(): void {
     this.notifier?.reposChanged()
     this.emitClientEvent({ type: 'reposChanged' })
   }
@@ -11572,11 +11573,34 @@ export class OrcaRuntimeService {
     return { deleted }
   }
 
-  async scanNestedRepos(path: string): Promise<NestedRepoScanResult> {
+  async scanNestedRepos(path: string, connectionId?: string): Promise<NestedRepoScanResult> {
+    if (connectionId) {
+      return scanNestedReposForIpc({ path, connectionId, options: { timeoutMs: 15_000 } })
+    }
     if (!isAbsolute(path)) {
       throw new Error('Project path must be an absolute path')
     }
     return scanNestedRepos({ path, options: { timeoutMs: 15_000 } })
+  }
+
+  async addSshRepo(args: {
+    connectionId: string
+    remotePath: string
+    displayName?: string
+    kind?: 'git' | 'folder'
+  }): Promise<{ repo: Repo } | { error: string }> {
+    if (!this.store) {
+      throw new Error('runtime_unavailable')
+    }
+    // Why: runtime RPC and desktop IPC must persist identical SSH repo
+    // metadata so a project added from a paired desktop behaves like one added
+    // directly on the server.
+    const result = await addRemoteRepoFromPath(this.store as Store, args)
+    if ('error' in result) {
+      return result
+    }
+    this.notifyReposChanged()
+    return { repo: result.repo }
   }
 
   async browseServerDir(pathValue: string): Promise<{ resolvedPath: string; entries: DirEntry[] }> {
