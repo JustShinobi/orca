@@ -513,14 +513,13 @@ describe('createDetectedAgentsSlice remote detection', () => {
     expect(runtimeEnvironmentCall).toHaveBeenNthCalledWith(1, {
       selector: 'env-1',
       method: 'status.get',
-      params: undefined,
-      timeoutMs: undefined
+      timeoutMs: 30_000
     })
     expect(runtimeEnvironmentCall).toHaveBeenNthCalledWith(2, {
       selector: 'env-1',
       method: 'preflight.detectAgents',
       params: undefined,
-      timeoutMs: undefined
+      timeoutMs: 30_000
     })
   })
 
@@ -558,7 +557,7 @@ describe('createDetectedAgentsSlice remote detection', () => {
       selector: 'env-linux',
       method: 'preflight.detectRemoteAgents',
       params: { connectionId: 'ssh-p8' },
-      timeoutMs: undefined
+      timeoutMs: 30_000
     })
     expect(store.getState().runtimeDetectedAgentIds['env-linux']).toBeUndefined()
   })

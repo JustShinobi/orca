@@ -275,7 +275,8 @@ export const createDetectedAgentsSlice: StateCreator<AppState, [], [], DetectedA
     const pending = callRuntimeRpc<TuiAgent[]>(
       { kind: 'environment', environmentId },
       remoteConnectionId ? 'preflight.detectRemoteAgents' : 'preflight.detectAgents',
-      remoteConnectionId ? { connectionId: remoteConnectionId } : undefined
+      remoteConnectionId ? { connectionId: remoteConnectionId } : undefined,
+      { timeoutMs: 30_000 }
     )
       .then((ids) => {
         const typed = ids as TuiAgent[]

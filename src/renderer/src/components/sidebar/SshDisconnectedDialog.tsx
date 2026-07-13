@@ -76,9 +76,22 @@ export function SshDisconnectedDialog({
   const handleReconnect = useCallback(async () => {
     setConnecting(true)
     try {
-      await (sshOwnerEnvironmentId
-        ? connectRuntimeEnvironmentSshTarget(sshOwnerEnvironmentId, targetId)
-        : window.api.ssh.connect({ targetId }))
+      if (sshOwnerEnvironmentId) {
+        const connectedState = await connectRuntimeEnvironmentSshTarget(
+          sshOwnerEnvironmentId,
+          targetId
+        )
+        if (connectedState?.status !== 'connected') {
+          throw new Error(
+            translate(
+              'auto.components.sidebar.SshDisconnectedDialog.656368f3a2',
+              'Reconnection failed'
+            )
+          )
+        }
+      } else {
+        await window.api.ssh.connect({ targetId })
+      }
       if (mountedRef.current) {
         onOpenChange(false)
       }

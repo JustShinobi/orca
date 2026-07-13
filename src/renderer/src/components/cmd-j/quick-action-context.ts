@@ -4,6 +4,7 @@ import type { Worktree } from '../../../../shared/types'
 import type { SshConnectionStatus } from '../../../../shared/ssh-types'
 import { getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { selectRuntimeAwareSshStatus } from '@/store/slices/runtime-environment-ssh'
+import { isPairedWebClientWindow } from '@/lib/desktop-window-chrome'
 
 export type CmdJUnavailableReason =
   | 'loading'
@@ -88,10 +89,7 @@ export function getActiveWorktreeSshStatus(
   if (!connectionId) {
     return null
   }
-  const isPairedWebClient = Boolean(
-    (globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__
-  )
-  const sshOwnerEnvironmentId = isPairedWebClient
+  const sshOwnerEnvironmentId = isPairedWebClientWindow()
     ? null
     : getExplicitRuntimeEnvironmentIdForWorktree(state, activeWorktree.id)
   return selectRuntimeAwareSshStatus(state, sshOwnerEnvironmentId, connectionId)
