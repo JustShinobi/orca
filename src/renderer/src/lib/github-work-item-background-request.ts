@@ -34,7 +34,6 @@ export type GitHubWorkItemBackgroundStoreSnapshot = {
           | 'agentCmdOverrides'
           | 'agentDefaultArgs'
           | 'agentDefaultEnv'
-          | 'terminalWindowsShell'
         >
       >
     | null
