@@ -2,6 +2,8 @@ import type { AppState } from '@/store/types'
 import { findWorktreeById } from '@/store/slices/worktree-helpers'
 import type { Worktree } from '../../../../shared/types'
 import type { SshConnectionStatus } from '../../../../shared/ssh-types'
+import { getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { selectRuntimeAwareSshStatus } from '@/store/slices/runtime-environment-ssh'
 
 export type CmdJUnavailableReason =
   | 'loading'
@@ -75,7 +77,7 @@ export function captureCmdJActiveGroupSnapshot(
 }
 
 export function getActiveWorktreeSshStatus(
-  state: Pick<AppState, 'repos' | 'sshConnectionStates' | 'worktreesByRepo'>,
+  state: AppState,
   activeWorktree: Worktree | null
 ): SshConnectionStatus | null {
   if (!activeWorktree) {
@@ -86,7 +88,13 @@ export function getActiveWorktreeSshStatus(
   if (!connectionId) {
     return null
   }
-  return state.sshConnectionStates.get(connectionId)?.status ?? 'disconnected'
+  const isPairedWebClient = Boolean(
+    (globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__
+  )
+  const sshOwnerEnvironmentId = isPairedWebClient
+    ? null
+    : getExplicitRuntimeEnvironmentIdForWorktree(state, activeWorktree.id)
+  return selectRuntimeAwareSshStatus(state, sshOwnerEnvironmentId, connectionId)
 }
 
 export function getWorkspaceScopedActionAvailability(

@@ -6691,6 +6691,7 @@ export function connectPanePty(
       // (Guard the map's presence for minimal test stubs that omit it; an absent
       // map is "not hydrated", not "target gone".)
       if (
+        runtimeEnvironmentId === null &&
         !isRuntimeOwnedSshTargetId(connectionId) &&
         storeState.sshTargetLabels instanceof Map &&
         !storeState.sshTargetLabels.has(connectionId)
@@ -6703,6 +6704,7 @@ export function connectPanePty(
           : null
       const gate = resolveSshPaneConnectGate({
         connectionId,
+        sshOwnerEnvironmentId: runtimeEnvironmentId,
         sshStatus: storeState.sshConnectionStates.get(connectionId)?.status,
         isDeferredTarget: storeState.deferredSshReconnectTargets.includes(connectionId),
         restoredLeafSessionId,
