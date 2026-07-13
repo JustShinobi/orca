@@ -16,6 +16,7 @@ import type {
   RuntimeStatus,
   RuntimeTerminalCreate,
   RuntimeTerminalResolvePane,
+  RuntimeTerminalCreateAgentLaunchFailure,
   RuntimeTerminalSend
 } from '../../../../shared/runtime-types'
 import {
@@ -28,6 +29,7 @@ import {
 } from '../../../../shared/terminal-input'
 import type {
   IpcPtyTransportOptions,
+  PtyConnectAgentLaunchFailure,
   PtyConnectResult,
   PtyTransport,
   PtyTransportRecoveryState
@@ -114,6 +116,7 @@ type RemoteAgentSessionLaunchResult =
   | RuntimeEnsureAgentSessionResult
   | RuntimeCreateAgentSessionResult
   | { terminal: RuntimeTerminalCreate; disposition?: undefined }
+  | RuntimeTerminalCreateAgentLaunchFailure
 const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
 
 function isRemoteTerminalStaleMessage(message: string): boolean {
@@ -148,6 +151,7 @@ export function createRemoteRuntimePtyTransport(
     agentPromptDelivery,
     agentArgsOverride,
     agentLaunchPreferences,
+    agentLaunch,
     worktreeId,
     executionHostId,
     tabId,
@@ -454,6 +458,9 @@ export function createRemoteRuntimePtyTransport(
     result: RemoteAgentSessionLaunchResult,
     environmentId: string
   ): boolean {
+    if (!('terminal' in result)) {
+      return false
+    }
     if (result.disposition !== undefined || result.terminal.isReattach === true) {
       // Why: every structured launch is host-owned; provisional teardown must
       // never close its canonical terminal while snapshot reconciliation catches up.
@@ -1930,6 +1937,7 @@ export function createRemoteRuntimePtyTransport(
         const resumeProviderSessionToSend = options.resumeProviderSession ?? resumeProviderSession
         const launchTokenToSend = options.launchToken ?? launchToken
         const launchAgentToSend = options.launchAgent ?? launchAgent
+        const agentLaunchToSend = options.agentLaunch ?? agentLaunch
         const legacyCreateParams = {
           worktree: toRuntimeTerminalWorktreeSelector(worktreeId),
           clientMutationId: terminalCreateMutationId,
@@ -2019,24 +2027,63 @@ export function createRemoteRuntimePtyTransport(
             createEnvironmentId,
             connectLifecycleEpoch
           )
-        const created = launchAgentToSend
-          ? agentSessionRequiresHostAuthorityReplay
-            ? await hostAuthorityCreate()
-            : await runRemoteAgentSessionLaunch<RemoteAgentSessionLaunchResult | null>({
-                environmentId: createEnvironmentId,
-                hostAuthority: hostAuthorityCreate,
-                ...(resumeProviderSessionToSend && launchAgentToSend === 'omp'
-                  ? { hostAuthorityCapability: AGENT_SESSION_OMP_RESUME_PATH_RUNTIME_CAPABILITY }
-                  : {}),
-                legacy: legacyCreate
-              })
-          : await legacyCreate()
+        const agentLaunchCreate = () =>
+          createWithUnknownOutcomeRecovery(
+            'terminal',
+            (timeoutMs, reconcileExisting) =>
+              callRuntimeForEnvironment<
+                { terminal: RuntimeTerminalCreate } | RuntimeTerminalCreateAgentLaunchFailure
+              >(
+                createEnvironmentId,
+                'terminal.create',
+                {
+                  worktree: toRuntimeTerminalWorktreeSelector(worktreeId),
+                  clientMutationId: terminalCreateMutationId,
+                  agentLaunch: agentLaunchToSend!,
+                  ...(terminalColorQueryReplies ? { terminalColorQueryReplies } : {}),
+                  tabId,
+                  leafId,
+                  presentation: 'background',
+                  ...(activate === true ? { activate: true } : {}),
+                  ...(reconcileExisting ? { reconcileExisting: true } : {})
+                },
+                timeoutMs
+              ),
+            createEnvironmentId,
+            connectLifecycleEpoch
+          )
+        const created = agentLaunchToSend
+          ? await agentLaunchCreate()
+          : launchAgentToSend
+            ? agentSessionRequiresHostAuthorityReplay
+              ? await hostAuthorityCreate()
+              : await runRemoteAgentSessionLaunch<RemoteAgentSessionLaunchResult | null>({
+                  environmentId: createEnvironmentId,
+                  hostAuthority: hostAuthorityCreate,
+                  ...(resumeProviderSessionToSend && launchAgentToSend === 'omp'
+                    ? {
+                        hostAuthorityCapability: AGENT_SESSION_OMP_RESUME_PATH_RUNTIME_CAPABILITY
+                      }
+                    : {}),
+                  legacy: legacyCreate
+                })
+            : await legacyCreate()
         if (!created) {
           if (!destroyed && lifecycleEpoch === connectLifecycleEpoch) {
             connecting = false
             recovery.markDisconnected()
           }
           return
+        }
+        // A pre-spawn agentLaunch failure creates no terminal.
+        if (!('terminal' in created)) {
+          if (destroyed || lifecycleEpoch !== connectLifecycleEpoch) {
+            return
+          }
+          connecting = false
+          recovery.cancel()
+          emitRecoveryState()
+          return { agentLaunch: created.agentLaunch } satisfies PtyConnectAgentLaunchFailure
         }
         const createdTerminal = created.terminal
         adoptExecutionMetadata(createdTerminal)
@@ -2100,7 +2147,10 @@ export function createRemoteRuntimePtyTransport(
         return {
           id: remotePtyId,
           replay: '',
-          ...(createdTerminal.isReattach === true ? { isReattach: true } : {})
+          ...(createdTerminal.isReattach === true ? { isReattach: true } : {}),
+          // Receipt-only: pane identity/attribution rides the receipt token and
+          // the status stream; the runtime result never echoes a launch config.
+          ...(createdTerminal.agentLaunch ? { agentLaunch: createdTerminal.agentLaunch } : {})
         } satisfies PtyConnectResult
       } catch (error) {
         if (!destroyed && lifecycleEpoch === connectLifecycleEpoch) {

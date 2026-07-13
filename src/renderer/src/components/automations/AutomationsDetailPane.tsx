@@ -35,6 +35,8 @@ import {
 import { getAutomationRunContent } from './automation-run-content'
 import type { AutomationTargetAvailability } from './automation-target-availability'
 import type { AutomationRunViewState } from './automation-run-view-state'
+import type { AutomationRunLaunchFailure as AutomationRunLaunchFailureState } from './automation-run-view-state'
+import { AutomationRunLaunchFailure } from './AutomationRunLaunchFailure'
 import type { AutomationRunWorkspaceDisplay } from './automation-run-workspace-display'
 import type { ExternalAutomationSourceAvailability } from './external-automation-source-availability'
 import type { AutomationPaneTab, SelectedExternalRunPage } from './automation-page-state'
@@ -61,6 +63,8 @@ type AutomationsDetailPaneProps = {
   selectedExternalSshConnected: boolean
   selectedAutomationRunPageWorkspaceDisplay: AutomationRunWorkspaceDisplay | null
   selectedAutomationRunPageViewState: AutomationRunViewState | null
+  selectedAutomationRunPageLaunchFailure: AutomationRunLaunchFailureState | null
+  forgetRunIdInFlight: string | null
   canRerunSelectedAutomationRunPage: boolean
   isSelectedAutomationRunPageRerunPending: boolean
   worktreeMap: ReadonlyMap<string, Worktree>
@@ -85,6 +89,7 @@ type AutomationsDetailPaneProps = {
   toggleAutomation: (automation: Automation) => void
   requestDeleteAutomation: (automation: Automation) => void
   rerunAutomationRun: (automation: Automation, run: AutomationRun) => void
+  forgetAutomationRun: (run: AutomationRun) => void
   openRunWorkspace: (run: AutomationRun) => void
   openAutomationRunPage: (run: AutomationRun) => void
 }
@@ -108,6 +113,8 @@ export function AutomationsDetailPane({
   selectedExternalSshConnected,
   selectedAutomationRunPageWorkspaceDisplay,
   selectedAutomationRunPageViewState,
+  selectedAutomationRunPageLaunchFailure,
+  forgetRunIdInFlight,
   canRerunSelectedAutomationRunPage,
   isSelectedAutomationRunPageRerunPending,
   worktreeMap,
@@ -124,6 +131,7 @@ export function AutomationsDetailPane({
   toggleAutomation,
   requestDeleteAutomation,
   rerunAutomationRun,
+  forgetAutomationRun,
   openRunWorkspace,
   openAutomationRunPage
 }: AutomationsDetailPaneProps): React.JSX.Element {
@@ -310,6 +318,14 @@ export function AutomationsDetailPane({
                 }
                 onBack={onClearAutomationRunPage}
               >
+                {selectedAutomationRunPageLaunchFailure ? (
+                  <AutomationRunLaunchFailure
+                    failure={selectedAutomationRunPageLaunchFailure.failure}
+                    forgottenAt={selectedAutomationRunPageLaunchFailure.forgottenAt}
+                    onForget={() => forgetAutomationRun(selectedAutomationRunPage)}
+                    busy={forgetRunIdInFlight === selectedAutomationRunPage.id}
+                  />
+                ) : null}
                 <CommentMarkdown
                   variant="document"
                   content={getAutomationRunContent(selectedAutomationRunPage)}

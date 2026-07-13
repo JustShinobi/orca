@@ -26,6 +26,7 @@ import { LinearAgentSkillSetupPrompt } from './LinearAgentSkillSetupPrompt'
 import WorktreeCardAgents from './WorktreeCardAgents'
 import { useWorktreeAgentRows } from './useWorktreeAgentRows'
 import { WorktreeCardStatusSlot } from './WorktreeCardStatusSlot'
+import { WorktreeCardBackgroundLaunchFailures } from './WorktreeCardBackgroundLaunchFailures'
 import { cn } from '@/lib/utils'
 import { WorktreeCardSshHostControl } from './WorktreeCardSshHostControl'
 import { activateWorktreeFromSidebar } from '@/lib/sidebar-worktree-activation'
@@ -1913,6 +1914,8 @@ const WorktreeCard = React.memo(function WorktreeCard({
         </div>
       )}
       {parentCardBodyWithHoverDetails}
+
+      <WorktreeCardBackgroundLaunchFailures worktreeId={worktree.id} />
 
       {newCardStyle && lineageChildren ? (
         <div

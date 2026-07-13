@@ -8,6 +8,12 @@ export type ConfirmationDialogOptions = {
   confirmLabel?: string
   cancelLabel?: string
   confirmVariant?: 'default' | 'destructive'
+  /** Optional opt-in reported on confirmation without changing the boolean result. */
+  optIn?: {
+    label: string
+    defaultChecked?: boolean
+    onConfirm: (checked: boolean) => void
+  }
 }
 
 export type ConfirmationDialogContextValue = (
