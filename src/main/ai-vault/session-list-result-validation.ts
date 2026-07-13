@@ -35,6 +35,10 @@ const aiVaultSessionSchema = z.object({
   id: z.string(),
   executionHostId: executionHostIdSchema,
   executionHostPlatform: nodePlatformSchema.nullable().optional(),
+  resumeLocator: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   agent: z.enum(AI_VAULT_AGENTS),
   sessionId: z.string(),
   title: z.string(),

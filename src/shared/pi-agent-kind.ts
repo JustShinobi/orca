@@ -24,23 +24,35 @@ export function isPiCompatibleAgentType(
   return agentType === 'pi' || agentType === 'omp'
 }
 
-function getLaunchBinary(command: string): string {
-  return getCommandTokenPathBasename(getFirstCommandToken(command))
-    .toLowerCase()
-    .replace(/\.(?:cmd|exe|sh)$/, '')
+const OMP_LAUNCH_CMD = TUI_AGENT_CONFIG.omp.launchArgv[0]
+
+// Why: match the executable token, including common path and script suffix forms.
+const BOUNDARY_BEFORE = `(?:^|[\\s;&|('"\`])`
+const BOUNDARY_AFTER = `(?:$|[\\s;&|)'"\`])`
+const PATH_PREFIX = `(?:[^\\s;&|('"\`]*[\\\\/])?`
+
+function makeLaunchCmdRegex(launchCmd: string): RegExp {
+  const binary = getCommandTokenPathBasename(getFirstCommandToken(launchCmd))
+  const escaped = binary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(
+    `${BOUNDARY_BEFORE}${PATH_PREFIX}${escaped}(?:\\.cmd|\\.exe|\\.sh)?${BOUNDARY_AFTER}`,
+    'i'
+  )
 }
 
-const PI_LAUNCH_BINARY = getLaunchBinary(TUI_AGENT_CONFIG.pi.launchCmd)
-const OMP_LAUNCH_BINARY = getLaunchBinary(TUI_AGENT_CONFIG.omp.launchCmd)
+const PI_REGEX = makeLaunchCmdRegex(TUI_AGENT_CONFIG.pi.launchArgv[0])
+const OMP_REGEX = makeLaunchCmdRegex(OMP_LAUNCH_CMD)
 
 export function detectExplicitPiAgentKindFromCommand(
   command: string | undefined
 ): PiAgentKind | null {
-  const binary = getLaunchBinary(command ?? '')
-  if (binary === OMP_LAUNCH_BINARY) {
+  if (typeof command === 'string' && OMP_REGEX.test(command)) {
     return 'omp'
   }
-  return binary === PI_LAUNCH_BINARY ? 'pi' : null
+  if (typeof command === 'string' && PI_REGEX.test(command)) {
+    return 'pi'
+  }
+  return null
 }
 
 /**
