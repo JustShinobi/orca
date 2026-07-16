@@ -5758,6 +5758,10 @@ export function registerPtyHandlers(
       let pendingRegistrationPtyId: string | null = null
       let preparedProvisionalExecutionContext = false
       let releaseWorktreeSpawn: (() => void) | undefined
+      // Why: the admission token/background attempt minted above must settle on
+      // ANY pre-spawn throw (auth prep, host-env assembly, invariant checks) —
+      // an unsettled token burns launch capacity until restart. The catch below
+      // therefore covers the whole pre-spawn region, not just provider.spawn.
       try {
         if (!earlyStablePaneOwner) {
           await assertFolderWorkspacePtyPathUsable(args.worktreeId)
@@ -6438,7 +6442,10 @@ export function registerPtyHandlers(
         if (startupTerminalColorQueryReplyColors) {
           spawnOptions.startupIngress = {
             colors: startupTerminalColorQueryReplyColors,
-            deadlineMs: 5_000
+            deadlineMs: 5_000,
+            ...(nativeWindowsConptySpawn
+              ? { echoProjection: 'windows-conpty-esc-stripped' as const }
+              : {})
           }
         }
         const resolvedPaneSpawnReservationKey = makePaneSpawnReservationKey(
