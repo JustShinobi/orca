@@ -914,6 +914,7 @@ import {
 } from '../agent-launch/agent-launch-host-state'
 import {
   resolveAgentLaunchStartupPlanWithoutAdmission,
+  sanitizeClientAgentLaunchSourceRecord,
   type AgentLaunchSpawnTarget
 } from '../agent-launch/agent-launch-spawn'
 import type {
@@ -990,6 +991,63 @@ export type LocalWorktreeCreateAgentLaunchFinished = {
   agentLaunchResult: CreatedWorktreeResult['agentLaunchResult']
   wrappedSetupCommand?: string
   startupTerminal?: CreatedWorktreeResult['startupTerminal']
+}
+
+export type CreateManagedWorktreeArgs = {
+  repoSelector: string
+  name: string
+  baseBranch?: string
+  compareBaseRef?: string
+  branchNameOverride?: string
+  linkedIssue?: number | null
+  linkedPR?: number | null
+  linkedLinearIssue?: string
+  linkedLinearIssueWorkspaceId?: string | null
+  linkedLinearIssueOrganizationUrlKey?: string | null
+  linkedGitLabMR?: number | null
+  linkedGitLabIssue?: number | null
+  linkedBitbucketPR?: number | null
+  linkedAzureDevOpsPR?: number | null
+  linkedGiteaPR?: number | null
+  linkedWorkItem?: WorkspaceLinkedItem | null
+  linkedTaskSourceContext?: TaskSourceContext | null
+  comment?: string
+  displayName?: string
+  telemetrySource?: WorkspaceCreateTelemetrySource
+  workspaceStatus?: string
+  manualOrder?: number
+  sparseCheckout?: { directories: string[]; presetId?: string }
+  pushTarget?: GitPushTarget
+  runHooks?: boolean
+  activate?: boolean
+  setupDecision?: 'run' | 'skip' | 'inherit'
+  awaitTerminalProvisioning?: boolean
+  observeSetupCompletion?: boolean
+  createdWithAgent?: TuiAgent
+  startupAgent?: TuiAgent
+  startupPrompt?: string
+  pendingFirstAgentMessageRename?: boolean
+  automationProvenance?: AutomationWorkspaceProvenance
+  cliProvenance?: CliWorkspaceProvenance
+  startup?: WorktreeStartupLaunch
+  startupDraft?: string
+  startupDraftPaste?: WorktreeStartupDraftPaste
+  lineage?: WorktreeLineageInput
+  // The one host-atomic launch request shape (shared with pty.spawn,
+  // terminal.create, and session.tabs.createTerminal). When present the host
+  // IGNORES the client startup/createdWithAgent for the agent terminal and
+  // runs the two-stage transactional launch.
+  agentLaunch?: AgentLaunchSpawnRequest
+  agentLaunchClientKind?: AuthenticatedClientKind
+  // Surface-owned agent_started telemetry for a host-emitted interactive create
+  // (Option A: the host emits from the validated receipt, not the renderer).
+  // agent_kind + used_custom_agent are host-derived from the receipt — only the
+  // surface fields cross. Omitted for automation/orchestration/background creates,
+  // which must not emit agent_started (omission = no host emit).
+  agentLaunchTelemetry?: Pick<
+    NonNullable<WorktreeStartupLaunch['telemetry']>,
+    'launch_source' | 'request_kind'
+  >
 }
 import type {
   AgentLaunchInput,
@@ -8719,13 +8777,21 @@ export class OrcaRuntimeService {
       : args.tabId
     const session = this.store?.getWorkspaceSession?.()
     const tab = session?.tabsByWorktree[worktreeId]?.find((candidate) => candidate.id === hostTabId)
-    const existing = tab?.launchNotices
-    if (
-      !session ||
-      !this.store?.setWorkspaceSession ||
-      !existing ||
-      existing.launchToken !== args.launchToken
-    ) {
+    const sessionNotices =
+      tab?.launchNotices && tab.launchNotices.launchToken === args.launchToken
+        ? tab.launchNotices
+        : undefined
+    // Host-spawned background terminals carry their notices on the live pty
+    // record (no renderer session tab yet), and every republish path copies
+    // pty.launchNotices back into new snapshots — so dismissal must find AND
+    // clear the record too, or the dismissed notice resurrects undismissable.
+    const pty = [...this.ptysById.values()].find(
+      (candidate) =>
+        candidate.worktreeId === worktreeId &&
+        candidate.launchNotices?.launchToken === args.launchToken
+    )
+    const existing = sessionNotices ?? pty?.launchNotices
+    if (!existing) {
       return { ok: false, changed: false }
     }
     const remaining = existing.notices.filter((notice) => notice.code !== args.code)
@@ -8734,7 +8800,12 @@ export class OrcaRuntimeService {
     }
     const nextState =
       remaining.length > 0 ? { launchToken: existing.launchToken, notices: remaining } : undefined
-    this.persistTabLaunchNotices(session, worktreeId, hostTabId, nextState)
+    if (pty) {
+      pty.launchNotices = nextState ?? null
+    }
+    if (session && this.store?.setWorkspaceSession && sessionNotices) {
+      this.persistTabLaunchNotices(session, worktreeId, hostTabId, nextState)
+    }
     this.applyLaunchNoticesToSnapshot(worktreeId, hostTabId, nextState)
     return { ok: true, changed: true }
   }
@@ -21838,62 +21909,7 @@ export class OrcaRuntimeService {
     })
   }
 
-  async createManagedWorktree(args: {
-    repoSelector: string
-    name: string
-    baseBranch?: string
-    compareBaseRef?: string
-    branchNameOverride?: string
-    linkedIssue?: number | null
-    linkedPR?: number | null
-    linkedLinearIssue?: string
-    linkedLinearIssueWorkspaceId?: string | null
-    linkedLinearIssueOrganizationUrlKey?: string | null
-    linkedGitLabMR?: number | null
-    linkedGitLabIssue?: number | null
-    linkedBitbucketPR?: number | null
-    linkedAzureDevOpsPR?: number | null
-    linkedGiteaPR?: number | null
-    linkedWorkItem?: WorkspaceLinkedItem | null
-    linkedTaskSourceContext?: TaskSourceContext | null
-    comment?: string
-    displayName?: string
-    telemetrySource?: WorkspaceCreateTelemetrySource
-    workspaceStatus?: string
-    manualOrder?: number
-    sparseCheckout?: { directories: string[]; presetId?: string }
-    pushTarget?: GitPushTarget
-    runHooks?: boolean
-    activate?: boolean
-    setupDecision?: 'run' | 'skip' | 'inherit'
-    awaitTerminalProvisioning?: boolean
-    observeSetupCompletion?: boolean
-    createdWithAgent?: TuiAgent
-    startupAgent?: TuiAgent
-    startupPrompt?: string
-    pendingFirstAgentMessageRename?: boolean
-    automationProvenance?: AutomationWorkspaceProvenance
-    cliProvenance?: CliWorkspaceProvenance
-    startup?: WorktreeStartupLaunch
-    startupDraft?: string
-    startupDraftPaste?: WorktreeStartupDraftPaste
-    lineage?: WorktreeLineageInput
-    // The one host-atomic launch request shape (shared with pty.spawn,
-    // terminal.create, and session.tabs.createTerminal). When present the host
-    // IGNORES the client startup/createdWithAgent for the agent terminal and
-    // runs the two-stage transactional launch.
-    agentLaunch?: AgentLaunchSpawnRequest
-    agentLaunchClientKind?: AuthenticatedClientKind
-    // Surface-owned agent_started telemetry for a host-emitted interactive create
-    // (Option A: the host emits from the validated receipt, not the renderer).
-    // agent_kind + used_custom_agent are host-derived from the receipt — only the
-    // surface fields cross. Omitted for automation/orchestration/background creates,
-    // which must not emit agent_started (omission = no host emit).
-    agentLaunchTelemetry?: Pick<
-      NonNullable<WorktreeStartupLaunch['telemetry']>,
-      'launch_source' | 'request_kind'
-    >
-  }): Promise<CreatedWorktreeResult> {
+  async createManagedWorktree(args: CreateManagedWorktreeArgs): Promise<CreatedWorktreeResult> {
     if (!this.store) {
       throw new Error('runtime_unavailable')
     }
@@ -21934,6 +21950,50 @@ export class OrcaRuntimeService {
       })
     }
     const agentLaunchFinish = agentLaunchPrepared?.ok ? agentLaunchPrepared : null
+    if (!agentLaunchFinish) {
+      return this.createManagedWorktreeAfterLaunchPrepare(
+        args,
+        repo,
+        createSettings,
+        requestedAgent,
+        requestedAgentEnabled,
+        null
+      )
+    }
+    try {
+      return await this.createManagedWorktreeAfterLaunchPrepare(
+        args,
+        repo,
+        createSettings,
+        requestedAgent,
+        requestedAgentEnabled,
+        agentLaunchFinish
+      )
+    } catch (err) {
+      // Any throw between the stage-1 reservation and a settled finish() (branch
+      // conflict, SSH drop, `git worktree add` failure, …) must free the held
+      // capacity slot: reservations have no TTL and are invisible to reconcile/
+      // Forget, so a leak here wedges launches until restart. Idempotent —
+      // release() no-ops once finish() consumed or released the reservation.
+      agentLaunchFinish.release()
+      throw err
+    }
+  }
+
+  /** Post-prepare body of createManagedWorktree (git creation, owner writes,
+   *  and the stage-2 launch finish), split out so the caller can release a held
+   *  stage-1 reservation on ANY throw in this span. */
+  private async createManagedWorktreeAfterLaunchPrepare(
+    args: CreateManagedWorktreeArgs,
+    repo: Repo,
+    createSettings: ReturnType<RuntimeStore['getSettings']>,
+    requestedAgent: TuiAgent | undefined,
+    requestedAgentEnabled: boolean,
+    agentLaunchFinish: WorktreeCreateAgentLaunchPreparedOk | null
+  ): Promise<CreatedWorktreeResult> {
+    if (!this.store) {
+      throw new Error('runtime_unavailable')
+    }
     // The host-atomic agentLaunch owns the agent terminal; suppress the legacy
     // client startup path for it entirely.
     const agentStartup =
@@ -22878,10 +22938,13 @@ export class OrcaRuntimeService {
         console.warn(`[worktree-create] ${warning}`)
       }
     }
-    if (agentLaunchFinish && this.ptyController?.spawn) {
+    if (agentLaunchFinish) {
       // Stage 2 for a local git worktree: the workspace now exists, so convert
       // the reservation and spawn the single agent terminal. It becomes the
       // primary/startup terminal so setup + default tabs provision around it.
+      // Not gated on ptyController.spawn: with no controller the spawn throws
+      // inside the transaction, which settles the reservation `failed` — a
+      // skipped finish would strand the reservation forever.
       try {
         const outcome = await agentLaunchFinish.finish(
           worktree.id,
@@ -25300,10 +25363,14 @@ export class OrcaRuntimeService {
    *  a held reservation never burns capacity forever. */
   private async prepareWorktreeCreateAgentLaunch(
     repo: Repo,
-    request: AgentLaunchSpawnRequest,
+    rawRequest: AgentLaunchSpawnRequest,
     clientKind: AuthenticatedClientKind,
     intent: LaunchIntent
   ): Promise<WorktreeCreateAgentLaunchPrepared> {
+    // Client JSON enters the launch pipeline here (worktree-create RPC and
+    // desktop IPC): strip unverifiable persisted sourceRecord authority so a
+    // remote payload cannot claim host-only fallback authority.
+    const request = sanitizeClientAgentLaunchSourceRecord(rawRequest)
     const boundary = getHostAgentLaunchBoundary()
     const deps = this.buildWorktreeAgentLaunchDeps(repo)
     const principal: AdmissionPrincipal = clientKind
@@ -25339,7 +25406,12 @@ export class OrcaRuntimeService {
       finish: (worktreeId, authoritativePaths, spawn) => {
         const store = this.requireStore()
         const operationStore = getHostAgentLaunchOperationStore()
-        const scopedContext: WorktreeAgentLaunchContext = { ...context, scope: worktreeId }
+        // Stage 2 knows the created worktree: thread it for the per-worktree cap.
+        const scopedContext: WorktreeAgentLaunchContext = {
+          ...context,
+          scope: worktreeId,
+          worktreeId
+        }
         return runWorktreeAgentLaunchTransaction(
           {
             boundary,
@@ -25374,6 +25446,7 @@ export class OrcaRuntimeService {
             clientMutationId: null,
             requestedAgent: prepared.requestedAgent,
             intent: intent.kind,
+            principal,
             execute: () =>
               executeWorktreeAgentLaunch(deps, scopedContext, authoritativePaths, {
                 reservationId,
@@ -25639,6 +25712,7 @@ export class OrcaRuntimeService {
       intent: { kind: 'background', attemptId, worktreeId: attempt.worktreeId },
       descriptor: this.buildRepoAgentLaunchDescriptor(repo),
       scope: attemptId,
+      worktreeId: attempt.worktreeId,
       principal
     }
     const authoritativePaths = { repoPath: repo.path, worktreePath: worktree.path }
@@ -25674,6 +25748,7 @@ export class OrcaRuntimeService {
         clientMutationId: input.clientMutationId,
         requestedAgent: prepared.requestedAgent,
         intent: 'background',
+        principal,
         priorFailureId: input.priorFailureId,
         execute: () =>
           executeWorktreeAgentLaunch(deps, context, authoritativePaths, {
@@ -25847,7 +25922,19 @@ export class OrcaRuntimeService {
    *  most one kind matches; a still-paired kind is skipped, and a local-host row is
    *  never returned (plan :498 never clears a local reservation). */
   private resolveRevokedRemoteRowOwner(scope: string): DeviceScope | null {
-    const pairedScopes = new Set(this.getPairedDeviceScopesFn?.() ?? [])
+    // Fail CLOSED when the device registry is unavailable (no reader wired, or
+    // it throws): "revoked" is proven by absence from a READABLE pairing store.
+    // An unreadable store proves nothing, and treating it as "no devices" would
+    // let this local override clear a still-paired device's reservation.
+    if (!this.getPairedDeviceScopesFn) {
+      return null
+    }
+    let pairedScopes: Set<DeviceScope>
+    try {
+      pairedScopes = new Set(this.getPairedDeviceScopesFn())
+    } catch {
+      return null
+    }
     const boundary = getHostAgentLaunchBoundary()
     for (const kind of REVOCABLE_REMOTE_CLIENT_KINDS) {
       if (pairedScopes.has(kind)) {
@@ -26055,7 +26142,13 @@ export class OrcaRuntimeService {
    *  outcome to its owner record by launch intent. */
   private reconcilePendingAgentLaunches(
     isHostAuthoritative: (hostId: AgentLaunchExecutionHostId) => boolean,
-    filter?: (pending: PendingAgentLaunchSnapshot) => boolean
+    filter?: (pending: PendingAgentLaunchSnapshot) => boolean,
+    // Launch tokens the triggering re-list saw on live sessions whose worktree
+    // could NOT be resolved (so they never entered ptysById). The token match
+    // alone proves the launch's terminal is alive; without this a live SSH
+    // session with failed worktree inference resolves `absent` while its own
+    // connection marks the host authoritative → false spawn_failed + duplicate.
+    relistedTokenPtyIds?: ReadonlyMap<string, string>
   ): void {
     if (!this.store) {
       return
@@ -26066,15 +26159,19 @@ export class OrcaRuntimeService {
       orchestration: (id) => this.orchestrationReconcilePersistence(id),
       background: (id) => this.backgroundReconcilePersistence(id)
     }
+    const operationStore = getHostAgentLaunchOperationStore()
     const deps = buildReconcileAgentLaunchDeps({
-      operationStore: getHostAgentLaunchOperationStore(),
+      operationStore,
       liveTerminalByToken: (launchToken) => {
         for (const pty of this.ptysById.values()) {
           if (pty.launchToken === launchToken && pty.connected) {
             return { ptyId: pty.ptyId, worktreeId: pty.worktreeId }
           }
         }
-        return null
+        const relistedPtyId = relistedTokenPtyIds?.get(launchToken)
+        // null worktree = live but unattributable to a worktree; the reconcile
+        // deps treat the token match as identity proof, never `absent`.
+        return relistedPtyId ? { ptyId: relistedPtyId, worktreeId: null } : null
       },
       isHostAuthoritative,
       expectedWorktreeId: (pending) => {
@@ -26095,7 +26192,14 @@ export class OrcaRuntimeService {
         getHostAgentLaunchBoundary().settleAgentLaunch(launchToken, settlement),
       mintFailureId: () => randomUUID()
     })
-    reconcileAllPendingAgentLaunches(deps, filter)
+    // Skip launches whose spawn is running in THIS process right now: their PTY
+    // registers the token only after spawn resolves, so a re-list firing in the
+    // beginPending→registration window would false-settle spawn_failed.
+    reconcileAllPendingAgentLaunches(
+      deps,
+      (pending) =>
+        !operationStore.isSpawnInFlight(pending.launchToken) && (!filter || filter(pending))
+    )
   }
 
   /** Reissue the result a settled retry ledger entry references: the current
@@ -26145,6 +26249,7 @@ export class OrcaRuntimeService {
       intent: { kind: 'interactive', client: mapClientKindToLaunchClient(clientKind) },
       descriptor: this.buildRepoAgentLaunchDescriptor(repo),
       scope: worktreeId,
+      worktreeId,
       principal
     }
     const authoritativePaths = { repoPath: repo.path, worktreePath }
@@ -26185,6 +26290,7 @@ export class OrcaRuntimeService {
         clientMutationId: input.clientMutationId,
         requestedAgent: prepared.requestedAgent,
         intent: 'interactive',
+        principal,
         priorFailureId: input.priorFailureId,
         execute: () =>
           executeWorktreeAgentLaunch(deps, context, authoritativePaths, {
@@ -26418,6 +26524,11 @@ export class OrcaRuntimeService {
     clientKind: AuthenticatedClientKind
   ): Promise<WorkspaceAgentLaunchResolution> {
     const descriptor = this.buildTerminalAgentLaunchDescriptor(workspace)
+    if (!('resume' in request) && !('vaultResume' in request)) {
+      // Client JSON enters the launch pipeline here (terminal-create/mobile
+      // RPC): strip unverifiable persisted sourceRecord authority.
+      request = sanitizeClientAgentLaunchSourceRecord(request)
+    }
     if ('vaultResume' in request) {
       const vault = request.vaultResume
       if (vault.operation !== 'resume') {
@@ -26429,22 +26540,18 @@ export class OrcaRuntimeService {
       // Runtime discovery is local to this process. Restamp it to the client-
       // visible runtime id before matching so the echoed locator selects the
       // same row the listing returned; correlation below still uses the actual
-      // terminal target from the descriptor.
+      // terminal target from the descriptor. Match-first like
+      // resolveAiVaultResumeCommand: restamp the WHOLE list only when no fresh
+      // row already carries the entry's host id — restamping per-mismatched-row
+      // would relabel WSL rows as the entry host and let a same-session-id row
+      // from the wrong host match.
       const discovered = await this.listAiVaultSessions({ limit: 2000, force: true })
-      const sessions = discovered.sessions.map((session) =>
-        session.executionHostId === vault.entry.executionHostId
-          ? session
-          : restampAiVaultListResult(
-              { sessions: [session], issues: [], scannedAt: discovered.scannedAt },
-              vault.entry.executionHostId
-            ).sessions[0]
+      const fresh = discovered.sessions.some(
+        (session) => session.executionHostId === vault.entry.executionHostId
       )
-      const session = findVaultResumeSession(
-        vault.entry,
-        sessions.filter((candidate): candidate is NonNullable<typeof candidate> =>
-          Boolean(candidate)
-        )
-      )
+        ? discovered
+        : restampAiVaultListResult(discovered, vault.entry.executionHostId)
+      const session = findVaultResumeSession(vault.entry, fresh.sessions)
       if (!session) {
         return {
           kind: 'failed',
@@ -27164,6 +27271,10 @@ export class OrcaRuntimeService {
         claimedStablePaneCreate?.()
       }
       let agentLaunchSettled = false
+      let rejectedRegistrationCandidate: {
+        id: string
+        incarnationId?: PtyIncarnationId
+      } | null = null
       const settleFailedAgentLaunch = (): void => {
         if (agentLaunchAdmissionToken !== null && !agentLaunchSettled) {
           getHostAgentLaunchBoundary().settleAgentLaunch(agentLaunchAdmissionToken, 'failed')
@@ -27335,6 +27446,9 @@ export class OrcaRuntimeService {
             // awaits above if the authoritative window is destroyed mid-spawn.
             ...(persistHostSessionBinding ? { persistHostSessionBinding: true } : {})
           })
+          if (!result.stablePaneOwner) {
+            rejectedRegistrationCandidate = result
+          }
         } finally {
           releaseStablePaneCreate?.()
         }
@@ -27354,14 +27468,8 @@ export class OrcaRuntimeService {
           leafId = result.stablePaneOwner.leafId
           paneKey = makePaneKey(tabId, leafId)
         }
-        try {
-          this.assertPtyDidNotExitBeforeRegistration(result.id, result.incarnationId)
-        } catch (error) {
-          if (error instanceof Error && error.message === 'agent_session_exited_during_start') {
-            this.releaseRejectedPtyRegistrationFence(result.id, result.incarnationId)
-          }
-          throw error
-        }
+        this.assertPtyDidNotExitBeforeRegistration(result.id, result.incarnationId)
+        rejectedRegistrationCandidate = null
         this.registerPreAllocatedHandleForPty(result.id, preAllocatedHandle)
         if (result.wslDistro) {
           this.preparePtyExecutionContext(result.id, result.wslDistro)
@@ -27464,6 +27572,16 @@ export class OrcaRuntimeService {
             })
           }
         }
+        // Persist host-minted launch notices through the shared committer
+        // (workspace session + mobile snapshot), not only on the live pty record.
+        if (!adoptedStablePane && pty?.launchNotices && agentLaunchReceipt) {
+          await this.commitSuccessfulLaunchNotices(
+            workspace.id,
+            tabId,
+            pty.launchNotices,
+            result.id
+          )
+        }
         // Stable-pane adoption must not replay a prompt into an existing owner.
         if (!adoptedStablePane && resolution.kind === 'launched' && resolution.postReadyPrompt) {
           this.deliverTerminalLaunchPrompt(
@@ -27492,6 +27610,16 @@ export class OrcaRuntimeService {
         }
       } catch (error) {
         settleFailedAgentLaunch()
+        if (
+          error instanceof Error &&
+          error.message === 'agent_session_exited_during_start' &&
+          rejectedRegistrationCandidate
+        ) {
+          this.releaseRejectedPtyRegistrationFence(
+            rejectedRegistrationCandidate.id,
+            rejectedRegistrationCandidate.incarnationId
+          )
+        }
         throw error
       } finally {
         releaseStablePaneCreate()
@@ -31444,12 +31572,19 @@ export class OrcaRuntimeService {
     // SSH relay connections that evidenced a live re-list in this pass, so the
     // reconcile below can speak authoritatively for their execution hosts.
     const relistedConnectionIds = new Set<string>()
+    // Launch tokens seen on live re-listed sessions, independent of worktree
+    // resolution: a session whose worktree cannot be inferred never enters
+    // ptysById, but its token match must still count as live for reconcile.
+    const relistedTokenPtyIds = new Map<string, string>()
     for (const session of sessions) {
       const sessionConnectionId =
         parseAppSshPtyId(session.id)?.connectionId ??
         (typeof connectionId === 'string' ? connectionId : null)
       if (sessionConnectionId) {
         relistedConnectionIds.add(sessionConnectionId)
+      }
+      if (session.launchToken) {
+        relistedTokenPtyIds.set(session.launchToken, session.id)
       }
       const persistedIndexes = getPersistedIndexes(
         sessionConnectionId ? toSshExecutionHostId(sessionConnectionId) : LOCAL_EXECUTION_HOST_ID
@@ -31572,15 +31707,19 @@ export class OrcaRuntimeService {
     this.pruneDisconnectedPtyRecords()
     if (targetWorktreeId === null) {
       const relistedAuthority = hostAuthorityFromRelistedConnections(relistedConnectionIds)
-      this.reconcilePendingAgentLaunches((hostId) => {
-        if (connectionId === undefined) {
-          return relistedAuthority(hostId)
-        }
-        if (connectionId === null) {
-          return hostId === 'local' || hostId.startsWith('wsl:')
-        }
-        return hostId !== 'local' && !hostId.startsWith('wsl:') && relistedAuthority(hostId)
-      })
+      this.reconcilePendingAgentLaunches(
+        (hostId) => {
+          if (connectionId === undefined) {
+            return relistedAuthority(hostId)
+          }
+          if (connectionId === null) {
+            return hostId === 'local' || hostId.startsWith('wsl:')
+          }
+          return hostId !== 'local' && !hostId.startsWith('wsl:') && relistedAuthority(hostId)
+        },
+        undefined,
+        relistedTokenPtyIds
+      )
     }
     return {
       livePtyIds: targetWorktreeId ? selectedLivePtyIds : allLivePtyIds,

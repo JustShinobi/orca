@@ -63,7 +63,11 @@ import {
   detectionUnavailable,
   resolveLocalTargetHomePath
 } from '../agent-launch/agent-launch-host-state'
-import { resolveAgentLaunchSpawn } from '../agent-launch/agent-launch-spawn'
+import {
+  resolveAgentLaunchSpawn,
+  sanitizeClientAgentLaunchSourceRecord
+} from '../agent-launch/agent-launch-spawn'
+import { ORCA_PROTECTED_ENV_KEYS } from '../agent-launch/compose-agent-launch-env'
 import { resolveResumeLaunchIngest } from '../agent-launch/agent-launch-resume-ingest'
 import { resolveRevalidatedVaultResume } from '../agent-launch/agent-launch-vault-resume'
 import { revalidateAiVaultResumeEntry } from './ai-vault-resume-command'
@@ -5719,6 +5723,10 @@ export function registerPtyHandlers(
       let agentLaunchToken: string | null = null
       let vaultLaunchNotices: PersistedLaunchNoticeState | null = null
       let agentLaunchSettled = false
+      // Track the settled outcome so the catch below only rolls back a genuinely
+      // failed launch — a throw AFTER a 'registered' settle must NOT delete the live
+      // PTY's just-registered resume record.
+      let agentLaunchSettlement: 'registered' | 'failed' | null = null
       // Host-minted generic background attempt for an unattended declaration
       // (ledger #8/#13). Non-null only when the request declares
       // `unattended:{kind:'background'}`; the spawn/registration seam then settles
@@ -5741,6 +5749,7 @@ export function registerPtyHandlers(
           return
         }
         agentLaunchSettled = true
+        agentLaunchSettlement = settlement
         getHostAgentLaunchBoundary().settleAgentLaunch(agentLaunchToken, settlement)
         if (backgroundDeclaration && backgroundDeclarationRequestedAgent) {
           settleBackgroundDeclarationSpawn(
@@ -5854,6 +5863,9 @@ export function registerPtyHandlers(
               args.commandDelivery = 'provider'
               args.launchConfig = ingest.launchConfig
               args.launchAgent = ingest.baseAgent
+              if (ingest.launchConfig.agentEnv) {
+                args.env = { ...args.env, ...ingest.launchConfig.agentEnv }
+              }
             } else {
               resumeRequest = ingest.request
               resumeIntent = ingest.intent
@@ -5929,7 +5941,7 @@ export function registerPtyHandlers(
               vaultLaunchNotices = vaultResolution.launchNotices ?? null
             }
           } else {
-            resumeRequest = args.agentLaunch
+            resumeRequest = sanitizeClientAgentLaunchSourceRecord(args.agentLaunch)
             // Ids-free background declaration: the host mints the attempt identity,
             // creates the generic attempt BEFORE resolution, and drives its own
             // background intent (ledger #8/#13). Only a named-agent selection carries
@@ -5977,6 +5989,10 @@ export function registerPtyHandlers(
                   (typeof args.worktreeId === 'string' && args.worktreeId.length > 0
                     ? args.worktreeId
                     : 'local-pty-spawn'),
+                worktreeId:
+                  typeof args.worktreeId === 'string' && args.worktreeId.length > 0
+                    ? args.worktreeId
+                    : null,
                 principal: { kind: 'local' },
                 ...(resumePersistedSnapshot ? { persistedSnapshot: resumePersistedSnapshot } : {}),
                 ...(resumeProviderSession ? { resumeProviderSession } : {})
@@ -6151,6 +6167,20 @@ export function registerPtyHandlers(
             : null
         const stablePaneKey = verifiedPaneKey ?? migrationUnsupportedPaneKey
         let baseEnv = baseEnvWithAuth ? { ...baseEnvWithAuth } : undefined
+        // Windows env keys are case-insensitive, so an inherited/spoofed non-canonical
+        // case variant of a protected Orca key (e.g. `orca_pane_key`) would reach the
+        // CreateProcess block alongside the canonical key and steal pane/hook identity.
+        // Drop every non-canonical case variant before Orca reclaims its own names.
+        if (baseEnv && process.platform === 'win32') {
+          for (const protectedKey of ORCA_PROTECTED_ENV_KEYS) {
+            const lower = protectedKey.toLowerCase()
+            for (const existing of Object.keys(baseEnv)) {
+              if (existing !== protectedKey && existing.toLowerCase() === lower) {
+                delete baseEnv[existing]
+              }
+            }
+          }
+        }
         const shouldRefreshAgentTeamsEnv =
           !preAdoptedStablePane &&
           !args.connectionId &&
@@ -6959,7 +6989,11 @@ export function registerPtyHandlers(
         // for this pane awaits a promise that never resolves. reject is a
         // no-op once the reservation has already resolved.
         settleAgentLaunch('failed')
-        if (agentLaunchToken) {
+        // Drop any private resume attribution staged for this launch so a failed
+        // spawn strands no record (no-op if register was not reached). Guard on the
+        // settled outcome: a throw AFTER a 'registered' settle (e.g. in response
+        // assembly) must NOT roll back — the PTY is live and its record is valid.
+        if (agentLaunchToken && agentLaunchSettlement !== 'registered') {
           getHostAgentSessionRecordStore().rollbackByToken(agentLaunchToken)
         }
         rejectPaneSpawnReservation(paneSpawnReservationKey, paneSpawnReservation, err)
