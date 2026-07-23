@@ -562,6 +562,73 @@ describe('RemoteRuntimeSharedControlConnection', () => {
     connection.close()
   })
 
+  it('detects a dead E2EE session via the session probe when the relay still answers pings', async () => {
+    // Repro of the serve-restart-behind-a-relay bug: a WS-terminating relay
+    // answers protocol pings itself (autoPong stays enabled), so socket-level
+    // liveness sees inbound traffic — but the server process behind it
+    // restarted, its subscription registry is empty, and encrypted requests go
+    // unanswered. Only the session probe can prove the E2EE session is dead.
+    const server = await createServer({ goSilentOnFirstConnectionAfterFirstStreamingResponse: true })
+    const connection = new RemoteRuntimeSharedControlConnection(server.pairing, {
+      sessionProbeIntervalMs: 40,
+      sessionProbeTimeoutMs: 80
+    })
+    const onClose = vi.fn()
+
+    await connection.subscribe('runtime.clientEvents.subscribe', null, 1000, {
+      onResponse: vi.fn(),
+      onError: vi.fn(),
+      onClose
+    })
+
+    await vi.waitFor(() => expect(server.connectionCount()).toBe(2), { timeout: 5000 })
+    await vi.waitFor(
+      () =>
+        expect(
+          server.requests.filter((request) => request.method === 'runtime.clientEvents.subscribe')
+        ).toHaveLength(2),
+      { timeout: 5000 }
+    )
+    expect(onClose).not.toHaveBeenCalled()
+
+    connection.close()
+  })
+
+  it('keeps a responsive connection on one socket while session probes succeed', async () => {
+    const server = await createServer()
+    const connection = new RemoteRuntimeSharedControlConnection(server.pairing, {
+      sessionProbeIntervalMs: 20,
+      sessionProbeTimeoutMs: 500
+    })
+
+    await connection.subscribe('runtime.clientEvents.subscribe', null, 1000, {
+      onResponse: vi.fn(),
+      onError: vi.fn()
+    })
+
+    await vi.waitFor(() =>
+      expect(server.requests.map((request) => request.method)).toContain('status.get')
+    )
+    expect(server.connectionCount()).toBe(1)
+
+    connection.close()
+  })
+
+  it('does not run session probes when no subscriptions are active', async () => {
+    const server = await createServer()
+    const connection = new RemoteRuntimeSharedControlConnection(server.pairing, {
+      sessionProbeIntervalMs: 10,
+      sessionProbeTimeoutMs: 50
+    })
+
+    await connection.request('worktree.ps', undefined, 1000)
+    await new Promise((resolve) => setTimeout(resolve, 60))
+
+    expect(server.requests.map((request) => request.method)).not.toContain('status.get')
+
+    connection.close()
+  })
+
   it('keeps unrelated pending requests alive when one request times out', async () => {
     const server = await createServer({
       silentMethods: ['worktree.hang'],
@@ -700,6 +767,7 @@ async function createServer(
     disableAutoPong?: boolean
     delayedMethods?: string[]
     silentMethods?: string[]
+    goSilentOnFirstConnectionAfterFirstStreamingResponse?: boolean
   } = {}
 ): Promise<TestServer> {
   const serverKeyPair = generateKeyPair()
@@ -713,6 +781,11 @@ async function createServer(
 
   wss.on('connection', (ws) => {
     connectionCount += 1
+    const isFirstConnection = connectionCount === 1
+    // Zombie mode: record requests but never answer and never close, like a
+    // restarted server process behind a relay that holds the socket open and
+    // keeps answering ws pings itself.
+    let goneSilent = false
     let sharedKey: Uint8Array | null = null
     let authenticated = false
     ws.on('message', (data, isBinary) => {
@@ -748,11 +821,23 @@ async function createServer(
         }
         return
       }
+      const request = JSON.parse(plaintext) as { id: string; method: string; params?: unknown }
+      if (goneSilent) {
+        requests.push(request)
+        return
+      }
+      if (
+        options.goSilentOnFirstConnectionAfterFirstStreamingResponse &&
+        isFirstConnection &&
+        isStreamingMethod(request.method)
+      ) {
+        goneSilent = true
+      }
       handleRequest(
         ws,
         sharedKey,
         requests,
-        JSON.parse(plaintext),
+        request,
         {
           ...options,
           closeAfterStreamingResponse: () => {
