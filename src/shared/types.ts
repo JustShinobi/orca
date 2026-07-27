@@ -41,7 +41,9 @@ import type {
   LocalWindowsRuntimePreference
 } from './project-execution-runtime'
 import type { UsagePercentageDisplay } from './usage-percentage-display'
+import type { StatusBarUsageMode } from './status-bar-usage-mode'
 import type { PersistedNativeChatSessionOptions } from './native-chat-session-options'
+import type { CodexResetCreditAttemptLedger } from './codex-reset-credit-attempt-ledger'
 
 // Re-exported for backward compat with renderer call sites that import
 // `WorkspaceCreateTelemetrySource` from '../../../shared/types'.
@@ -103,6 +105,7 @@ export type ProjectProviderIdentity = {
   provider: 'github'
   owner: string
   repo: string
+  host?: string
 }
 
 export type Project = {
@@ -146,6 +149,8 @@ export type ProjectHostSetup = {
   kind?: RepoKind
   connectionId?: string | null
   executionHostId?: ExecutionHostId | null
+  /** Renderer projection of the paired runtime that owns this setup's transport. */
+  runtimeOwnerEnvironmentId?: string
   worktreeBasePath?: string
   hookSettings?: RepoHookSettings
   gitUsername?: string
@@ -468,6 +473,8 @@ export type Worktree = {
   projectId?: string
   /** Execution host that owns the workspace. Optional for pre-project-host metadata. */
   hostId?: ExecutionHostId
+  /** Renderer projection of the paired runtime that transports operations to `hostId`. */
+  runtimeOwnerEnvironmentId?: string
   /** Host-specific setup used to create/run this workspace. */
   projectHostSetupId?: string
   displayName: string
@@ -528,7 +535,21 @@ export type Worktree = {
   diffComments?: DiffComment[]
   mobileDiffReview?: MobileDiffReviewState
   automationProvenance?: AutomationWorkspaceProvenance
+  cliProvenance?: CliWorkspaceProvenance
 } & GitWorktreeInfo
+
+/** Provenance for workspaces created through `orca worktree create`. Absent on
+ *  workspaces created before this field existed and on every non-CLI create, so
+ *  consumers must read "missing" as "not CLI-created". */
+export type CliWorkspaceProvenance = {
+  kind: 'created-by-cli'
+  createdAt: number
+  /** Orca terminal the CLI ran inside, when the caller had one — distinguishes
+   *  an agent-issued create from one hand-typed in an external shell. */
+  callerTerminalHandle?: string
+  /** Agent requested via `--agent`, when one was passed. */
+  startupAgent?: TuiAgent
+}
 
 export type AutomationWorkspaceProvenance = {
   kind: 'created-by-automation'
@@ -639,6 +660,8 @@ export type WorktreeMeta = {
   mobileDiffReview?: MobileDiffReviewState
   /** System-owned provenance for workspaces created by automation new-per-run dispatches. */
   automationProvenance?: AutomationWorkspaceProvenance
+  /** System-owned provenance for workspaces created via `orca worktree create`. */
+  cliProvenance?: CliWorkspaceProvenance
 }
 
 export type WorktreeOwnership = 'orca-managed' | 'external' | 'unknown-legacy' | 'agent-scratch'
@@ -1060,6 +1083,8 @@ export type PersistedOpenFile = {
   language: string
   isPreview?: boolean
   runtimeEnvironmentId?: string | null
+  /** SSH target that owns an absolute path outside the worktree. */
+  externalSshTargetId?: string
   /** Unsaved editor buffer captured for hot exit; presence restores the tab dirty. */
   dirtyDraftContent?: string
   /** Signature of the disk content the dirty draft is based on; lets restore
@@ -1134,6 +1159,22 @@ export type WorkspaceSessionState = {
   defaultTerminalTabsAppliedByWorktreeId?: Record<string, true>
   /** Provider-session resume records captured when workspaces sleep. */
   sleepingAgentSessionsByPaneKey?: Record<string, SleepingAgentSessionRecord>
+  /** Host-issued process incarnation for each durable terminal surface. */
+  terminalPtyIncarnationsByPaneKey?: Record<string, string>
+  /** Monotonic host authority watermark for terminal membership in each repo. */
+  terminalTopologyRevisionByRepoId?: Record<string, number>
+  /** Legacy per-surface fences migrated into terminalTopologyRevisionByRepoId on load. */
+  terminalSurfaceTombstonesByPaneKey?: Record<
+    string,
+    {
+      worktreeId: string
+      parentTabId: string
+      leafId: string
+      ptyId: string
+      incarnationId: string
+      retiredAt: number
+    }
+  >
 }
 
 export type WorkspaceSessionPatch = Partial<WorkspaceSessionState>
@@ -1154,7 +1195,9 @@ export type PRConflictSummary = {
   localMergeState?: 'clean'
 }
 
-export type GitHubRepositoryIdentity = { owner: string; repo: string }
+// Why: host must survive renderer/RPC boundaries so Enterprise review actions
+// cannot silently fall back to a same-named repository on github.com.
+export type GitHubRepositoryIdentity = { owner: string; repo: string; host?: string }
 
 export type GitHubPRMergeMethod = 'merge' | 'squash' | 'rebase'
 
@@ -1286,6 +1329,7 @@ export type GitHubPRRefreshSkippedReason =
   | 'disconnected'
   | 'remote'
   | 'rate-limit'
+  | 'capacity'
 
 type GitHubPRRefreshEventBase = {
   sequence: number
@@ -1571,6 +1615,7 @@ export type GitHubPRFileContents = {
 
 export type GitHubPRReviewCommentInput = {
   repoPath: string
+  prRepo?: GitHubRepositoryIdentity | null
   prNumber: number
   commitId: string
   path: string
@@ -1682,6 +1727,7 @@ export type LinearIssue = {
 
 export type LinearProjectSummary = {
   id: string
+  slugId?: string
   workspaceId?: string
   workspaceName?: string
   name: string
@@ -1846,6 +1892,7 @@ export type LinearIssueUpdate = {
   dueDate?: string | null
   labelIds?: string[]
   projectId?: string | null
+  parentId?: string | null
 }
 
 export type ClassifiedError = {
@@ -2021,6 +2068,8 @@ export type LinearLabel = {
 export type LinearMember = {
   id: string
   displayName: string
+  name?: string
+  email?: string
   avatarUrl?: string
 }
 
@@ -2548,6 +2597,9 @@ export type SourceControlGroupOrder = 'changes-first' | 'staged-first' | 'untrac
 
 export type LeftSidebarAppearanceMode = 'default' | 'match-terminal' | 'tinted'
 
+/** Strategy for the prefix prepended to worktree branch names. */
+export type BranchPrefixStrategy = 'git-username' | 'custom' | 'none'
+
 export type FloatingTerminalCwdRequest = {
   path?: string
   requireTrusted?: boolean
@@ -2564,6 +2616,9 @@ export type HostSettingOverrides = {
   displayLabel?: string
   defaultWorktreeLocation?: string
 }
+
+/** Presentation mode for the experimental Agent Dashboard. */
+export type AgentDashboardMode = 'in-window' | 'popout'
 
 export type GlobalSettings = {
   workspaceDir: string
@@ -2583,7 +2638,7 @@ export type GlobalSettings = {
   /** One-shot migration guard for the default-on rollout. Existing profiles
    *  without the guard are flipped on once; later explicit opt-outs stick. */
   autoRenameBranchFromWorkDefaultedOn?: boolean
-  branchPrefix: 'git-username' | 'custom' | 'none'
+  branchPrefix: BranchPrefixStrategy
   branchPrefixCustom: string
   enableGitHubAttribution: boolean
   theme: 'system' | 'dark' | 'light'
@@ -2597,6 +2652,8 @@ export type GlobalSettings = {
   editorAutoSave: boolean
   editorAutoSaveDelayMs: number
   editorMinimapEnabled: boolean
+  /** Opt-in code-editor font; empty (the default) keeps following `terminalFontFamily`. */
+  editorFontFamily?: string
   /** Defaults on for profiles saved before file-editor wrapping became configurable. */
   editorWordWrap?: boolean
   /** Persisted opt-out for browser spellcheck noise in rich Markdown editing surfaces. */
@@ -2671,9 +2728,11 @@ export type GlobalSettings = {
   terminalWindowsShell: string
   /** Pins the WSL distro for terminals/agent scans instead of WSL's current global default. */
   terminalWindowsWslDistro?: string | null
-  /** Account/auth location independent from the terminal shell (e.g. WSL terminals but Windows-scoped accounts). */
-  localAccountRuntime: 'host' | 'wsl'
+  /** Account/auth location; auto follows the global Windows runtime while host/wsl pin it. */
+  localAccountRuntime: 'auto' | 'host' | 'wsl'
   localAccountWslDistro?: string | null
+  /** One-shot guard for migrating the legacy host default to auto. */
+  localAccountRuntimeDefaultedToAutoForAllUsers?: boolean
   /** Independent from the terminal shell so users can inspect Windows vs WSL agent PATH state without changing it. */
   localAgentRuntime?: 'host' | 'wsl'
   localAgentWslDistro?: string | null
@@ -2684,8 +2743,10 @@ export type GlobalSettings = {
   terminalFocusFollowsMouse: boolean
   /** X11/gnome-terminal "copy on select": selecting text auto-copies to the clipboard; default off. */
   terminalClipboardOnSelect: boolean
-  /** Enables OSC 52 clipboard writes for TUIs (SSH clipboard bridge); default off since OSC 52 is a clipboard-exfiltration vector. */
+  /** Enables OSC 52 clipboard writes for TUIs (tmux/Zellij/nvim, incl. over SSH); default on. Clipboard *queries* stay blocked and payload size is capped, so this is write-only exposure. */
   terminalAllowOsc52Clipboard: boolean
+  /** One-shot stamp: profiles saved under the old off default get flipped on once, after which an explicit opt-out sticks. */
+  terminalAllowOsc52ClipboardDefaultedOnForAllUsers?: boolean
   /** Experimental Claude Agent Teams; native panes use a tmux-compatible shim so teammate output stays on the normal PTY path. */
   claudeAgentTeamsMode?: ClaudeAgentTeamsMode
   /** Where the repo setup script runs on workspace create; defaults to a background "Setup" tab to keep the main terminal usable. */
@@ -2874,6 +2935,10 @@ export type GlobalSettings = {
   experimentalSidekick?: boolean
   /** Experimental: left-sidebar Agents view — threaded feed of agent completions, blocking/unread state, worktree creation. */
   experimentalActivity: boolean
+  /** Experimental: pop-out Kanban dashboard for monitoring and opening agent terminals across worktrees. */
+  experimentalAgentDashboardPopout?: boolean
+  /** How the Agent Dashboard opens: an in-window companion board or a separate pop-out window. Defaults to in-window. */
+  experimentalAgentDashboardMode?: AgentDashboardMode
   /** One-shot migration guard for defaulting the Agents view off; later explicit opt-ins persist normally. */
   experimentalActivityDefaultedOffForAllUsers?: boolean
   /** Experimental: persistent terminal-pane attention ring for bell + agent-completion events. Opt-in while tuning signal/noise. */
@@ -2999,6 +3064,7 @@ export type NotificationDispatchResult = {
     | 'not-supported'
     | 'not-displayed'
     | 'blocked-by-system'
+    | 'invalid-request'
 }
 
 export type NotificationDismissResult = {
@@ -3087,6 +3153,8 @@ export type WorktreeCardProperty =
   | 'linear-issue'
   | 'pr'
   | 'automation'
+  // Badge marking workspaces created through `orca worktree create`.
+  | 'cli'
   | 'comment'
   | 'ports'
   // Inline agent-activity list rendered in each workspace card; on by default (see DEFAULT_WORKTREE_CARD_PROPERTIES in shared/constants.ts).
@@ -3195,6 +3263,10 @@ export type PersistedUIState = {
   hideDefaultBranchWorkspace: boolean
   /** Hide workspaces created by automation new-per-run dispatches. */
   hideAutomationGeneratedWorkspaces?: boolean
+  /** Hide workspaces created through `orca worktree create`. */
+  hideCliCreatedWorkspaces?: boolean
+  /** Hide workspaces sitting on a detached HEAD; folder workspaces (no head at all) are unaffected. */
+  hideDetachedHeadWorkspaces?: boolean
   /** Per-worktree Explorer dotfile visibility. Missing entries inherit the default: show. */
   showDotfilesByWorktree?: Record<string, boolean>
   filterRepoIds: string[]
@@ -3231,6 +3303,8 @@ export type PersistedUIState = {
   statusBarVisible: boolean
   /** Why: this is client-side presentation, not a provider/account or execution-host setting. */
   usagePercentageDisplay?: UsagePercentageDisplay
+  /** Client-side footer presentation; verbose preserves the pre-roster all-window default. */
+  statusBarUsageMode?: StatusBarUsageMode
   dismissedUpdateVersion: string | null
   lastUpdateCheckAt: number | null
   pendingUpdateNudgeId?: string | null
@@ -3251,6 +3325,8 @@ export type PersistedUIState = {
   browserImportHintHidden?: boolean
   /** Why: Windows-only. Set once on first hide to tray so the "Orca is still running" notice shows only once. */
   trayMinimizeNoticeShown?: boolean
+  /** Set by the OSC 52 default-on migration when it overrode a persisted `false`; the renderer shows one notice and clears it. */
+  osc52ClipboardDefaultOnNoticePending?: boolean
   /** User dismissed the first-run Mobile Emulator intro; reversible only by re-enabling the feature in Settings. */
   mobileEmulatorTabIntroDismissed?: boolean
   /** User deferred the in-pane Mobile Emulator CLI + skill setup guide. */
@@ -3272,6 +3348,9 @@ export type PersistedUIState = {
   windowBounds?: { x: number; y: number; width: number; height: number } | null
   /** Whether the window was maximized when it was last closed. */
   windowMaximized?: boolean
+  /** Saved bounds for the pop-out dashboard window so it restores to its last
+   *  position/size. Independent of the main window's bounds. */
+  dashboardPopoutBounds?: { x: number; y: number; width: number; height: number } | null
   /** One-shot flag: 'recent' once meant the smart sort (v1→v2 rename), migrated to 'smart' once so the new last-activity 'recent' isn't re-clobbered. */
   _sortBySmartMigrated?: boolean
   /** LEGACY inline-agents flag, stamped unconditionally every load so it can't gate migration; kept only for rollback forward-compat (real gate: _inlineAgentsDefaultedForAllUsers). */
@@ -3383,6 +3462,19 @@ export type LegacyPaneKeyAliasEntry = {
   updatedAt: number
 }
 
+/** Last tab selection a paired client made in a worktree; restores phone navigation across host restarts. */
+export type PersistedMobileClientTabSelection = {
+  activeTabId: string | null
+  activeGroupId: string | null
+  activeTabIdByGroupId: Readonly<Record<string, string>>
+}
+
+/** deviceId → worktreeId → selection. */
+export type PersistedMobileClientTabSelections = Record<
+  string,
+  Record<string, PersistedMobileClientTabSelection>
+>
+
 // ─── Persistence shape ──────────────────────────────────────────────
 export type PersistedState = {
   schemaVersion: number
@@ -3393,6 +3485,8 @@ export type PersistedState = {
   folderWorkspaces: FolderWorkspace[]
   /** Sparse-checkout presets keyed by repoId. */
   sparsePresetsByRepo: Record<string, SparsePreset[]>
+  /** Per paired device last tab selection by worktree; keeps mobile navigation across host restarts. */
+  mobileClientTabSelectionsByDeviceId?: PersistedMobileClientTabSelections
   worktreeMeta: Record<string, WorktreeMeta>
   worktreeLineageById: Record<string, WorktreeLineage>
   workspaceLineageByChildKey: Record<WorkspaceKey, WorkspaceLineage>
@@ -3421,6 +3515,8 @@ export type PersistedState = {
   onboarding: OnboardingState
   /** Main-owned telemetry de-dupe marker; never exposed through PersistedUIState. */
   featureInteractionTelemetryBuckets?: FeatureInteractionTelemetryBucketState
+  /** Main-owned reset mutation journal. Never expose this through renderer settings APIs. */
+  codexResetCreditAttemptLedger?: CodexResetCreditAttemptLedger
 }
 
 // ─── Filesystem ─────────────────────────────────────────────
@@ -3571,6 +3667,10 @@ export type UsageValues = {
   memory: number
 }
 
+export type ProcessMemoryMetric = 'rss' | 'working-set'
+
+export type HostAvailableMemorySource = 'memory-pressure' | 'proc-meminfo' | 'free-memory'
+
 /** The top-level cpu/memory are the sum of main + renderer + other. */
 export type AppMemory = UsageValues & {
   main: UsageValues
@@ -3599,7 +3699,12 @@ export type WorktreeMemory = UsageValues & {
 
 export type HostMemory = {
   totalMemory: number
+  /** Immediately free memory reported by Node's host API. */
   freeMemory: number
+  /** Memory available without material pressure, or freeMemory when unavailable. */
+  availableMemory: number
+  availableMemorySource: HostAvailableMemorySource
+  /** totalMemory - availableMemory. */
   usedMemory: number
   memoryUsagePercent: number
   cpuCoreCount: number
@@ -3610,9 +3715,11 @@ export type MemorySnapshot = {
   app: AppMemory
   worktrees: WorktreeMemory[]
   host: HostMemory
+  /** Per-process byte metric used by app, session, worktree, history, and totalMemory values. */
+  processMemoryMetric: ProcessMemoryMetric
   /** Sum of app + all tracked worktree sessions. Percent of a single core, so may exceed 100 on multi-core machines. */
   totalCpu: number
-  /** Sum of app + all tracked worktree sessions in bytes. NOT the same as host.totalMemory, which is physical RAM. */
+  /** Sum of per-process samples. Shared pages may repeat, so this can exceed host.totalMemory. */
   totalMemory: number
   collectedAt: number
 }

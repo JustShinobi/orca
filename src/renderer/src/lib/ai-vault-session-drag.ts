@@ -17,10 +17,17 @@ export type AiVaultSessionDragPayload = {
   // WSL) to reject SSH panes that cannot reach it.
   sessionFilePath?: string
   sessionExecutionHostId?: ExecutionHostId
+  codexHome?: string | null
   // Why: drag/drop resume must preserve planned env mutations/default args, not just the command.
   env?: Record<string, string>
   envToDelete?: string[]
   launchConfig?: SleepingAgentLaunchConfig
+  realHomeStartup?: {
+    command: string
+    env?: Record<string, string>
+    envToDelete?: string[]
+    launchConfig?: SleepingAgentLaunchConfig
+  }
 }
 
 let activeAiVaultSessionDragPayload: AiVaultSessionDragPayload | null = null
@@ -61,7 +68,8 @@ function isLaunchConfig(value: unknown): value is SleepingAgentLaunchConfig {
   return (
     (config.agentCommand === undefined || typeof config.agentCommand === 'string') &&
     typeof config.agentArgs === 'string' &&
-    isStringRecord(config.agentEnv)
+    isStringRecord(config.agentEnv) &&
+    (config.ompResumeFilePath === undefined || isNonEmptyString(config.ompResumeFilePath))
   )
 }
 
@@ -80,9 +88,28 @@ function isSerializedPayload(value: unknown): value is SerializedAiVaultSessionD
     (payload.sessionFilePath === undefined || isNonEmptyString(payload.sessionFilePath)) &&
     (payload.sessionExecutionHostId === undefined ||
       Boolean(normalizeExecutionHostId(payload.sessionExecutionHostId))) &&
+    (payload.codexHome === undefined ||
+      payload.codexHome === null ||
+      isNonEmptyString(payload.codexHome)) &&
     (payload.env === undefined || isStringRecord(payload.env)) &&
     (payload.envToDelete === undefined || isEnvDeletionList(payload.envToDelete)) &&
-    (payload.launchConfig === undefined || isLaunchConfig(payload.launchConfig))
+    (payload.launchConfig === undefined || isLaunchConfig(payload.launchConfig)) &&
+    (payload.realHomeStartup === undefined || isResumeStartup(payload.realHomeStartup))
+  )
+}
+
+function isResumeStartup(
+  value: unknown
+): value is NonNullable<AiVaultSessionDragPayload['realHomeStartup']> {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  const startup = value as NonNullable<AiVaultSessionDragPayload['realHomeStartup']>
+  return (
+    isNonEmptyString(startup.command) &&
+    (startup.env === undefined || isStringRecord(startup.env)) &&
+    (startup.envToDelete === undefined || isEnvDeletionList(startup.envToDelete)) &&
+    (startup.launchConfig === undefined || isLaunchConfig(startup.launchConfig))
   )
 }
 
@@ -135,9 +162,11 @@ export function readAiVaultSessionDragData(
       command,
       sessionFilePath,
       sessionExecutionHostId,
+      codexHome,
       env,
       envToDelete,
-      launchConfig
+      launchConfig,
+      realHomeStartup
     } = parsed
     return {
       agent,
@@ -146,9 +175,11 @@ export function readAiVaultSessionDragData(
       command,
       ...(sessionFilePath ? { sessionFilePath } : {}),
       ...(sessionExecutionHostId ? { sessionExecutionHostId } : {}),
+      ...(codexHome !== undefined ? { codexHome } : {}),
       ...(env ? { env } : {}),
       ...(envToDelete ? { envToDelete } : {}),
-      ...(launchConfig ? { launchConfig } : {})
+      ...(launchConfig ? { launchConfig } : {}),
+      ...(realHomeStartup ? { realHomeStartup } : {})
     }
   } catch {
     return null

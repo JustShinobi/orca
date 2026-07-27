@@ -49,12 +49,17 @@ describe('Session History session drag data', () => {
       title: 'Fix terminal split',
       command: "cd '/repo' && claude --resume session-1",
       sessionFilePath: '/Users/ada/.claude/projects/-repo/session-1.jsonl',
+      codexHome: '/Users/ada/Library/Application Support/orca/codex-runtime-home/home',
       env: { ANTHROPIC_BASE_URL: 'https://claude.example.test' },
       envToDelete: ['CODEX_HOME', 'ORCA_CODEX_HOME'],
       launchConfig: {
         agentCommand: 'claude --dangerously-skip-permissions',
         agentArgs: '--dangerously-skip-permissions',
         agentEnv: { ANTHROPIC_BASE_URL: 'https://claude.example.test' }
+      },
+      realHomeStartup: {
+        command: "cd '/repo' && claude --resume session-1",
+        envToDelete: ['CODEX_HOME', 'ORCA_CODEX_HOME']
       }
     }
 

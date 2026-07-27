@@ -21,6 +21,12 @@ import {
   FEATURE_INTERACTION_USAGE_BUCKETS,
   getFeatureInteractionCategory
 } from './feature-interactions'
+import {
+  DAEMON_LIFECYCLE_SESSION_BUCKETS,
+  DAEMON_LIFECYCLE_TRANSITIONS,
+  DAEMON_REPLACE_REASONS,
+  DAEMON_RETIRE_REASONS
+} from './daemon-lifecycle-telemetry'
 import { SETUP_SCRIPT_IMPORT_PROVIDERS } from './setup-script-import-providers'
 import { WORKSPACE_SOURCE_VALUES, type WorkspaceSource } from './workspace-source'
 import { appStarSourceSchema } from './gh-star-source'
@@ -239,6 +245,7 @@ export const SETTINGS_CHANGED_WHITELIST = [
   'experimentalPet',
   'experimentalNativeChat',
   'experimentalActivity',
+  'experimentalAgentDashboardPopout',
   'experimentalTerminalAttention',
   'experimentalAgentHibernation',
   'experimentalEphemeralVms',
@@ -363,14 +370,38 @@ const agentErrorSchema = z
 // Why: daemon start-failure signal (fleet-wide outage like v1.4.129-rc.1); enum-only so raw stderr never reaches the wire.
 const daemonStartFailedSchema = z.object({ error_class: errorClassSchema }).strict()
 
+// Why: daemon replace/retire lifecycle signal — issue #7936 was undiagnosable without asking a user for daemon.log.
+// Enum-only + bucketed session count so no paths, raw versions, or exact counts reach the wire.
+// The union keeps each reason pinned to its transition, so a death can't be reported as a replace.
+const daemonLifecycleSchema = z.discriminatedUnion('transition', [
+  z
+    .object({
+      transition: z.literal(DAEMON_LIFECYCLE_TRANSITIONS[0]),
+      reason: z.enum(DAEMON_REPLACE_REASONS),
+      live_session_count_bucket: z.enum(DAEMON_LIFECYCLE_SESSION_BUCKETS)
+    })
+    .strict(),
+  z
+    .object({
+      transition: z.literal(DAEMON_LIFECYCLE_TRANSITIONS[1]),
+      reason: z.enum(DAEMON_RETIRE_REASONS),
+      live_session_count_bucket: z.enum(DAEMON_LIFECYCLE_SESSION_BUCKETS)
+    })
+    .strict()
+])
+
 // Rollout signal for granting Codex hook trust via codex app-server RPCs
 // instead of Orca's self-computed trusted_hash. `fallback`/`verify_failed`
 // spikes mean the RPC lane is not taking; steady-state ledger skips are not
-// reported (they would only measure launch volume).
+// reported (they would only measure launch volume). `lane` attributes the
+// grant surface (real ~/.codex vs managed home); `error_class`/`verify_class`
+// are closed classifications so `error` fallbacks are diagnosable in the
+// field — e.g. `binary-missing` = codex CLI absent, no rollout impact.
 const codexTrustGrantSchema = z
   .object({
     outcome: z.enum(['granted', 'fallback', 'verify_failed']),
     host_kind: z.enum(['native', 'wsl']),
+    lane: z.enum(['real-home', 'managed']),
     fallback_reason: z
       .enum([
         'disabled',
@@ -380,6 +411,19 @@ const codexTrustGrantSchema = z
         'verify-failed',
         'retry-cached',
         'error'
+      ])
+      .optional(),
+    error_class: z
+      .enum(['binary-missing', 'timeout', 'entry-failed', 'early-exit', 'rpc-failed', 'unexpected'])
+      .optional(),
+    verify_class: z
+      .enum([
+        'list-mismatch',
+        'post-grant-untrusted',
+        'post-grant-mismatch',
+        'unexpected-key',
+        'duplicate-key',
+        'coverage'
       ])
       .optional()
   })
@@ -1282,6 +1326,7 @@ export const eventSchemas = {
   agent_hook_unattributed: agentHookUnattributedSchema,
 
   daemon_start_failed: daemonStartFailedSchema,
+  daemon_lifecycle: daemonLifecycleSchema,
 
   codex_trust_grant: codexTrustGrantSchema,
 
