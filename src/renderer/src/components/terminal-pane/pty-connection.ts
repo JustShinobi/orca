@@ -87,6 +87,7 @@ import {
   registerTerminalPaneRecoveryInstance,
   requestTerminalPaneRecovery
 } from './terminal-pane-recovery'
+import { shouldDropQuarantinedTerminalInput } from './terminal-input-quarantine'
 import {
   isDocumentVisibilityProvenStale,
   registerStaleDocumentVisibilityRecovery
@@ -2009,6 +2010,12 @@ export function connectPanePty(
     hasKnownAgentIdentity: paneHasKnownAgentIdentity,
     onConfirmedShellForeground: (reason) => {
       clearStaleAgentTabTitleOnConfirmedShell()
+      // Why: a hard-killed agent leaves mouse/focus/kitty modes armed, and the
+      // surviving shell then receives pointer moves as typed SGR reports; the
+      // replay guard keeps xterm's auto-replies from leaking to the shell.
+      replayIntoTerminal(pane, deps.replayingPanesRef, POST_REPLAY_REATTACH_RESET, {
+        shouldRefreshViewportSynchronously: shouldRefreshForegroundSynchronously
+      })
       if (reason === 'visible-pty') {
         useAppStore.getState().clearAgentLaunchConfig(cacheKey)
         return
@@ -3662,7 +3669,11 @@ export function connectPanePty(
       // and a disconnected remote pane would otherwise remount-churn on every
       // cooldown window while typing. Local panes keep the lenient gate.
       requireAuthoritativeLiveness:
-        Boolean(transport.getConnectionId?.()) || isRemoteRuntimePtyId(undeliverablePtyId)
+        Boolean(transport.getConnectionId?.()) || isRemoteRuntimePtyId(undeliverablePtyId),
+      // Why only the rejected path: it is the only one whose remount can land on
+      // a fresh shell. A stalled-pipeline remount always reattaches to the same
+      // shell, so its half-typed line is still on screen and intact.
+      endpointReplaced: providerRejected
     })
   }
   // Why: the write-pipeline health watch (scheduler stall probe, replay-guard
@@ -3741,6 +3752,15 @@ export function connectPanePty(
     // so a real keystroke never reaches this branch.
     if (isTerminalQueryReply(data)) {
       sendDesktopQueryReplyImmediate(data)
+      return
+    }
+    // Why after the query-reply branch: device replies are not user input and
+    // must always reach the shell, or a program querying during reattach hangs.
+    // Why at all: a replaced endpoint reattaches to a fresh shell, so the tail
+    // of the interrupted line would be submitted by the user's own Enter and a
+    // compound command could run its surviving half (#10065 follow-up).
+    if (shouldDropQuarantinedTerminalInput(deps.tabId, data)) {
+      clearPendingTerminalInputIntent()
       return
     }
     const intent = pendingTerminalInputIntent
