@@ -117,7 +117,6 @@ export class PreflightHandler {
             (command) =>
               !isDetectionUnsupportedInRuntime(command, process.platform) &&
               foundCommands.has(command.cmd) &&
-              (!command.capabilityProbe || foundCommands.has(command.cmd)) &&
               (command.requiredCommands ?? []).every((required) => foundCommands.has(required))
           )
           .map(({ id }) => id)

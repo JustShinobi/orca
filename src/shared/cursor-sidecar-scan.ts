@@ -22,11 +22,11 @@ export const cursorSidecarScanRequestSchema = z
     version: z.literal(CURSOR_SIDECAR_SCAN_VERSION),
     chatsRoot: boundedPath,
     scopePaths: z.array(boundedPath).max(CURSOR_REMOTE_MAX_SCOPE_PATHS),
-    maxBuckets: positiveSafeInteger,
-    maxSessionDirs: positiveSafeInteger,
-    maxScopePaths: positiveSafeInteger,
-    maxSidecarBytes: positiveSafeInteger,
-    maxAggregateBytes: positiveSafeInteger
+    maxBuckets: positiveSafeInteger.max(CURSOR_REMOTE_MAX_BUCKETS),
+    maxSessionDirs: positiveSafeInteger.max(CURSOR_REMOTE_MAX_SESSION_DIRS),
+    maxScopePaths: positiveSafeInteger.max(CURSOR_REMOTE_MAX_SCOPE_PATHS),
+    maxSidecarBytes: positiveSafeInteger.max(CURSOR_SIDECAR_MAX_BYTES),
+    maxAggregateBytes: positiveSafeInteger.max(CURSOR_REMOTE_MAX_AGGREGATE_BYTES)
   })
   .strict()
 

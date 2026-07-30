@@ -73,6 +73,22 @@ describe('resolveAiVaultCursorCommand', () => {
     ).toBeNull()
   })
 
+  it('falls back to the flat command map only when no context-indexed map exists', () => {
+    expect(
+      resolveAiVaultCursorCommand({
+        state: state({ detectedAgentCommands: { cursor: 'cursor-agent' } })
+      })
+    ).toBe('cursor-agent')
+    expect(
+      resolveAiVaultCursorCommand({
+        state: state({
+          detectedAgentCommands: { cursor: 'cursor-agent' },
+          detectedAgentCommandsByContext: { 'wsl:Ubuntu': { cursor: 'cursor agent' } }
+        })
+      })
+    ).toBeNull()
+  })
+
   it('prefers an explicit override over every detected match', () => {
     expect(
       resolveAiVaultCursorCommand({

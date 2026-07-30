@@ -43,14 +43,18 @@ export async function processLocalCursorCandidates(args: {
   const parsed: ParsedCursorCandidate[] = []
   const processedGroups = new Set<CursorCandidateSelectionGroup<SessionFileCandidate>>()
   for (let index = 0; index < groups.length; index += CURSOR_PARSE_CONCURRENCY) {
-    const preview = reconcileCursorCandidates({
-      candidates: parsed,
-      executionHostId: args.executionHostId,
-      platform: args.platform,
-      issues: []
-    })
-    if (canStopCursorGroupSelection(preview.sessions, args.limit, groups[index]?.mtimeMs)) {
-      break
+    // Reconcile is O(parsed); sessions never outnumber candidates, so a short parsed
+    // count can't satisfy the limit and the preview would be wasted work.
+    if (parsed.length >= args.limit) {
+      const preview = reconcileCursorCandidates({
+        candidates: parsed,
+        executionHostId: args.executionHostId,
+        platform: args.platform,
+        issues: []
+      })
+      if (canStopCursorGroupSelection(preview.sessions, args.limit, groups[index]?.mtimeMs)) {
+        break
+      }
     }
     const batch = groups.slice(index, index + CURSOR_PARSE_CONCURRENCY)
     await parseCursorGroups(batch, parsed, args)

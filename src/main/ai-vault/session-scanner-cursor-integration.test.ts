@@ -79,7 +79,8 @@ describe('Cursor session scanner integration', () => {
     tempRoots.push(root)
     const roots = isolatedScanRoots(root)
     const scopePath = join(root, 'scoped-workspace')
-    const otherPaths = [join(root, 'newest-workspace'), join(root, 'middle-workspace')]
+    // Timestamps derive from array index, so the newest bucket must sort last.
+    const otherPaths = [join(root, 'middle-workspace'), join(root, 'newest-workspace')]
     const sessionId = 'shared-session-id'
     await mkdir(scopePath, { recursive: true })
 

@@ -82,28 +82,31 @@ describe('scanCursorSidecars', () => {
     })
   })
 
-  it('keeps missing files silent and rejects symlinked sidecars', async () => {
-    const root = await createRoot()
-    const chatsRoot = join(root, 'chats')
-    const bucket = '11111111111111111111111111111111'
-    await addSession(chatsRoot, bucket, 'valid')
-    const missingStore = join(chatsRoot, bucket, 'missing-store')
-    await mkdir(missingStore)
-    await writeFile(join(missingStore, 'meta.json'), '{}')
-    const linked = join(chatsRoot, bucket, 'linked')
-    await mkdir(linked)
-    await Promise.all([
-      symlink(join(chatsRoot, bucket, 'valid', 'meta.json'), join(linked, 'meta.json')),
-      writeFile(join(linked, 'store.db'), '')
-    ])
+  it.skipIf(process.platform === 'win32')(
+    'keeps missing files silent and rejects symlinked sidecars',
+    async () => {
+      const root = await createRoot()
+      const chatsRoot = join(root, 'chats')
+      const bucket = '11111111111111111111111111111111'
+      await addSession(chatsRoot, bucket, 'valid')
+      const missingStore = join(chatsRoot, bucket, 'missing-store')
+      await mkdir(missingStore)
+      await writeFile(join(missingStore, 'meta.json'), '{}')
+      const linked = join(chatsRoot, bucket, 'linked')
+      await mkdir(linked)
+      await Promise.all([
+        symlink(join(chatsRoot, bucket, 'valid', 'meta.json'), join(linked, 'meta.json')),
+        writeFile(join(linked, 'store.db'), '')
+      ])
 
-    const result = await scanCursorSidecars(
-      defaultCursorSidecarScanRequest(chatsRoot, [], process.platform),
-      context
-    )
-    expect(result.sidecars.map((sidecar) => sidecar.sessionId)).toEqual(['valid'])
-    expect(result.issues).toEqual([])
-  })
+      const result = await scanCursorSidecars(
+        defaultCursorSidecarScanRequest(chatsRoot, [], process.platform),
+        context
+      )
+      expect(result.sidecars.map((sidecar) => sidecar.sessionId)).toEqual(['valid'])
+      expect(result.issues).toEqual([])
+    }
+  )
 
   it('clamps session and aggregate-content bounds and reports one issue per dimension', async () => {
     const root = await createRoot()

@@ -17959,16 +17959,25 @@ export class OrcaRuntimeService {
     return getAgentLaunchPlatformForRepo(repo, projectRuntime)
   }
 
+  private resolveProjectRuntimeWslDistro(
+    resolution: ProjectExecutionRuntimeResolution | undefined
+  ): string | null {
+    const runtime =
+      resolution?.status === 'resolved' ? resolution.runtime : resolution?.repair.preferredRuntime
+    return runtime?.kind === 'wsl' ? runtime.distro?.trim() || null : null
+  }
+
   private getAgentLaunchWslDistroForRepo(repo: Repo): string | null {
     if (repo.connectionId) {
       return null
     }
-    const projectRuntime = resolveLocalProjectRuntimeForRepo(this.requireStore(), repo)
-    const runtime =
-      projectRuntime?.status === 'resolved'
-        ? projectRuntime.runtime
-        : projectRuntime?.repair.preferredRuntime
-    return runtime?.kind === 'wsl' ? runtime.distro : (parseWslUncPath(repo.path)?.distro ?? null)
+    return (
+      this.resolveProjectRuntimeWslDistro(
+        resolveLocalProjectRuntimeForRepo(this.requireStore(), repo)
+      ) ??
+      parseWslUncPath(repo.path)?.distro ??
+      null
+    )
   }
 
   private getAgentLaunchWslDistroForWorkspace(scope: TerminalWorkspaceLaunchScope): string | null {
@@ -26903,12 +26912,7 @@ export class OrcaRuntimeService {
     )
     const wslDistroByRepoId = new Map(
       repos.flatMap((repo): [string, string][] => {
-        const resolution = projectRuntimeByRepoId.get(repo.id)
-        const runtime =
-          resolution?.status === 'resolved'
-            ? resolution.runtime
-            : resolution?.repair.preferredRuntime
-        const distro = runtime?.kind === 'wsl' ? runtime.distro?.trim() : null
+        const distro = this.resolveProjectRuntimeWslDistro(projectRuntimeByRepoId.get(repo.id))
         return distro ? [[repo.id, distro]] : []
       })
     )

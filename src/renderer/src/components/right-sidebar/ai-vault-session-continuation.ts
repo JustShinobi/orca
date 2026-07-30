@@ -2,15 +2,24 @@ import type { AgentSessionContinuationRequest } from '@/lib/agent-session-contin
 import type { AiVaultSession } from '../../../../shared/ai-vault-types'
 import { getAiVaultTranscriptPath } from '../../../../shared/ai-vault-transcript-path'
 
+// Cursor resumes by re-running its CLI in the recorded cwd, so both gating
+// paths need the same triple; keep them from drifting apart.
+export function hasCursorResumeTarget(
+  session: Partial<Pick<AiVaultSession, 'agent' | 'cwd' | 'resumeCommand'>>,
+  cursorCommandAvailable: boolean
+): boolean {
+  return (
+    session.agent !== 'cursor' ||
+    Boolean(session.cwd && session.resumeCommand?.trim() && cursorCommandAvailable)
+  )
+}
+
 export function canContinueAiVaultSessionInNewSession(
   session: AiVaultSession,
   targetWorktreeId: string | null | undefined,
   cursorCommandAvailable = false
 ): boolean {
-  if (
-    session.agent === 'cursor' &&
-    (!session.cwd || !session.resumeCommand.trim() || !cursorCommandAvailable)
-  ) {
+  if (!hasCursorResumeTarget(session, cursorCommandAvailable)) {
     return false
   }
   return Boolean(

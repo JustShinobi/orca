@@ -36,7 +36,6 @@ import {
 import { buildMobileAgentHistoryResumeActionState } from './agent-history-session-card'
 import { styles } from './agent-history-styles'
 import { resolveRequiredMobileCursorResumeCommand } from '../session/mobile-cursor-command'
-import { parseWslUncPath } from '../../../src/shared/wsl-paths'
 import { useMobileAgentHistoryWorktrees } from './use-mobile-agent-history-worktrees'
 
 export type MobileAgentSessionHistoryPanelProps = {
@@ -172,13 +171,10 @@ export function MobileAgentSessionHistoryPanel({
         }
 
         const preparedSession = await prepareMobileAiVaultSessionResume(client, session)
-        const resumeWorktrees = freshWorktrees ?? worktrees
         const cursorCommand = await resolveRequiredMobileCursorResumeCommand({
           client,
           settings,
-          wslDistro:
-            resumeWorktrees.find((worktree) => worktree.worktreeId === target.worktreeId)
-              ?.wslDistro ?? parseWslUncPath(target.workspacePath ?? '')?.distro,
+          wslDistro: target.wslDistro,
           session
         })
         const launch = buildMobileAiVaultResumeLaunch({

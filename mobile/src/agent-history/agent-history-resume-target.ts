@@ -53,6 +53,7 @@ export type MobileAiVaultSessionResumeTarget =
       targetStatus: 'local'
       workspacePath: string | null
       terminalPlatform: NodeJS.Platform | null
+      wslDistro: string | null
     }
   | { status: 'blocked'; message: string }
 
@@ -155,6 +156,8 @@ export function resolveMobileAiVaultSessionResumeTarget(args: {
       (worktree) => worktree.worktreeId === candidateWorktreeId
     )
     const targetRepo = args.repos.find((repo) => repo.id === targetWorktree?.repoId)
+    const targetWslDistro =
+      targetWorktree?.wslDistro ?? parseWslUncPath(targetWorktree?.path ?? '')?.distro ?? null
     if (
       !canResumeAiVaultSessionInExecutionContext({
         agent: args.session.agent,
@@ -164,8 +167,7 @@ export function resolveMobileAiVaultSessionResumeTarget(args: {
         targetExecutionHostId:
           normalizeExecutionHostId(targetWorktree?.hostId) ??
           (targetRepo ? getRepoExecutionHostId(targetRepo) : LOCAL_EXECUTION_HOST_ID),
-        targetWslDistro:
-          targetWorktree?.wslDistro ?? parseWslUncPath(targetWorktree?.path ?? '')?.distro ?? null
+        targetWslDistro
       })
     ) {
       continue
@@ -175,7 +177,8 @@ export function resolveMobileAiVaultSessionResumeTarget(args: {
       worktreeId: candidateWorktreeId,
       targetStatus,
       workspacePath: targetWorktree?.path ?? null,
-      terminalPlatform: targetWorktree?.terminalPlatform ?? null
+      terminalPlatform: targetWorktree?.terminalPlatform ?? null,
+      wslDistro: targetWslDistro
     }
   }
 
@@ -240,11 +243,7 @@ function getMobileAiVaultResumeFolderTargetStatus(args: {
 function getMobileAiVaultResumeExecutionHostTargetStatus(
   hostId: ExecutionHostId | null | undefined
 ): MobileAiVaultResumeTargetStatus {
-  const parsed = parseExecutionHostId(hostId)
-  if (!parsed) {
-    return 'unknown'
-  }
-  return parsed.kind
+  return parseExecutionHostId(hostId)?.kind ?? 'unknown'
 }
 
 function parseFolderWorkspaceRepoId(repoId: string): string | null {

@@ -1,6 +1,7 @@
 import { resolveEffectiveCursorCommand } from '../../../src/shared/cursor-command'
 import { detectedAgentInventorySchema } from '../../../src/shared/detected-agent-inventory'
 import type { RpcClient } from '../transport/rpc-client'
+import { RESUME_RPC_TIMEOUT_MS } from './ai-vault-resume-preparation'
 import type { MobileAiVaultResumeSettings } from './ai-vault-resume-launch'
 import type { AiVaultSession } from '../../../src/shared/ai-vault-types'
 
@@ -16,7 +17,8 @@ export async function resolveMobileCursorCommand(args: {
   const wslDistro = args.wslDistro?.trim()
   const response = await args.client.sendRequest(
     'preflight.detectAgentInventory',
-    wslDistro ? { wslDistro } : undefined
+    wslDistro ? { wslDistro } : undefined,
+    { timeoutMs: RESUME_RPC_TIMEOUT_MS }
   )
   if (!response.ok) {
     return null

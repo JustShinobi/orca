@@ -175,7 +175,8 @@ describe('mobile AI Vault resume target guards', () => {
       worktreeId: 'session-wt',
       targetStatus: 'local',
       workspacePath: '/Users/ada/repo/feature',
-      terminalPlatform: null
+      terminalPlatform: null,
+      wslDistro: null
     })
   })
 
@@ -198,7 +199,8 @@ describe('mobile AI Vault resume target guards', () => {
       worktreeId: 'route-wt',
       targetStatus: 'local',
       workspacePath: '/Users/ada/repo/main',
-      terminalPlatform: null
+      terminalPlatform: null,
+      wslDistro: null
     })
   })
 
@@ -274,7 +276,8 @@ describe('mobile AI Vault resume target guards', () => {
       worktreeId: 'route-wt',
       targetStatus: 'local',
       workspacePath: '/Users/ada/repo/main',
-      terminalPlatform: null
+      terminalPlatform: null,
+      wslDistro: null
     })
   })
 

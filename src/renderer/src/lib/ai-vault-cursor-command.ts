@@ -65,7 +65,11 @@ export function resolveAiVaultCursorCommand(args: {
             args.worktreeId
           )
         )
-    matches = args.state.detectedAgentCommandsByContext?.[contextKey]
+    // Older preflight/preload payloads carry only the flat map; keep a missing
+    // context result authoritative once the context-indexed map exists.
+    matches = args.state.detectedAgentCommandsByContext
+      ? args.state.detectedAgentCommandsByContext[contextKey]
+      : args.state.detectedAgentCommands
   }
   return resolveEffectiveCursorCommand(args.commandOverride, {
     version: 1,

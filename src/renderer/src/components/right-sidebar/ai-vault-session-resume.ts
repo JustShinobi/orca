@@ -18,6 +18,7 @@ import {
   canJumpToAiVaultSessionWorktree,
   type AiVaultSessionWorktreeInfo
 } from './ai-vault-session-worktree'
+import { hasCursorResumeTarget } from './ai-vault-session-continuation'
 
 export type AiVaultSessionResumeTargetState = Pick<
   AppState,
@@ -228,12 +229,10 @@ export function aiVaultSessionRowResumeGating(
     | null
 ): { resumeDisabled: boolean; canCopyResumeCommand: boolean } {
   const hasResumableContent = isAiVaultSessionResumableContent(session)
-  const hasCursorResumeTarget =
-    session.agent !== 'cursor' ||
-    Boolean(session.cwd && session.resumeCommand?.trim() && state?.cursorCommandAvailable === true)
+  const cursorResumable = hasCursorResumeTarget(session, state?.cursorCommandAvailable === true)
   return {
-    resumeDisabled: (state?.blocked ?? true) || !hasResumableContent || !hasCursorResumeTarget,
-    canCopyResumeCommand: hasResumableContent && hasCursorResumeTarget
+    resumeDisabled: (state?.blocked ?? true) || !hasResumableContent || !cursorResumable,
+    canCopyResumeCommand: hasResumableContent && cursorResumable
   }
 }
 

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { RESUME_RPC_TIMEOUT_MS } from './ai-vault-resume-preparation'
 import { resolveMobileCursorCommand } from './mobile-cursor-command'
 
 describe('resolveMobileCursorCommand', () => {
@@ -15,7 +16,9 @@ describe('resolveMobileCursorCommand', () => {
     await expect(resolveMobileCursorCommand({ client: { sendRequest } })).resolves.toBe(
       'cursor agent'
     )
-    expect(sendRequest).toHaveBeenCalledWith('preflight.detectAgentInventory', undefined)
+    expect(sendRequest).toHaveBeenCalledWith('preflight.detectAgentInventory', undefined, {
+      timeoutMs: RESUME_RPC_TIMEOUT_MS
+    })
   })
 
   it('fails closed without a valid inventory unless an override exists', async () => {
@@ -47,8 +50,10 @@ describe('resolveMobileCursorCommand', () => {
         wslDistro: ' Ubuntu '
       })
     ).resolves.toBe('cursor agent')
-    expect(sendRequest).toHaveBeenCalledWith('preflight.detectAgentInventory', {
-      wslDistro: 'Ubuntu'
-    })
+    expect(sendRequest).toHaveBeenCalledWith(
+      'preflight.detectAgentInventory',
+      { wslDistro: 'Ubuntu' },
+      { timeoutMs: RESUME_RPC_TIMEOUT_MS }
+    )
   })
 })

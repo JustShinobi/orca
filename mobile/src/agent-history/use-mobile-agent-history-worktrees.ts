@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { RpcClient } from '../transport/rpc-client'
+import { RESUME_RPC_TIMEOUT_MS } from '../session/ai-vault-resume-preparation'
 import type { RpcSuccess } from '../transport/types'
 import type { Worktree } from '../worktree/workspace-list-types'
 
@@ -19,7 +20,11 @@ export function useMobileAgentHistoryWorktrees(
     let cancelled = false
     void (async () => {
       try {
-        const response = await client.sendRequest('worktree.ps', { limit: 10000 })
+        const response = await client.sendRequest(
+          'worktree.ps',
+          { limit: 10000 },
+          { timeoutMs: RESUME_RPC_TIMEOUT_MS }
+        )
         if (!cancelled && response.ok) {
           setSnapshot({
             client,

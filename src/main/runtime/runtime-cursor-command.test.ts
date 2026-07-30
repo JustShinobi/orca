@@ -10,7 +10,10 @@ vi.mock('../ipc/tui-agent-inventory-detection', () => ({
   detectRemoteAgentCommands: mocks.detectRemote
 }))
 
-import { resolveRuntimeAgentCommandOverrides } from './runtime-cursor-command'
+import {
+  resetRuntimeCursorCommandCacheForTests,
+  resolveRuntimeAgentCommandOverrides
+} from './runtime-cursor-command'
 
 const inventory = (command?: string) => ({
   version: 1 as const,
@@ -19,6 +22,7 @@ const inventory = (command?: string) => ({
 })
 
 beforeEach(() => {
+  resetRuntimeCursorCommandCacheForTests()
   mocks.detectLocal.mockReset().mockResolvedValue(inventory())
   mocks.detectRemote.mockReset().mockResolvedValue(inventory())
 })
@@ -83,6 +87,28 @@ describe('resolveRuntimeAgentCommandOverrides', () => {
         workspacePath: '/repo'
       })
     ).resolves.toEqual({})
+  })
+
+  it('probes once per host and keeps separate hosts isolated', async () => {
+    mocks.detectLocal.mockResolvedValue(inventory('cursor-agent'))
+    mocks.detectRemote.mockResolvedValue(inventory('cursor agent'))
+    const local = { agent: 'cursor' as const, cmdOverrides: {}, workspacePath: '/repo' }
+    await expect(
+      Promise.all([
+        resolveRuntimeAgentCommandOverrides(local),
+        resolveRuntimeAgentCommandOverrides(local),
+        resolveRuntimeAgentCommandOverrides({ ...local, connectionId: 'ssh-1' })
+      ])
+    ).resolves.toEqual([
+      { cursor: 'cursor-agent' },
+      { cursor: 'cursor-agent' },
+      { cursor: 'cursor agent' }
+    ])
+    await expect(resolveRuntimeAgentCommandOverrides(local)).resolves.toEqual({
+      cursor: 'cursor-agent'
+    })
+    expect(mocks.detectLocal).toHaveBeenCalledTimes(1)
+    expect(mocks.detectRemote).toHaveBeenCalledTimes(1)
   })
 
   it('does not probe commands for other agents', async () => {

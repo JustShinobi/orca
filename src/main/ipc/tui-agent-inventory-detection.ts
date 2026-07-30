@@ -132,9 +132,13 @@ export async function detectRemoteAgentCommands(args: {
       })
     )
   } catch {
-    return legacyDetectedAgentInventory(
-      (await detectRemoteAgents(args)) as DetectedTuiAgentsResult['agents']
-    )
+    try {
+      return legacyDetectedAgentInventory(
+        (await detectRemoteAgents(args)) as DetectedTuiAgentsResult['agents']
+      )
+    } catch {
+      return emptyDetectedAgentInventory()
+    }
   }
 }
 

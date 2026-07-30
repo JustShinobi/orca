@@ -32,7 +32,7 @@ type VerifiedTerminalArtifactOptions = {
 export async function readVerifiedTerminalArtifact(params: Record<string, unknown>) {
   const filePath = stringParam(params.filePath)
   const options = verifiedTerminalArtifactOptions(params)
-  const handle = await openVerifiedTerminalArtifact(filePath, options, constants.O_RDONLY)
+  const handle = await openVerifiedTerminalArtifact(filePath, options)
   try {
     await verifiedHandleStat(handle, options)
     const mimeType = terminalArtifactImageMimeType(filePath)
@@ -64,7 +64,7 @@ export async function writeVerifiedTerminalArtifact(
   if (Buffer.byteLength(content, 'utf8') > writeLimit) {
     throw new Error('file_too_large')
   }
-  const handle = await openVerifiedTerminalArtifact(filePath, options, constants.O_RDONLY)
+  const handle = await openVerifiedTerminalArtifact(filePath, options)
   let originalMode: number | null = null
   try {
     originalMode = (await verifiedHandleStat(handle, options)).mode ?? null
@@ -81,7 +81,7 @@ export async function writeVerifiedTerminalArtifact(
     if (typeof originalMode === 'number') {
       await chmod(tempPath, originalMode & 0o7777)
     }
-    const freshHandle = await openVerifiedTerminalArtifact(filePath, options, constants.O_RDONLY)
+    const freshHandle = await openVerifiedTerminalArtifact(filePath, options)
     try {
       await verifiedHandleStat(freshHandle, options)
     } finally {
@@ -110,17 +110,15 @@ function terminalArtifactImageMimeType(filePath: string): string | undefined {
   return mimeType === 'image/svg+xml' ? undefined : mimeType
 }
 
+// Why: read-only + O_NOFOLLOW is the whole guard here; a caller-supplied flag
+// set would make it trivial to reintroduce symlink-follow on a temp path.
 async function openVerifiedTerminalArtifact(
   filePath: string,
-  options: VerifiedTerminalArtifactOptions,
-  flags: number
+  options: VerifiedTerminalArtifactOptions
 ): Promise<FileHandle> {
   await assertRealPathStillGranted(filePath, options.expectedRealPath)
   try {
-    if (flags === constants.O_RDONLY) {
-      return await openNoFollow(filePath)
-    }
-    return await open(filePath, flags)
+    return await openNoFollow(filePath)
   } catch (error) {
     if (
       (error as NodeJS.ErrnoException).code === 'ELOOP' ||

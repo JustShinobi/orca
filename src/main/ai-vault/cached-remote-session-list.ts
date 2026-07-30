@@ -46,7 +46,15 @@ export async function listCachedRemoteAiVaultSessions(args: {
   const now = Date.now()
   if (existing?.inflight) {
     existing.lastUsedAt = now
-    return withScopePathTruncationIssue(await existing.inflight, args, scopePathsTruncated)
+    try {
+      return withScopePathTruncationIssue(await existing.inflight, args, scopePathsTruncated)
+    } catch (error) {
+      // The shared scan carries the initiating caller's abort semantics; re-issue our own
+      // scan rather than inheriting an abort this caller never requested.
+      if (args.signal?.aborted !== false) {
+        throw error
+      }
+    }
   }
   if (args.force !== true && existing?.result && existing.expiresAt > now) {
     existing.lastUsedAt = now

@@ -86,6 +86,7 @@ async function scopeBuckets(
   const buckets = new Map<string, Bucket>()
   args.response.scopeCwds = [...cwds].sort()
   for (const cwd of args.response.scopeCwds) {
+    // Cursor names its bucket dirs md5(cwd); this mirrors that, not a security primitive.
     const name = createHash('md5').update(cwd).digest('hex')
     buckets.set(name, { name, path: join(chatsRoot, name), scopeCwd: cwd })
   }

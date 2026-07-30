@@ -282,9 +282,12 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
               ...settings,
               agentCmdOverrides: effectiveAgent
                 ? resolveCursorCommandOverrides({
-                    state: store,
+                    // Why: the pre-create snapshot lacks the new worktree, so
+                    // Cursor would resolve against the active/local host.
+                    state: latestStore,
                     agent: effectiveAgent,
                     worktreeId,
+                    repoId: repo.id,
                     cmdOverrides: settings.agentCmdOverrides ?? {}
                   })
                 : settings.agentCmdOverrides
