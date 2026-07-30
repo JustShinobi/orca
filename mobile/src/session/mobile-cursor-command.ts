@@ -9,19 +9,20 @@ export async function resolveMobileCursorCommand(args: {
   settings?: MobileAiVaultResumeSettings | null
   wslDistro?: string | null
 }): Promise<string | null> {
+  const configured = resolveEffectiveCursorCommand(args.settings?.agentCmdOverrides?.cursor, null)
+  if (configured) {
+    return configured
+  }
   const wslDistro = args.wslDistro?.trim()
   const response = await args.client.sendRequest(
     'preflight.detectAgentInventory',
     wslDistro ? { wslDistro } : undefined
   )
   if (!response.ok) {
-    return resolveEffectiveCursorCommand(args.settings?.agentCmdOverrides?.cursor, null)
+    return null
   }
   const result = detectedAgentInventorySchema.safeParse(response.result)
-  return resolveEffectiveCursorCommand(
-    args.settings?.agentCmdOverrides?.cursor,
-    result.success ? result.data : null
-  )
+  return resolveEffectiveCursorCommand(null, result.success ? result.data : null)
 }
 
 export async function resolveRequiredMobileCursorResumeCommand(args: {

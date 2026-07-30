@@ -33,13 +33,13 @@ export const PREFLIGHT_METHODS: RpcMethod[] = [
   }),
   defineMethod({
     name: 'preflight.detectAgents',
-    params: null,
-    handler: async () => detectInstalledAgentsWithShellPathHydration()
+    params: PreflightLocalAgentContext,
+    handler: async (params) => detectInstalledAgentsWithShellPathHydration(params)
   }),
   defineMethod({
     name: 'preflight.detectAgentCommands',
-    params: null,
-    handler: async () => detectInstalledAgentCommandsWithShellPathHydration()
+    params: PreflightLocalAgentContext,
+    handler: async (params) => detectInstalledAgentCommandsWithShellPathHydration(params)
   }),
   defineMethod({
     name: 'preflight.detectAgentInventory',
@@ -68,7 +68,7 @@ export const PREFLIGHT_METHODS: RpcMethod[] = [
   }),
   defineMethod({
     name: 'preflight.refreshAgents',
-    params: null,
-    handler: async () => refreshShellPathAndDetectAgents()
+    params: PreflightLocalAgentContext,
+    handler: async (params) => refreshShellPathAndDetectAgents(params)
   })
 ]

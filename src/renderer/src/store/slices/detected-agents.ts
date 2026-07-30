@@ -5,6 +5,7 @@ import {
   getLocalAgentPreflightContext,
   localPreflightContextKey
 } from '@/lib/local-preflight-context'
+import { legacyDetectedAgentInventory } from '../../../../shared/detected-agent-inventory'
 
 export type DetectedAgentsSlice = {
   detectedAgentIds: TuiAgent[] | null
@@ -89,9 +90,7 @@ export const createDetectedAgentsSlice: StateCreator<AppState, [], [], DetectedA
         ? window.api.preflight.detectAgentCommands(context)
         : window.api.preflight
             .detectAgents(context)
-            .then((agents): { agents: string[]; matchedCommands?: Record<string, string> } => ({
-              agents
-            }))
+            .then((agents) => legacyDetectedAgentInventory(agents as TuiAgent[]))
     const pending = detection
       .then((result) => {
         const typed = result.agents as TuiAgent[]
@@ -223,9 +222,7 @@ export const createDetectedAgentsSlice: StateCreator<AppState, [], [], DetectedA
         ? window.api.preflight.detectRemoteAgentCommands({ connectionId })
         : window.api.preflight
             .detectRemoteAgents({ connectionId })
-            .then((agents): { agents: string[]; matchedCommands?: Record<string, string> } => ({
-              agents
-            }))
+            .then((agents) => legacyDetectedAgentInventory(agents as TuiAgent[]))
     const pending = detection
       .then((result) => {
         const typed = result.agents as TuiAgent[]

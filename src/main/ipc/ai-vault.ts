@@ -57,6 +57,12 @@ type RuntimeAiVaultHostInfo = {
   executionHostId: `runtime:${string}`
 }
 
+type AllHostScanSnapshot = {
+  sshHosts: ReturnType<typeof getActiveSshAiVaultHostInfos>
+  runtimeHosts: readonly RuntimeAiVaultHostInfo[]
+  runtimeIssues: readonly AiVaultListResult[]
+}
+
 let cachedList: CachedAiVaultList | null = null
 let inflightList: Promise<AiVaultListResult> | null = null
 let inflightKey: string | null = null
@@ -73,11 +79,13 @@ async function listAiVaultSessions(args?: AiVaultListArgs): Promise<AiVaultListR
   if (executionHostScope === LOCAL_EXECUTION_HOST_ID) {
     return scanLocalAiVaultSessions(args)
   }
+  const allHostSnapshot = executionHostScope === 'all' ? captureAllHostScanSnapshot() : undefined
   // Scope paths change the result set, so they must be part of the cache key.
   const key = JSON.stringify({
     limit: args?.limit ?? 'default',
     scopePaths: args?.scopePaths ?? [],
-    executionHostScope
+    executionHostScope,
+    hostTopology: allHostSnapshot ? allHostTopologyKey(allHostSnapshot) : undefined
   })
   const now = Date.now()
   // Why: opening this panel repeatedly should not re-parse hundreds of JSONL
@@ -94,7 +102,7 @@ async function listAiVaultSessions(args?: AiVaultListArgs): Promise<AiVaultListR
   }
 
   inflightKey = key
-  inflightList = scanAiVaultSessionsByHostScope(args, executionHostScope)
+  inflightList = scanAiVaultSessionsByHostScope(args, executionHostScope, allHostSnapshot)
     .then((result) => {
       cachedList = {
         key,
@@ -116,15 +124,15 @@ async function listAiVaultSessions(args?: AiVaultListArgs): Promise<AiVaultListR
 
 async function scanAiVaultSessionsByHostScope(
   args: AiVaultListArgs | undefined,
-  executionHostScope: ExecutionHostScope
+  executionHostScope: ExecutionHostScope,
+  allHostSnapshot?: AllHostScanSnapshot
 ): Promise<AiVaultListResult> {
   if (executionHostScope === 'all') {
-    const runtimeHosts = getActiveRuntimeAiVaultHostInfosResult()
-    const runtimeIssues = runtimeHosts.issue ? [runtimeHosts.issue] : []
+    const snapshot = allHostSnapshot ?? captureAllHostScanSnapshot()
     return scanAllAiVaultHosts({
-      sshHosts: getActiveSshAiVaultHostInfos(),
-      runtimeHosts: runtimeHosts.hostInfos,
-      runtimeIssues,
+      sshHosts: snapshot.sshHosts,
+      runtimeHosts: snapshot.runtimeHosts,
+      runtimeIssues: snapshot.runtimeIssues,
       limit: args?.limit,
       scanLocal: () => scanLocalAiVaultSessions(args),
       scanSsh: (hostInfo, signal) => scanSshAiVaultSessions(hostInfo.targetId, args, signal),
@@ -156,8 +164,29 @@ async function scanAiVaultSessionsByHostScope(
   })
 }
 
-function getActiveRuntimeAiVaultHostInfos(): readonly RuntimeAiVaultHostInfo[] {
-  return handlerOptions.getActiveRuntimeAiVaultHostInfos?.() ?? []
+function captureAllHostScanSnapshot(): AllHostScanSnapshot {
+  const runtimeHosts = getActiveRuntimeAiVaultHostInfosResult()
+  return {
+    sshHosts: getActiveSshAiVaultHostInfos(),
+    runtimeHosts: runtimeHosts.hostInfos,
+    runtimeIssues: runtimeHosts.issue ? [runtimeHosts.issue] : []
+  }
+}
+
+function allHostTopologyKey(snapshot: AllHostScanSnapshot): unknown {
+  return {
+    ssh: snapshot.sshHosts
+      .map((host) => ({
+        executionHostId: host.executionHostId,
+        remoteHome: host.remoteHome,
+        relayPlatform: host.hostPlatform.relayPlatform
+      }))
+      .sort((left, right) => left.executionHostId.localeCompare(right.executionHostId)),
+    runtime: snapshot.runtimeHosts.map((host) => host.executionHostId).toSorted(),
+    runtimeIssues: snapshot.runtimeIssues.flatMap((result) =>
+      result.issues.map((issue) => `${issue.path}:${issue.message}`)
+    )
+  }
 }
 
 function getActiveRuntimeAiVaultHostInfosResult(): {
@@ -165,7 +194,7 @@ function getActiveRuntimeAiVaultHostInfosResult(): {
   issue?: AiVaultListResult
 } {
   try {
-    return { hostInfos: getActiveRuntimeAiVaultHostInfos() }
+    return { hostInfos: handlerOptions.getActiveRuntimeAiVaultHostInfos?.() ?? [] }
   } catch (error) {
     return {
       hostInfos: [],

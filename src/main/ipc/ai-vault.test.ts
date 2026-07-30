@@ -126,6 +126,23 @@ describe('listAiVaultSessions host routing', () => {
     ])
   })
 
+  it('invalidates the all-host cache when the connected host set changes', async () => {
+    mocks.getActiveSshAiVaultHostInfo.mockImplementation((targetId) => hostInfo(targetId))
+    mocks.scanRemoteAiVaultSessions.mockImplementation(({ executionHostId }) =>
+      Promise.resolve(result([session(executionHostId, `${executionHostId}-session`)]))
+    )
+    await _internals.listAiVaultSessions({ executionHostScope: 'all' })
+
+    mocks.getActiveSshAiVaultHostInfos.mockReturnValue([
+      hostInfo('dev-box'),
+      hostInfo('second-box')
+    ])
+    const scanResult = await _internals.listAiVaultSessions({ executionHostScope: 'all' })
+
+    expect(mocks.scanRemoteAiVaultSessions).toHaveBeenCalledTimes(2)
+    expect(scanResult.sessions.map((entry) => entry.executionHostId)).toContain('ssh:second-box')
+  })
+
   it('keeps successful hosts when one SSH scan fails', async () => {
     mocks.getActiveSshAiVaultHostInfos.mockReturnValue([
       hostInfo('unavailable'),

@@ -105,6 +105,15 @@ describe('createDetectedAgentsSlice WSL context', () => {
     })
   })
 
+  it('preserves the legacy Cursor command when the preload lacks inventory methods', async () => {
+    detectAgents.mockResolvedValueOnce(['cursor'])
+    const store = createTestStore()
+    store.getState().clearLocalDetectedAgents()
+    await expect(store.getState().ensureDetectedAgents()).resolves.toEqual(['cursor'])
+    expect(store.getState().detectedAgentCommands).toEqual({ cursor: 'cursor-agent' })
+    expect(store.getState().detectedAgentCommandsByContext.host).toEqual({ cursor: 'cursor-agent' })
+  })
+
   it('detects local agents inside the active WSL worktree distro', async () => {
     const store = createTestStore({
       repos: [makeRepo({ id: 'repo-1', path: 'C:\\repo' })],
@@ -452,6 +461,17 @@ describe('createDetectedAgentsSlice remote detection', () => {
         result,
         _meta: { runtimeId: 'remote-runtime' }
       })
+    })
+  })
+
+  it('preserves the legacy Cursor command when remote inventory methods are unavailable', async () => {
+    detectRemoteAgents.mockResolvedValueOnce(['cursor'])
+    const store = createTestStore()
+    await expect(store.getState().ensureRemoteDetectedAgents('ssh-legacy')).resolves.toEqual([
+      'cursor'
+    ])
+    expect(store.getState().remoteDetectedAgentCommands['ssh-legacy']).toEqual({
+      cursor: 'cursor-agent'
     })
   })
 

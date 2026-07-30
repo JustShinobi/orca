@@ -34,7 +34,12 @@ const sidecarCache = new Map<
     mtimeMs: number
     sizeBytes: number | null
     storeMtimeMs: number | null
+    dev: number | null
+    ino: number | null
+    nlink: number | null
     platform: NodeJS.Platform
+    executionHostId: ExecutionHostId | null
+    expectedRootRealPath: string | null
     result: CursorSidecarParseResult
   }
 >()
@@ -68,7 +73,12 @@ export async function parseCursorSidecarFileCached(args: {
     cached &&
     cached.mtimeMs === args.file.mtimeMs &&
     cached.storeMtimeMs === (args.file.cursorStoreMtimeMs ?? null) &&
+    cached.dev === (args.file.dev ?? null) &&
+    cached.ino === (args.file.ino ?? null) &&
+    cached.nlink === (args.file.nlink ?? null) &&
     cached.platform === args.platform &&
+    cached.executionHostId === (args.executionHostId ?? null) &&
+    cached.expectedRootRealPath === (args.expectedRootRealPath ?? null) &&
     (cached.sizeBytes === null ||
       args.file.sizeBytes === undefined ||
       cached.sizeBytes === args.file.sizeBytes)
@@ -83,7 +93,12 @@ export async function parseCursorSidecarFileCached(args: {
     mtimeMs: args.file.mtimeMs,
     sizeBytes: args.file.sizeBytes ?? null,
     storeMtimeMs: args.file.cursorStoreMtimeMs ?? null,
+    dev: args.file.dev ?? null,
+    ino: args.file.ino ?? null,
+    nlink: args.file.nlink ?? null,
     platform: args.platform,
+    executionHostId: args.executionHostId ?? null,
+    expectedRootRealPath: args.expectedRootRealPath ?? null,
     result
   })
   if (sidecarCache.size > SIDECAR_CACHE_MAX_ENTRIES) {

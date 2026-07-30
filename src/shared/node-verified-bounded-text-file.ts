@@ -77,11 +77,23 @@ async function assertRegularDescendantPath(rootPath: string, filePath: string): 
 export async function readBoundedFileHandle(handle: FileHandle, maxBytes: number): Promise<Buffer> {
   const safeLimit = validatedByteLimit(maxBytes)
   const buffer = Buffer.alloc(safeLimit + 1)
-  const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-  if (bytesRead > safeLimit) {
+  let totalBytesRead = 0
+  while (totalBytesRead < buffer.length) {
+    const { bytesRead } = await handle.read(
+      buffer,
+      totalBytesRead,
+      buffer.length - totalBytesRead,
+      totalBytesRead
+    )
+    if (bytesRead === 0) {
+      break
+    }
+    totalBytesRead += bytesRead
+  }
+  if (totalBytesRead > safeLimit) {
     throw new Error('file_too_large')
   }
-  return buffer.subarray(0, bytesRead)
+  return buffer.subarray(0, totalBytesRead)
 }
 
 export async function openNoFollow(filePath: string): Promise<FileHandle> {
