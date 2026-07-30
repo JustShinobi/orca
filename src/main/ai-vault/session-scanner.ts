@@ -5,8 +5,10 @@ import type {
   AiVaultSession
 } from '../../shared/ai-vault-types'
 import { LOCAL_EXECUTION_HOST_ID, type ExecutionHostId } from '../../shared/execution-host'
+import { buildAiVaultSessionId } from '../../shared/ai-vault-session-id'
 import { withSpan } from '../observability/tracer'
 import { sessionSortTime } from './session-scanner-accumulator'
+import { mergeAiVaultSessions } from './session-list-results'
 import {
   codexRolloutHardlinkIdentity,
   dedupeCodexRolloutFileAliases,
@@ -39,6 +41,7 @@ import type {
   SessionParseResult
 } from './session-scanner-types'
 import { clampPositiveInteger, errorMessage } from './session-scanner-values'
+import { processLocalCursorCandidates } from './session-scanner-cursor-local-pipeline'
 
 const DEFAULT_LIMIT = 1000
 const DEFAULT_SCAN_LIMIT_PER_AGENT = 1000
@@ -92,7 +95,11 @@ export async function scanAiVaultSessions(
               antigravityHistoryPath:
                 discovery.agent === 'antigravity'
                   ? antigravityHistoryPathForBrainDir(discovery.rootDir)
-                  : undefined
+                  : undefined,
+              cursorLayout: discovery.cursorLayout,
+              cursorStorageContextKey: discovery.cursorStorageContextKey,
+              cursorCwdEvidence: discovery.cursorCwdEvidenceByPath?.get(file.path),
+              cursorExpectedRootRealPath: discovery.cursorExpectedRootRealPath
             })
           )
         )
@@ -105,8 +112,20 @@ export async function scanAiVaultSessions(
       }
     )
 
+    const cursorCandidates = candidates.filter((candidate) => candidate.agent === 'cursor')
+    const nonCursorCandidates = candidates.filter((candidate) => candidate.agent !== 'cursor')
+    const cursorResult = await processLocalCursorCandidates({
+      candidates: cursorCandidates,
+      limit,
+      scopeLimit: SCOPE_PARSE_LIMIT,
+      platform,
+      executionHostId,
+      issues,
+      parseStats,
+      span
+    })
     const parsedSessions = await parseSessionCandidates({
-      candidates,
+      candidates: nonCursorCandidates,
       limit,
       platform,
       executionHostId,
@@ -115,7 +134,10 @@ export async function scanAiVaultSessions(
       antigravityWorkspaceResolver
     })
 
-    const cappedSessions = dedupeCodexSessionsBySessionId(parsedSessions)
+    const cappedSessions = dedupeCodexSessionsBySessionId([
+      ...parsedSessions,
+      ...cursorResult.sessions
+    ])
       .sort((left, right) => sessionSortTime(right) - sessionSortTime(left))
       .slice(0, limit)
 
@@ -128,6 +150,9 @@ export async function scanAiVaultSessions(
       issues,
       parseStats
     })
+    const cursorScopeSessions = cursorResult.sessions.filter((session) =>
+      cursorResult.scopedSessionIds.has(session.id)
+    )
 
     span.setAttribute('candidates', candidates.length)
     span.setAttribute('reused', parseStats.reused)
@@ -135,35 +160,14 @@ export async function scanAiVaultSessions(
     span.setAttribute('fullParses', parseStats.fullParses)
     span.setAttribute('bytesRead', parseStats.bytesRead)
     span.setAttribute('issues', issues.length)
-
     scheduleSessionParseCachePersist(parseStats)
 
     return {
-      sessions: mergeSessions(cappedSessions, scopeSessions),
+      sessions: mergeAiVaultSessions(cappedSessions, [...scopeSessions, ...cursorScopeSessions]),
       issues: issues.map((issue) => ({ executionHostId, ...issue })),
       scannedAt: new Date().toISOString()
     }
   })
-}
-
-// In-scope sessions are guaranteed regardless of the recency cap, so the global
-// (already capped) result and the scope result are unioned and de-duplicated by
-// session id, then re-sorted DESC.
-function mergeSessions(
-  cappedSessions: AiVaultSession[],
-  scopeSessions: AiVaultSession[]
-): AiVaultSession[] {
-  if (scopeSessions.length === 0) {
-    return cappedSessions
-  }
-  const byId = new Map<string, AiVaultSession>()
-  for (const session of cappedSessions) {
-    byId.set(session.id, session)
-  }
-  for (const session of scopeSessions) {
-    byId.set(session.id, session)
-  }
-  return [...byId.values()].sort((left, right) => sessionSortTime(right) - sessionSortTime(left))
 }
 
 async function scanInScopeSessions(args: {
@@ -305,7 +309,13 @@ function withSessionExecutionHost(
   return {
     ...session,
     executionHostId,
-    id: `${executionHostId}:${session.agent}:${session.sessionId}:${session.filePath}`
+    id: buildAiVaultSessionId({
+      executionHostId,
+      agent: session.agent,
+      sessionId: session.sessionId,
+      filePath: session.filePath,
+      previousId: session.id
+    })
   }
 }
 

@@ -30,6 +30,7 @@ import { translate } from '@/i18n/i18n'
 import { getConnectionIdFromState } from '@/lib/connection-context'
 import { resolveNativeChatSessionOptionDefaults } from '../../../shared/native-chat-session-option-defaults'
 import { seedNativeChatAppliedSessionOptions } from '@/components/native-chat/native-chat-session-option-cache'
+import { resolveWorktreeAgentCommandOverrides } from '@/lib/ai-vault-cursor-command'
 
 export type LaunchAgentInNewTabArgs = {
   agent: TuiAgent
@@ -102,7 +103,7 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
     isRemote,
     terminalWindowsShell: store.settings?.terminalWindowsShell
   })
-  const cmdOverrides = store.settings?.agentCmdOverrides ?? {}
+  const cmdOverrides = resolveWorktreeAgentCommandOverrides(store, agent, worktreeId)
   const effectiveAgentArgs =
     agentArgs !== undefined
       ? agentArgs

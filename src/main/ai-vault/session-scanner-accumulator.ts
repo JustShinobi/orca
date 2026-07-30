@@ -7,6 +7,7 @@ import {
   type AiVaultSessionPreviewMessage
 } from '../../shared/ai-vault-types'
 import { LOCAL_EXECUTION_HOST_ID, type ExecutionHostId } from '../../shared/execution-host'
+import { buildAiVaultSessionId } from '../../shared/ai-vault-session-id'
 import type {
   FileWithMtime,
   ResumableSessionParseState,
@@ -94,7 +95,12 @@ export function finalizeSession(
   const executionHostId = options.executionHostId ?? LOCAL_EXECUTION_HOST_ID
 
   return {
-    id: `${executionHostId}:${accumulator.agent}:${sessionId}:${accumulator.filePath}`,
+    id: buildAiVaultSessionId({
+      executionHostId,
+      agent: accumulator.agent,
+      sessionId,
+      filePath: accumulator.filePath
+    }),
     executionHostId,
     ...(options.executionHostPlatform
       ? { executionHostPlatform: options.executionHostPlatform }

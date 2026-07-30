@@ -727,6 +727,7 @@ export type RuntimeWorktreePsSummary = {
   repoId: string
   hostId?: Worktree['hostId']
   terminalPlatform?: NodeJS.Platform
+  wslDistro?: string
   repo: string
   path: string
   branch: string

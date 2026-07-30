@@ -2,7 +2,9 @@ import type { Repo, Worktree } from '../../../../shared/types'
 import {
   canResumeAiVaultSessionOnTarget,
   getAiVaultResumeWorkspaceExecutionHostId,
-  getAiVaultResumeWorkspaceTargetStatus
+  getAiVaultResumeWorkspacePath,
+  getAiVaultResumeWorkspaceTargetStatus,
+  getAiVaultResumeWorkspaceWslDistro
 } from '@/lib/ai-vault-resume-target'
 import {
   isAiVaultSessionResumableContent,
@@ -20,12 +22,14 @@ import {
 export type AiVaultSessionResumeTargetState = Pick<
   AppState,
   'folderWorkspaces' | 'projectGroups' | 'repos' | 'worktreesByRepo'
->
+> &
+  Partial<Pick<AppState, 'activeRepoId' | 'activeWorktreeId' | 'projects' | 'settings'>>
 
 export type AiVaultSessionResumeState = {
   blocked: boolean
   worktreeId: string | null
   usesSessionWorktree: boolean
+  cursorCommandAvailable?: boolean
 }
 
 export type AiVaultSessionResumeAction = {
@@ -39,6 +43,7 @@ export type AiVaultSessionResumeActions = {
 }
 
 export function resolveAiVaultSessionResumeState(args: {
+  sessionAgent?: AiVaultSession['agent']
   sessionFilePath: string | null
   sessionExecutionHostId?: AiVaultSession['executionHostId'] | null
   worktreeInfo: AiVaultSessionWorktreeInfo | null
@@ -64,6 +69,7 @@ export function resolveAiVaultSessionResumeState(args: {
     const targetId = resolveSupportedResumeWorktreeId({
       sessionFilePath: args.sessionFilePath,
       sessionExecutionHostId: args.sessionExecutionHostId,
+      sessionAgent: args.sessionAgent,
       worktreeId,
       targetState
     })
@@ -85,6 +91,7 @@ export function resolveAiVaultSessionResumeState(args: {
 }
 
 export function resolveAiVaultSessionResumeActions(args: {
+  sessionAgent?: AiVaultSession['agent']
   sessionFilePath: string | null
   sessionExecutionHostId?: AiVaultSession['executionHostId'] | null
   worktreeInfo: AiVaultSessionWorktreeInfo | null
@@ -102,12 +109,14 @@ export function resolveAiVaultSessionResumeActions(args: {
   const sessionTargetId = resolveSupportedResumeWorktreeId({
     sessionFilePath: args.sessionFilePath,
     sessionExecutionHostId: args.sessionExecutionHostId,
+    sessionAgent: args.sessionAgent,
     worktreeId: sessionWorktreeId,
     targetState
   })
   const activeTargetId = resolveSupportedResumeWorktreeId({
     sessionFilePath: args.sessionFilePath,
     sessionExecutionHostId: args.sessionExecutionHostId,
+    sessionAgent: args.sessionAgent,
     worktreeId:
       args.activeWorktreeId && args.activeWorktreeId !== sessionWorktreeId
         ? args.activeWorktreeId
@@ -150,6 +159,7 @@ export function isKnownAiVaultResumeWorkspaceTarget(
 }
 
 function resolveSupportedResumeWorktreeId(args: {
+  sessionAgent?: AiVaultSession['agent']
   sessionFilePath: string | null
   sessionExecutionHostId?: AiVaultSession['executionHostId'] | null
   worktreeId: string | null
@@ -172,8 +182,11 @@ function resolveSupportedResumeWorktreeId(args: {
     !canResumeAiVaultSessionOnTarget({
       sessionFilePath: args.sessionFilePath,
       sessionExecutionHostId: args.sessionExecutionHostId,
+      sessionAgent: args.sessionAgent,
       targetStatus,
-      targetExecutionHostId
+      targetExecutionHostId,
+      targetWorkspacePath: getAiVaultResumeWorkspacePath(args.targetState, args.worktreeId),
+      targetWslDistro: getAiVaultResumeWorkspaceWslDistro(args.targetState, args.worktreeId)
     })
   ) {
     return null
@@ -207,13 +220,20 @@ function resolveAiVaultResumeTargetState(args: {
 // copying the command stays available for blocked-but-real sessions, so the copy
 // affordance is gated on content alone.
 export function aiVaultSessionRowResumeGating(
-  session: Pick<AiVaultSession, 'messageCount' | 'previewMessages'>,
-  state: Pick<AiVaultSessionResumeState, 'blocked'> | null
+  session: Pick<AiVaultSession, 'messageCount' | 'previewMessages' | 'hasConversation'> &
+    Partial<Pick<AiVaultSession, 'agent' | 'cwd' | 'resumeCommand'>>,
+  state:
+    | (Pick<AiVaultSessionResumeState, 'blocked'> &
+        Partial<Pick<AiVaultSessionResumeState, 'cursorCommandAvailable'>>)
+    | null
 ): { resumeDisabled: boolean; canCopyResumeCommand: boolean } {
   const hasResumableContent = isAiVaultSessionResumableContent(session)
+  const hasCursorResumeTarget =
+    session.agent !== 'cursor' ||
+    Boolean(session.cwd && session.resumeCommand?.trim() && state?.cursorCommandAvailable === true)
   return {
-    resumeDisabled: (state?.blocked ?? true) || !hasResumableContent,
-    canCopyResumeCommand: hasResumableContent
+    resumeDisabled: (state?.blocked ?? true) || !hasResumableContent || !hasCursorResumeTarget,
+    canCopyResumeCommand: hasResumableContent && hasCursorResumeTarget
   }
 }
 

@@ -1,23 +1,16 @@
 import { app, ipcMain } from 'electron'
-import { resolve } from 'node:path'
 import {
   configureAiVaultSessionSources,
-  getAiVaultWslHomeDirs,
   listAiVaultSessions as listCachedLocalAiVaultSessions,
   resetAiVaultSessionListCacheForTests,
   type AiVaultSessionSources
 } from '../ai-vault/cached-session-list'
-import { scanRemoteAiVaultSessions } from '../ai-vault/remote-session-scanner'
-import { listClaudeSubagentSessions } from '../ai-vault/session-scanner-claude-subagents'
-import { claudeProjectsRootDirs } from '../ai-vault/session-scanner-source-discovery'
-import { isPathInsideOrEqual } from '../../shared/cross-platform-path'
-import { aiVaultScanIssueResult, mergeAiVaultListResults } from '../ai-vault/session-list-results'
-import type {
-  AiVaultListArgs,
-  AiVaultListResult,
-  AiVaultSubagentListArgs,
-  AiVaultSubagentListResult
-} from '../../shared/ai-vault-types'
+import {
+  listCachedRemoteAiVaultSessions,
+  resetCachedRemoteAiVaultSessionsForTests
+} from '../ai-vault/cached-remote-session-list'
+import { aiVaultScanIssueResult } from '../ai-vault/session-list-results'
+import type { AiVaultListArgs, AiVaultListResult } from '../../shared/ai-vault-types'
 import { registerAiVaultResumeHandler, type AiVaultResumeHandlerOptions } from './ai-vault-resume'
 import {
   LOCAL_EXECUTION_HOST_ID,
@@ -32,6 +25,9 @@ import {
   SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE
 } from '../providers/ssh-filesystem-dispatch'
 import { getActiveSshAiVaultHostInfo, getActiveSshAiVaultHostInfos } from './ssh'
+import { resetAllAiVaultHostScansForTests, scanAllAiVaultHosts } from './ai-vault-all-host-scan'
+import { shouldBypassAiVaultMergedCache, shouldForceAiVaultHost } from './ai-vault-refresh-policy'
+import { listAiVaultSubagentSessions } from './ai-vault-subagent-list'
 
 const AI_VAULT_CACHE_TTL_MS = 15_000
 const AI_VAULT_ALL_HOST_RUNTIME_TIMEOUT_MS = 3_000
@@ -86,7 +82,11 @@ async function listAiVaultSessions(args?: AiVaultListArgs): Promise<AiVaultListR
   const now = Date.now()
   // Why: opening this panel repeatedly should not re-parse hundreds of JSONL
   // transcripts; explicit refreshes bypass the cache but not an active scan.
-  if (args?.force !== true && cachedList?.key === key && cachedList.expiresAt > now) {
+  if (
+    !shouldBypassAiVaultMergedCache(args) &&
+    cachedList?.key === key &&
+    cachedList.expiresAt > now
+  ) {
     return cachedList.result
   }
   if (inflightList && inflightKey === key) {
@@ -120,19 +120,19 @@ async function scanAiVaultSessionsByHostScope(
 ): Promise<AiVaultListResult> {
   if (executionHostScope === 'all') {
     const runtimeHosts = getActiveRuntimeAiVaultHostInfosResult()
-    const runtimeResults = runtimeHosts.issue ? [runtimeHosts.issue] : []
-    const scannedResults = await Promise.all([
-      scanLocalAiVaultSessions(args),
-      ...getActiveSshAiVaultHostInfos().map((hostInfo) =>
-        scanSshAiVaultSessions(hostInfo.targetId, args)
-      ),
-      ...runtimeHosts.hostInfos.map((hostInfo) =>
+    const runtimeIssues = runtimeHosts.issue ? [runtimeHosts.issue] : []
+    return scanAllAiVaultHosts({
+      sshHosts: getActiveSshAiVaultHostInfos(),
+      runtimeHosts: runtimeHosts.hostInfos,
+      runtimeIssues,
+      limit: args?.limit,
+      scanLocal: () => scanLocalAiVaultSessions(args),
+      scanSsh: (hostInfo, signal) => scanSshAiVaultSessions(hostInfo.targetId, args, signal),
+      scanRuntime: (hostInfo) =>
         scanRuntimeAiVaultSessions(hostInfo, args, {
           timeoutMs: AI_VAULT_ALL_HOST_RUNTIME_TIMEOUT_MS
         })
-      )
-    ])
-    return mergeAiVaultListResults([...scannedResults, ...runtimeResults], args?.limit)
+    })
   }
 
   const parsed = parseExecutionHostId(executionHostScope)
@@ -169,9 +169,10 @@ function getActiveRuntimeAiVaultHostInfosResult(): {
   } catch (error) {
     return {
       hostInfos: [],
-      issue: runtimeHostDiscoveryIssueResult(
-        error instanceof Error ? error.message : 'Runtime hosts are unavailable.'
-      )
+      issue: aiVaultScanIssueResult({
+        path: 'runtime environments',
+        message: error instanceof Error ? error.message : 'Runtime hosts are unavailable.'
+      })
     }
   }
 }
@@ -183,44 +184,29 @@ async function scanRuntimeAiVaultSessions(
 ): Promise<AiVaultListResult> {
   const scanner = handlerOptions.scanRuntimeAiVaultSessions
   if (!scanner) {
-    return runtimeScanIssueResult(
-      hostInfo,
-      'Agent Session History is not available for this execution host.'
-    )
+    return aiVaultScanIssueResult({
+      executionHostId: hostInfo.executionHostId,
+      path: hostInfo.environmentId,
+      message: 'Agent Session History is not available for this execution host.'
+    })
   }
   const scanArgs: AiVaultListArgs = { executionHostScope: hostInfo.executionHostId }
   if (args?.limit !== undefined) {
     scanArgs.limit = args.limit
   }
-  if (args?.force !== undefined) {
-    scanArgs.force = args.force
-  }
+  scanArgs.force = shouldForceAiVaultHost(args, hostInfo.executionHostId)
   if (args?.scopePaths !== undefined) {
     scanArgs.scopePaths = args.scopePaths
   }
   try {
     return await scanner(hostInfo.environmentId, scanArgs, options)
   } catch (error) {
-    return runtimeScanIssueResult(
-      hostInfo,
-      error instanceof Error ? error.message : 'Remote Orca server is unavailable.'
-    )
+    return aiVaultScanIssueResult({
+      executionHostId: hostInfo.executionHostId,
+      path: hostInfo.environmentId,
+      message: error instanceof Error ? error.message : 'Remote Orca server is unavailable.'
+    })
   }
-}
-
-function runtimeScanIssueResult(
-  hostInfo: RuntimeAiVaultHostInfo,
-  message: string
-): AiVaultListResult {
-  return aiVaultScanIssueResult({
-    executionHostId: hostInfo.executionHostId,
-    path: hostInfo.environmentId,
-    message
-  })
-}
-
-function runtimeHostDiscoveryIssueResult(message: string): AiVaultListResult {
-  return aiVaultScanIssueResult({ path: 'runtime environments', message })
 }
 
 async function scanLocalAiVaultSessions(args?: AiVaultListArgs): Promise<AiVaultListResult> {
@@ -229,14 +215,15 @@ async function scanLocalAiVaultSessions(args?: AiVaultListArgs): Promise<AiVault
   // share one cache instance and one source of managed-Codex homes.
   return listCachedLocalAiVaultSessions({
     limit: args?.limit,
-    force: args?.force,
+    force: shouldForceAiVaultHost(args, LOCAL_EXECUTION_HOST_ID),
     scopePaths: args?.scopePaths
   })
 }
 
 async function scanSshAiVaultSessions(
   targetId: string,
-  args?: AiVaultListArgs
+  args?: AiVaultListArgs,
+  signal?: AbortSignal
 ): Promise<AiVaultListResult> {
   const executionHostId = toSshExecutionHostId(targetId)
   const hostInfo = getActiveSshAiVaultHostInfo(targetId)
@@ -248,14 +235,27 @@ async function scanSshAiVaultSessions(
       message: SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE
     })
   }
-  return scanRemoteAiVaultSessions({
-    provider,
-    executionHostId: hostInfo.executionHostId,
-    remoteHome: hostInfo.remoteHome,
-    hostPlatform: hostInfo.hostPlatform,
-    limit: args?.limit,
-    scopePaths: args?.scopePaths
-  })
+  try {
+    return await listCachedRemoteAiVaultSessions({
+      provider,
+      executionHostId: hostInfo.executionHostId,
+      remoteHome: hostInfo.remoteHome,
+      hostPlatform: hostInfo.hostPlatform,
+      limit: args?.limit,
+      scopePaths: args?.scopePaths,
+      force: shouldForceAiVaultHost(args, hostInfo.executionHostId),
+      signal
+    })
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error
+    }
+    return sshScanIssueResult({
+      executionHostId,
+      targetId,
+      message: error instanceof Error ? error.message : SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE
+    })
+  }
 }
 
 function sshScanIssueResult(args: {
@@ -281,10 +281,8 @@ export function registerAiVaultHandlers(options: AiVaultHandlerOptions = {}): vo
     listAiVaultSessions(args)
   )
   registerAiVaultResumeHandler(options)
-  ipcMain.handle(
-    'aiVault:listSubagentSessions',
-    (_event, args?: AiVaultSubagentListArgs): Promise<AiVaultSubagentListResult> =>
-      listAiVaultSubagentSessions(args)
+  ipcMain.handle('aiVault:listSubagentSessions', (_event, args) =>
+    listAiVaultSubagentSessions(args)
   )
   // DOM focus/visibility events don't fire in the renderer on macOS app
   // activation, so refresh-on-refocus needs this main-process signal.
@@ -295,41 +293,8 @@ export function registerAiVaultHandlers(options: AiVaultHandlerOptions = {}): vo
   })
 }
 
-// Provider-gated: only Claude materializes Task subagent transcripts as
-// sibling files today; other agents resolve to an empty list.
-async function listAiVaultSubagentSessions(
-  args?: AiVaultSubagentListArgs
-): Promise<AiVaultSubagentListResult> {
-  // IPC payloads are untyped at runtime; malformed input resolves empty like
-  // every other rejected input instead of throwing.
-  if (
-    !args ||
-    args.agent !== 'claude' ||
-    typeof args.parentFilePath !== 'string' ||
-    !args.parentFilePath.trim()
-  ) {
-    return { sessions: [], issues: [] }
-  }
-  // Why: subagent transcripts are read from the local filesystem. The UI
-  // skips remote sessions (their transcripts live on the remote host); return
-  // empty defensively rather than reading local paths for a remote session.
-  const executionHostId = args.executionHostId ?? LOCAL_EXECUTION_HOST_ID
-  if (executionHostId !== LOCAL_EXECUTION_HOST_ID) {
-    return { sessions: [], issues: [] }
-  }
-  // Why: the path is renderer-supplied; only list files under a known Claude
-  // projects root so a crafted path can't readdir/preview arbitrary dirs.
-  // resolve() collapses `..` segments first — isPathInsideOrEqual compares
-  // textually and would otherwise pass `<root>/../../etc/x.jsonl`.
-  const parentFilePath = resolve(args.parentFilePath)
-  const roots = claudeProjectsRootDirs({ wslHomeDirs: await getAiVaultWslHomeDirs() })
-  if (!roots.some((root) => isPathInsideOrEqual(resolve(root), parentFilePath))) {
-    return { sessions: [], issues: [] }
-  }
-  return listClaudeSubagentSessions({ parentFilePath })
-}
-
 function resetAiVaultCacheForTests(): void {
+  resetAllAiVaultHostScansForTests()
   cachedList = null
   inflightList = null
   inflightKey = null
@@ -337,6 +302,7 @@ function resetAiVaultCacheForTests(): void {
   // The local leg delegates to the shared cache module; reset it too so tests
   // never see a scan cached by an earlier case.
   resetAiVaultSessionListCacheForTests()
+  resetCachedRemoteAiVaultSessionsForTests()
 }
 
 export const _internals = {

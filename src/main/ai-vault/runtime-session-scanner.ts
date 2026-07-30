@@ -13,6 +13,7 @@ import type {
   AiVaultPrepareSessionResumeArgs,
   AiVaultPrepareSessionResumeResult
 } from '../../shared/ai-vault-resume-preparation'
+import { buildAiVaultSessionId } from '../../shared/ai-vault-session-id'
 
 export type RuntimeAiVaultHostInfo = {
   environmentId: string
@@ -73,6 +74,8 @@ const aiVaultListResultSchema = z.object({
       updatedAt: z.string().nullable(),
       modifiedAt: z.string(),
       messageCount: z.number(),
+      hasConversation: z.boolean().optional(),
+      transcriptFilePath: z.string().nullable().optional(),
       totalTokens: z.number(),
       previewMessages: z.array(aiVaultSessionPreviewMessageSchema),
       // Optional keeps paired hosts on older builds compatible.
@@ -207,7 +210,13 @@ function retagRuntimeSession(
   return {
     ...session,
     executionHostId,
-    id: `${executionHostId}:${session.agent}:${session.sessionId}:${session.filePath}`
+    id: buildAiVaultSessionId({
+      executionHostId,
+      agent: session.agent,
+      sessionId: session.sessionId,
+      filePath: session.filePath,
+      previousId: session.id
+    })
   }
 }
 

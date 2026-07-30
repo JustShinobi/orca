@@ -140,15 +140,16 @@ afterEach(() => {
 })
 
 describe('useAiVaultSessionRefresh refocus behavior', () => {
-  it('bypasses the scan cache on mount so panel entry shows new sessions', async () => {
+  it('uses passive refresh intent on mount', async () => {
     await renderHook()
     await flushMicrotasks()
 
     expect(listSessionsMock).toHaveBeenCalledTimes(1)
     expect(listSessionsMock.mock.calls[0]?.[0]).toMatchObject({
       executionHostScope: 'local',
-      force: true
+      refreshReason: 'passive'
     })
+    expect(listSessionsMock.mock.calls[0]?.[0]).not.toMatchObject({ force: true })
   })
 
   it('passes the requested execution host scope to the scanner', async () => {
@@ -199,7 +200,7 @@ describe('useAiVaultSessionRefresh refocus behavior', () => {
     expect(latest?.scanResult?.scannedAt).toBe('2026-07-01T00:00:02.000Z')
   })
 
-  it('force re-scans on refocus once the throttle allows it', async () => {
+  it('uses passive cache-preserving refresh intent on refocus', async () => {
     await renderHook()
     await flushMicrotasks()
     expect(listSessionsMock).toHaveBeenCalledTimes(1)
@@ -208,23 +209,22 @@ describe('useAiVaultSessionRefresh refocus behavior', () => {
     await fireWindowFocused()
 
     expect(listSessionsMock).toHaveBeenCalledTimes(2)
-    expect(lastCallArgs()).toMatchObject({ force: true })
+    expect(lastCallArgs()).toMatchObject({ refreshReason: 'passive' })
+    expect(lastCallArgs()).not.toMatchObject({ force: true })
   })
 
-  it('defers a refocus inside the throttle window to a trailing forced scan', async () => {
+  it('lets the main-process cache dedupe repeated passive refocus scans', async () => {
     await renderHook()
     await flushMicrotasks()
     expect(listSessionsMock).toHaveBeenCalledTimes(1)
 
-    // Within the throttle window nothing runs yet — the event must not be
-    // dropped, so it lands as one trailing scan when the throttle frees up.
     await fireWindowFocused()
     await dispatch(document, 'visibilitychange')
-    expect(listSessionsMock).toHaveBeenCalledTimes(1)
+    expect(listSessionsMock).toHaveBeenCalledTimes(3)
 
     await advance(THROTTLE_MS + 1)
-    expect(listSessionsMock).toHaveBeenCalledTimes(2)
-    expect(lastCallArgs()).toMatchObject({ force: true })
+    expect(listSessionsMock).toHaveBeenCalledTimes(3)
+    expect(lastCallArgs()).toMatchObject({ refreshReason: 'passive' })
   })
 
   it('ignores focus/visibility events while the document is hidden', async () => {
@@ -241,19 +241,19 @@ describe('useAiVaultSessionRefresh refocus behavior', () => {
     expect(listSessionsMock).toHaveBeenCalledTimes(1)
   })
 
-  it('stops listening and cancels trailing scans after unmount', async () => {
+  it('stops listening after unmount', async () => {
     await renderHook()
     await flushMicrotasks()
     expect(listSessionsMock).toHaveBeenCalledTimes(1)
 
-    // Queue a trailing forced scan, then unmount before it fires.
     await fireWindowFocused()
+    expect(listSessionsMock).toHaveBeenCalledTimes(2)
     roots.splice(0).forEach((root) => act(() => root.unmount()))
     await advance(THROTTLE_MS + 1)
     await fireWindowFocused()
     await dispatch(document, 'visibilitychange')
 
-    expect(listSessionsMock).toHaveBeenCalledTimes(1)
+    expect(listSessionsMock).toHaveBeenCalledTimes(2)
   })
 
   it('does not raise the loading flag for refocus refreshes', async () => {
@@ -308,7 +308,7 @@ describe('useAiVaultSessionRefresh refocus behavior', () => {
     expect(lastCallArgs()).toMatchObject({ force: true })
   })
 
-  it('counts a manual force refresh against the rescan throttle', async () => {
+  it('keeps a later refocus passive after a manual force refresh', async () => {
     await renderHook()
     await flushMicrotasks()
 
@@ -318,14 +318,15 @@ describe('useAiVaultSessionRefresh refocus behavior', () => {
     })
     expect(listSessionsMock).toHaveBeenCalledTimes(2)
 
-    // The button just scanned; an immediate refocus defers to trailing.
     await fireWindowFocused()
-    expect(listSessionsMock).toHaveBeenCalledTimes(2)
+    expect(listSessionsMock).toHaveBeenCalledTimes(3)
+    expect(lastCallArgs()).toMatchObject({ refreshReason: 'passive' })
+    expect(lastCallArgs()).not.toMatchObject({ force: true })
   })
 })
 
 describe('useAiVaultSessionRefresh in-app agent session behavior', () => {
-  it('force re-scans when an agent session starts inside Orca', async () => {
+  it('refreshes only the exact host when an agent session starts inside Orca', async () => {
     await renderHook()
     await flushMicrotasks()
     expect(listSessionsMock).toHaveBeenCalledTimes(1)
@@ -334,20 +335,27 @@ describe('useAiVaultSessionRefresh in-app agent session behavior', () => {
     await setAgentStatuses({ 'pane-1': makeAgentEntry('sess-1') })
 
     expect(listSessionsMock).toHaveBeenCalledTimes(2)
-    expect(lastCallArgs()).toMatchObject({ force: true })
+    expect(lastCallArgs()).toMatchObject({
+      refreshReason: 'session-start',
+      refreshExecutionHostId: 'local'
+    })
+    expect(lastCallArgs()).not.toMatchObject({ force: true })
   })
 
-  it('defers an in-throttle session start to a trailing forced scan', async () => {
+  it('refreshes a new in-app session immediately without broad force', async () => {
     await renderHook()
     await flushMicrotasks()
     expect(listSessionsMock).toHaveBeenCalledTimes(1)
 
     await setAgentStatuses({ 'pane-1': makeAgentEntry('sess-1') })
-    expect(listSessionsMock).toHaveBeenCalledTimes(1)
+    expect(listSessionsMock).toHaveBeenCalledTimes(2)
 
     await advance(THROTTLE_MS + 1)
     expect(listSessionsMock).toHaveBeenCalledTimes(2)
-    expect(lastCallArgs()).toMatchObject({ force: true })
+    expect(lastCallArgs()).toMatchObject({
+      refreshReason: 'session-start',
+      refreshExecutionHostId: 'local'
+    })
   })
 
   it('ignores agent activity on already-known sessions', async () => {

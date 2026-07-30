@@ -202,6 +202,26 @@ describe('mobile AI Vault resume target guards', () => {
     })
   })
 
+  it('matches a configured WSL runtime when the workspace path is a Windows path', () => {
+    const target = resolveMobileAiVaultSessionResumeTarget({
+      session: session({
+        agent: 'cursor',
+        cwd: '/mnt/c/src/repo',
+        filePath: '\\\\wsl.localhost\\Ubuntu\\home\\ada\\.cursor\\chats\\bucket\\session\\meta.json'
+      }),
+      activeWorktreeId: 'wsl-wt',
+      worktrees: [
+        worktree({
+          worktreeId: 'wsl-wt',
+          path: 'C:\\src\\repo',
+          wslDistro: 'Ubuntu'
+        })
+      ],
+      repos
+    })
+    expect(target).toMatchObject({ status: 'ready', worktreeId: 'wsl-wt' })
+  })
+
   it('blocks runtime targets when no supported fallback is available', () => {
     const target = resolveMobileAiVaultSessionResumeTarget({
       session: session({ cwd: '/Users/ada/runtime/app' }),

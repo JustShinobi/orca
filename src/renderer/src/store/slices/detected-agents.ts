@@ -8,6 +8,8 @@ import {
 
 export type DetectedAgentsSlice = {
   detectedAgentIds: TuiAgent[] | null
+  detectedAgentCommands: Partial<Record<TuiAgent, string>>
+  detectedAgentCommandsByContext: Record<string, Partial<Record<TuiAgent, string>>>
   isDetectingAgents: boolean
   isRefreshingAgents: boolean
   /** Telemetry classification of the most recent refreshAgents() run. `null`
@@ -29,6 +31,7 @@ export type DetectedAgentsSlice = {
   // detectedAgentIds field is connection-unaware, so remote state lives in a
   // separate map keyed by SSH connectionId.
   remoteDetectedAgentIds: Record<string, TuiAgent[] | null>
+  remoteDetectedAgentCommands: Record<string, Partial<Record<TuiAgent, string>>>
   isDetectingRemoteAgents: Record<string, boolean>
   ensureRemoteDetectedAgents: (
     connectionId: string,
@@ -57,6 +60,8 @@ export const createDetectedAgentsSlice: StateCreator<AppState, [], [], DetectedA
   get
 ) => ({
   detectedAgentIds: null,
+  detectedAgentCommands: {},
+  detectedAgentCommandsByContext: {},
   isDetectingAgents: false,
   isRefreshingAgents: false,
   pathSource: null,
@@ -78,12 +83,28 @@ export const createDetectedAgentsSlice: StateCreator<AppState, [], [], DetectedA
       isDetectingAgents: true
     })
     const requestGeneration = localDetectionGeneration
-    const pending = window.api.preflight
-      .detectAgents(context)
-      .then((ids) => {
-        const typed = ids as TuiAgent[]
+    const detection = window.api.preflight.detectAgentInventory
+      ? window.api.preflight.detectAgentInventory(context)
+      : window.api.preflight.detectAgentCommands
+        ? window.api.preflight.detectAgentCommands(context)
+        : window.api.preflight
+            .detectAgents(context)
+            .then((agents): { agents: string[]; matchedCommands?: Record<string, string> } => ({
+              agents
+            }))
+    const pending = detection
+      .then((result) => {
+        const typed = result.agents as TuiAgent[]
         if (requestGeneration === localDetectionGeneration) {
-          set({ detectedAgentIds: typed, isDetectingAgents: false })
+          set({
+            detectedAgentIds: typed,
+            detectedAgentCommands: result.matchedCommands ?? {},
+            detectedAgentCommandsByContext: {
+              ...get().detectedAgentCommandsByContext,
+              [contextKey]: result.matchedCommands ?? {}
+            },
+            isDetectingAgents: false
+          })
           detectedContextKey = contextKey
         }
         return typed
@@ -95,6 +116,7 @@ export const createDetectedAgentsSlice: StateCreator<AppState, [], [], DetectedA
           detectPromise = null
           set({
             detectedAgentIds: contextChanged ? [] : get().detectedAgentIds,
+            detectedAgentCommands: contextChanged ? {} : get().detectedAgentCommands,
             isDetectingAgents: false
           })
         }
@@ -123,6 +145,11 @@ export const createDetectedAgentsSlice: StateCreator<AppState, [], [], DetectedA
         if (requestGeneration === localDetectionGeneration) {
           set({
             detectedAgentIds: typed,
+            detectedAgentCommands: result.matchedCommands ?? {},
+            detectedAgentCommandsByContext: {
+              ...get().detectedAgentCommandsByContext,
+              [contextKey]: result.matchedCommands ?? {}
+            },
             isRefreshingAgents: false,
             pathSource: result.pathSource,
             pathFailureReason: result.pathFailureReason
@@ -160,6 +187,8 @@ export const createDetectedAgentsSlice: StateCreator<AppState, [], [], DetectedA
     detectedContextKey = null
     set({
       detectedAgentIds: null,
+      detectedAgentCommands: {},
+      detectedAgentCommandsByContext: {},
       isDetectingAgents: false,
       isRefreshingAgents: false,
       pathSource: null,
@@ -168,6 +197,7 @@ export const createDetectedAgentsSlice: StateCreator<AppState, [], [], DetectedA
   },
 
   remoteDetectedAgentIds: {},
+  remoteDetectedAgentCommands: {},
   isDetectingRemoteAgents: {},
 
   ensureRemoteDetectedAgents: (connectionId: string, options?: { force?: boolean }) => {
@@ -187,13 +217,25 @@ export const createDetectedAgentsSlice: StateCreator<AppState, [], [], DetectedA
       isDetectingRemoteAgents: { ...s.isDetectingRemoteAgents, [connectionId]: true }
     }))
 
-    const pending = window.api.preflight
-      .detectRemoteAgents({ connectionId })
-      .then((ids) => {
-        const typed = ids as TuiAgent[]
+    const detection = window.api.preflight.detectRemoteAgentInventory
+      ? window.api.preflight.detectRemoteAgentInventory({ connectionId })
+      : window.api.preflight.detectRemoteAgentCommands
+        ? window.api.preflight.detectRemoteAgentCommands({ connectionId })
+        : window.api.preflight
+            .detectRemoteAgents({ connectionId })
+            .then((agents): { agents: string[]; matchedCommands?: Record<string, string> } => ({
+              agents
+            }))
+    const pending = detection
+      .then((result) => {
+        const typed = result.agents as TuiAgent[]
         if (remoteDetectPromises.get(connectionId) === pending) {
           set((s) => ({
             remoteDetectedAgentIds: { ...s.remoteDetectedAgentIds, [connectionId]: typed },
+            remoteDetectedAgentCommands: {
+              ...s.remoteDetectedAgentCommands,
+              [connectionId]: result.matchedCommands ?? {}
+            },
             isDetectingRemoteAgents: { ...s.isDetectingRemoteAgents, [connectionId]: false }
           }))
         }
@@ -252,7 +294,12 @@ export const createDetectedAgentsSlice: StateCreator<AppState, [], [], DetectedA
     set((s) => {
       const { [connectionId]: _, ...restAgents } = s.remoteDetectedAgentIds
       const { [connectionId]: __, ...restLoading } = s.isDetectingRemoteAgents
-      return { remoteDetectedAgentIds: restAgents, isDetectingRemoteAgents: restLoading }
+      const { [connectionId]: ___, ...restCommands } = s.remoteDetectedAgentCommands
+      return {
+        remoteDetectedAgentIds: restAgents,
+        remoteDetectedAgentCommands: restCommands,
+        isDetectingRemoteAgents: restLoading
+      }
     })
   }
 })

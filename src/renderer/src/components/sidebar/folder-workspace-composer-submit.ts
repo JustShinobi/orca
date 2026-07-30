@@ -22,6 +22,9 @@ import type { AgentStartupShell } from '../../../../shared/tui-agent-startup-she
 import type { LaunchSource } from '../../../../shared/telemetry-events'
 import type { SessionOptionValue } from '../../../../shared/native-chat-session-options'
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
+import { normalizeExecutionHostId, toSshExecutionHostId } from '../../../../shared/execution-host'
+import { useAppStore } from '@/store'
+import { resolveCursorCommandOverrides } from '@/lib/ai-vault-cursor-command'
 import {
   getLinkedItemDisplayName,
   toFolderWorkspaceLinkedTask
@@ -187,13 +190,24 @@ export async function submitFolderWorkspaceCreate({
     isRemote: launchIsRemote,
     terminalWindowsShell
   })
+  const effectiveCmdOverrides = quickAgent
+    ? resolveCursorCommandOverrides({
+        state: useAppStore.getState(),
+        agent: quickAgent,
+        cmdOverrides: agentCmdOverrides ?? {},
+        executionHostId: projectGroup.connectionId
+          ? toSshExecutionHostId(projectGroup.connectionId)
+          : normalizeExecutionHostId(projectGroup.executionHostId),
+        workspacePath: projectGroup.parentPath
+      })
+    : agentCmdOverrides
   const startupPlan =
     quickAgent && linkedWorkItem
       ? buildFolderWorkspaceLinkedStartupPlan({
           agent: quickAgent,
           linkedWorkItem,
           note,
-          agentCmdOverrides,
+          agentCmdOverrides: effectiveCmdOverrides,
           agentArgs,
           agentEnv,
           sessionOptions,
@@ -205,7 +219,7 @@ export async function submitFolderWorkspaceCreate({
         ? buildAgentStartupPlan({
             agent: quickAgent,
             prompt: note,
-            cmdOverrides: agentCmdOverrides ?? {},
+            cmdOverrides: effectiveCmdOverrides ?? {},
             agentArgs,
             agentEnv,
             sessionOptions,

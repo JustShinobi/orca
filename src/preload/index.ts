@@ -197,6 +197,7 @@ import type {
 import type { TelemetryConsentState } from '../shared/telemetry-consent-types'
 import type {
   PreflightRuntimeContext,
+  DetectedAgentCommandsResult,
   RefreshAgentsResult,
   NativeChatAppendedPayload,
   NativeChatReadSessionResult,
@@ -210,6 +211,7 @@ import type {
 import type { AgentKind, LaunchSource, RequestKind } from '../shared/telemetry-events'
 import type { AppStarSource } from '../shared/gh-star-source'
 import type { ExecutionHostId } from '../shared/execution-host'
+import type { DetectedAgentInventoryV1 } from '../shared/detected-agent-inventory'
 import type {
   Automation,
   AutomationCreateInput,
@@ -2119,10 +2121,22 @@ const api = {
     }> => ipcRenderer.invoke('preflight:check', args),
     detectAgents: (args?: PreflightRuntimeContext): Promise<string[]> =>
       ipcRenderer.invoke('preflight:detectAgents', args),
+    detectAgentInventory: (args?: PreflightRuntimeContext): Promise<DetectedAgentInventoryV1> =>
+      ipcRenderer.invoke('preflight:detectAgentInventory', args),
+    detectAgentCommands: (args?: PreflightRuntimeContext): Promise<DetectedAgentCommandsResult> =>
+      ipcRenderer.invoke('preflight:detectAgentCommands', args),
     refreshAgents: (args?: PreflightRuntimeContext): Promise<RefreshAgentsResult> =>
       ipcRenderer.invoke('preflight:refreshAgents', args),
     detectRemoteAgents: (args: { connectionId: string }): Promise<string[]> =>
       ipcRenderer.invoke('preflight:detectRemoteAgents', args),
+    detectRemoteAgentInventory: (args: {
+      connectionId: string
+    }): Promise<DetectedAgentInventoryV1> =>
+      ipcRenderer.invoke('preflight:detectRemoteAgentInventory', args),
+    detectRemoteAgentCommands: (args: {
+      connectionId: string
+    }): Promise<DetectedAgentCommandsResult> =>
+      ipcRenderer.invoke('preflight:detectRemoteAgentCommands', args),
     detectRemoteWindowsTerminalCapabilities: (args: {
       connectionId: string
     }): Promise<{

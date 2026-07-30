@@ -5,13 +5,17 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import { PREFLIGHT_METHODS } from './preflight'
 
 const {
+  detectInstalledAgentInventoryWithShellPathHydrationMock,
   detectInstalledAgentsWithShellPathHydrationMock,
+  detectRemoteAgentInventoryMock,
   detectRemoteAgentsMock,
   detectRemoteWindowsTerminalCapabilitiesMock,
   refreshShellPathAndDetectAgentsMock,
   runPreflightCheckMock
 } = vi.hoisted(() => ({
+  detectInstalledAgentInventoryWithShellPathHydrationMock: vi.fn(),
   detectInstalledAgentsWithShellPathHydrationMock: vi.fn(),
+  detectRemoteAgentInventoryMock: vi.fn(),
   detectRemoteAgentsMock: vi.fn(),
   detectRemoteWindowsTerminalCapabilitiesMock: vi.fn(),
   refreshShellPathAndDetectAgentsMock: vi.fn(),
@@ -19,7 +23,10 @@ const {
 }))
 
 vi.mock('../../../ipc/preflight', () => ({
+  detectInstalledAgentInventoryWithShellPathHydration:
+    detectInstalledAgentInventoryWithShellPathHydrationMock,
   detectInstalledAgentsWithShellPathHydration: detectInstalledAgentsWithShellPathHydrationMock,
+  detectRemoteAgentInventory: detectRemoteAgentInventoryMock,
   detectRemoteAgents: detectRemoteAgentsMock,
   detectRemoteWindowsTerminalCapabilities: detectRemoteWindowsTerminalCapabilitiesMock,
   refreshShellPathAndDetectAgents: refreshShellPathAndDetectAgentsMock,
@@ -70,6 +77,51 @@ describe('preflight RPC methods', () => {
       ok: true,
       result: { agents: ['codex', 'claude'], shellHydrationOk: true }
     })
+  })
+
+  it('preserves matched commands through the versioned runtime inventory methods', async () => {
+    const localInventory = {
+      version: 1,
+      agents: ['cursor'],
+      matchedCommands: { cursor: 'cursor agent' }
+    }
+    const remoteInventory = {
+      version: 1,
+      agents: ['cursor'],
+      matchedCommands: { cursor: 'cursor-agent' }
+    }
+    detectInstalledAgentInventoryWithShellPathHydrationMock.mockResolvedValueOnce(localInventory)
+    detectRemoteAgentInventoryMock.mockResolvedValueOnce(remoteInventory)
+    const runtime = { getRuntimeId: () => 'test-runtime' } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: PREFLIGHT_METHODS })
+
+    await expect(
+      dispatcher.dispatch(makeRequest('preflight.detectAgentInventory', { wslDistro: 'Ubuntu' }))
+    ).resolves.toMatchObject({ ok: true, result: localInventory })
+    await expect(
+      dispatcher.dispatch(
+        makeRequest('preflight.detectRemoteAgentInventory', { connectionId: 'ssh-1' })
+      )
+    ).resolves.toMatchObject({ ok: true, result: remoteInventory })
+    expect(detectInstalledAgentInventoryWithShellPathHydrationMock).toHaveBeenCalledWith({
+      wslDistro: 'Ubuntu'
+    })
+    expect(detectRemoteAgentInventoryMock).toHaveBeenCalledWith({ connectionId: 'ssh-1' })
+  })
+
+  it('keeps no-params inventory requests backward compatible', async () => {
+    detectInstalledAgentInventoryWithShellPathHydrationMock.mockResolvedValueOnce({
+      version: 1,
+      agents: [],
+      matchedCommands: {}
+    })
+    const runtime = { getRuntimeId: () => 'test-runtime' } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: PREFLIGHT_METHODS })
+
+    await expect(
+      dispatcher.dispatch(makeRequest('preflight.detectAgentInventory'))
+    ).resolves.toMatchObject({ ok: true })
+    expect(detectInstalledAgentInventoryWithShellPathHydrationMock).toHaveBeenCalledWith({})
   })
 
   it('detects agents on remote SSH connections through runtime RPC', async () => {

@@ -21,6 +21,10 @@ import type { GitHistoryOptions, GitHistoryResult } from '../../shared/git-histo
 import type { PtyStartupIngressIntent } from '../../shared/pty-startup-ingress'
 import type { CommitMessageDraftContext } from '../../shared/commit-message-generation'
 import type { WorkspaceSpaceDirectoryScanResult } from '../../shared/workspace-space-types'
+import type {
+  CursorSidecarScanRequest,
+  CursorSidecarScanResponse
+} from '../../shared/cursor-sidecar-scan'
 import type { StartupCommandDelivery } from '../../shared/codex-startup-delivery'
 import type { TerminalOscLinkRange } from '../../shared/terminal-osc-link-ranges'
 import type { GitProviderStatusOptions } from './git-provider-status-options'
@@ -230,6 +234,10 @@ export type FileReadResult = {
 export type IFilesystemProvider = {
   readDir(dirPath: string): Promise<DirEntry[]>
   readFile(filePath: string): Promise<FileReadResult>
+  scanCursorSidecars?(
+    request: CursorSidecarScanRequest,
+    options?: { signal?: AbortSignal }
+  ): Promise<CursorSidecarScanResponse>
   readTerminalArtifact?(
     filePath: string,
     options: TerminalArtifactAccessOptions

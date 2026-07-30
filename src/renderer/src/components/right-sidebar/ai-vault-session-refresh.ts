@@ -1,31 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AiVaultListResult, AiVaultSession } from '../../../../shared/ai-vault-types'
-import type { ExecutionHostScope } from '../../../../shared/execution-host'
+import {
+  LOCAL_EXECUTION_HOST_ID,
+  toSshExecutionHostId,
+  type ExecutionHostId,
+  type ExecutionHostScope
+} from '../../../../shared/execution-host'
 import { useAppStore } from '@/store'
+import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
 
 const SESSION_LIMIT = 500
 
-// Panel entry and window refocus must show sessions started since the last
-// scan, so they bypass the main process's 15s cache — but a full scan parses
-// up to ~1000 transcripts, so bound forced scans to one per interval. Module
-// scope so the throttle survives panel remounts (the panel unmounts per tab).
-const FORCED_RESCAN_MIN_INTERVAL_MS = 5_000
-let lastForcedRescanAt = 0
-
-function consumeForcedRescanBudget(): boolean {
-  const now = Date.now()
-  if (now - lastForcedRescanAt < FORCED_RESCAN_MIN_INTERVAL_MS) {
-    return false
-  }
-  lastForcedRescanAt = now
-  return true
-}
-
 export function resetAiVaultForcedRescanThrottleForTest(): void {
-  lastForcedRescanAt = 0
+  // Retained for test compatibility after passive refreshes stopped forcing.
 }
 
-type AiVaultRefreshArgs = { force?: boolean; background?: boolean }
+type AiVaultRefreshArgs = {
+  force?: boolean
+  background?: boolean
+  reason?: 'manual' | 'passive' | 'session-start'
+  refreshExecutionHostId?: ExecutionHostId
+}
 
 export function useAiVaultSessionRefresh(
   scopePaths: readonly string[],
@@ -46,6 +41,7 @@ export function useAiVaultSessionRefresh(
   const pendingRefreshRef = useRef(false)
   const pendingForceRef = useRef(false)
   const pendingBackgroundRef = useRef(true)
+  const pendingRefreshHostIdsRef = useRef(new Set<ExecutionHostId>())
   const lastAppliedScanRef = useRef<{ scopeKey: string; scannedAt: string } | null>(null)
   const mountedRef = useRef(true)
   const scopePathsKey = useMemo(() => scopePaths.join('\n'), [scopePaths])
@@ -65,19 +61,17 @@ export function useAiVaultSessionRefresh(
       // scan so the current scoped view is refreshed after the older scan settles.
       if (refreshInFlightRef.current) {
         pendingRefreshRef.current = true
-        pendingForceRef.current ||= args.force === true
+        pendingForceRef.current ||= args.force === true || args.reason === 'manual'
         pendingBackgroundRef.current &&= args.background === true
+        if (args.reason === 'session-start' && args.refreshExecutionHostId) {
+          pendingRefreshHostIdsRef.current.add(args.refreshExecutionHostId)
+        }
         return
       }
 
       refreshInFlightRef.current = true
       const refreshId = refreshIdRef.current + 1
       refreshIdRef.current = refreshId
-      // A manual force scan counts against the throttle so an auto rescan right
-      // after the button press doesn't trigger a second full scan.
-      if (args.force === true) {
-        lastForcedRescanAt = Date.now()
-      }
       // Background (refocus) refreshes usually resolve from the main-process
       // cache; suppressing the loading flag avoids a spinner flash on every
       // return to the app.
@@ -93,7 +87,9 @@ export function useAiVaultSessionRefresh(
           limit: SESSION_LIMIT,
           scopePaths: scopePathsRef.current,
           executionHostScope: hostScope,
-          force: args.force
+          force: args.force,
+          refreshReason: args.reason ?? (args.force ? 'manual' : 'passive'),
+          refreshExecutionHostId: args.refreshExecutionHostId
         })
         if (!mountedRef.current || refreshIdRef.current !== refreshId) {
           return
@@ -134,7 +130,21 @@ export function useAiVaultSessionRefresh(
           const background = pendingBackgroundRef.current
           pendingForceRef.current = false
           pendingBackgroundRef.current = true
-          void refresh({ force, background })
+          if (force) {
+            pendingRefreshHostIdsRef.current.clear()
+          }
+          const hostIterator = pendingRefreshHostIdsRef.current.values().next()
+          const refreshExecutionHostId = hostIterator.done ? undefined : hostIterator.value
+          if (refreshExecutionHostId) {
+            pendingRefreshHostIdsRef.current.delete(refreshExecutionHostId)
+          }
+          pendingRefreshRef.current = pendingRefreshHostIdsRef.current.size > 0
+          void refresh({
+            force,
+            background,
+            reason: force ? 'manual' : refreshExecutionHostId ? 'session-start' : 'passive',
+            refreshExecutionHostId
+          })
         }
       }
       // Deps intentionally avoid changing scope values: refresh reads them
@@ -143,52 +153,19 @@ export function useAiVaultSessionRefresh(
     [currentScanScopeKey]
   )
 
-  // Forced rescans triggered by events (refocus, agent-session starts) run
-  // immediately when the throttle allows, otherwise once as soon as it frees
-  // up — dropping the event would leave a just-started session invisible
-  // until some unrelated later trigger.
-  const forcedRescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const requestForcedRescan = useCallback(() => {
-    const waitMs = lastForcedRescanAt + FORCED_RESCAN_MIN_INTERVAL_MS - Date.now()
-    if (waitMs <= 0) {
-      lastForcedRescanAt = Date.now()
-      void refresh({ background: true, force: true })
-      return
-    }
-    if (forcedRescanTimerRef.current !== null) {
-      return
-    }
-    forcedRescanTimerRef.current = setTimeout(() => {
-      forcedRescanTimerRef.current = null
-      lastForcedRescanAt = Date.now()
-      void refresh({ background: true, force: true })
-    }, waitMs)
-  }, [refresh])
-
   useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
       refreshIdRef.current += 1
       refreshInFlightRef.current = false
-      if (forcedRescanTimerRef.current !== null) {
-        clearTimeout(forcedRescanTimerRef.current)
-        forcedRescanTimerRef.current = null
-      }
     }
   }, [])
 
-  // Re-scan on mount and whenever the active scope changes, since the scanner
-  // tailors its in-scope results to scopePaths. Force (throttled) so
-  // re-entering the panel shows sessions newer than the 15s cache; when the
-  // throttle denies it, paint from cache now and catch up once it frees.
+  // Re-scan on mount and scope changes while retaining the remote TTL.
   useEffect(() => {
-    const force = consumeForcedRescanBudget()
-    void refresh({ force })
-    if (!force) {
-      requestForcedRescan()
-    }
-  }, [refresh, requestForcedRescan, scanScopeKey])
+    void refresh({ reason: 'passive' })
+  }, [refresh, scanScopeKey])
 
   // Sessions started while the app was backgrounded should appear when the
   // user returns, so refocus also bypasses the scan cache (throttled). OS
@@ -199,7 +176,7 @@ export function useAiVaultSessionRefresh(
       if (document.visibilityState !== 'visible') {
         return
       }
-      requestForcedRescan()
+      void refresh({ background: true, reason: 'passive' })
     }
     const unsubscribeWindowFocus = window.api.aiVault.onWindowFocused?.(onRefocus)
     document.addEventListener('visibilitychange', onRefocus)
@@ -207,39 +184,57 @@ export function useAiVaultSessionRefresh(
       unsubscribeWindowFocus?.()
       document.removeEventListener('visibilitychange', onRefocus)
     }
-  }, [requestForcedRescan])
+  }, [refresh])
 
   // Sessions started inside Orca never blur the window, so refocus alone
   // can't surface them. Agent hooks already report provider sessions; re-scan
   // only when a session id we haven't seen appears — state transitions are
   // deliberately ignored, they fire constantly while agents work.
-  const agentSessionIdsKey = useAppStore((s) => {
-    const ids: string[] = []
-    for (const entry of Object.values(s.agentStatusByPaneKey)) {
+  const agentSessionIdsKey = useAppStore((state) => {
+    const ids: [ExecutionHostId, string][] = []
+    for (const entry of Object.values(state.agentStatusByPaneKey)) {
       if (entry.providerSession?.id) {
-        ids.push(entry.providerSession.id)
+        const hostId = entry.connectionId
+          ? toSshExecutionHostId(entry.connectionId)
+          : entry.worktreeId
+            ? getExecutionHostIdForWorktree(state, entry.worktreeId)
+            : LOCAL_EXECUTION_HOST_ID
+        ids.push([hostId, entry.providerSession.id])
       }
     }
-    return ids.sort().join('\n')
+    return JSON.stringify(
+      ids.sort((left, right) => left.join('\0').localeCompare(right.join('\0')))
+    )
   })
   const seenAgentSessionIdsRef = useRef<Set<string> | null>(null)
   useEffect(() => {
-    const ids = agentSessionIdsKey === '' ? [] : agentSessionIdsKey.split('\n')
+    const entries = JSON.parse(agentSessionIdsKey) as [ExecutionHostId, string][]
+    const ids = entries.map(([hostId, sessionId]) => `${hostId}\0${sessionId}`)
     // The mount refresh already covers sessions live at mount time.
     if (seenAgentSessionIdsRef.current === null) {
       seenAgentSessionIdsRef.current = new Set(ids)
       return
     }
     const seen = seenAgentSessionIdsRef.current
-    const freshIds = ids.filter((id) => !seen.has(id))
-    if (freshIds.length === 0) {
+    const freshEntries = entries.filter(
+      ([hostId, sessionId]) => !seen.has(`${hostId}\0${sessionId}`)
+    )
+    if (freshEntries.length === 0) {
       return
     }
-    for (const id of freshIds) {
-      seen.add(id)
+    for (const [hostId, sessionId] of freshEntries) {
+      seen.add(`${hostId}\0${sessionId}`)
+      const selectedHost = executionHostScopeRef.current
+      if (selectedHost !== 'all' && selectedHost !== hostId) {
+        continue
+      }
+      void refresh({
+        background: true,
+        reason: 'session-start',
+        refreshExecutionHostId: hostId
+      })
     }
-    requestForcedRescan()
-  }, [agentSessionIdsKey, requestForcedRescan])
+  }, [agentSessionIdsKey, refresh])
 
   return { error, loading, refresh, scanResult, sessions }
 }

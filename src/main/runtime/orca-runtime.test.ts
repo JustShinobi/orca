@@ -27833,7 +27833,8 @@ describe('OrcaRuntimeService', () => {
 
       expect(worktrees.find((worktree) => worktree.worktreeId === TEST_WORKTREE_ID)).toMatchObject({
         repoId: TEST_REPO_ID,
-        terminalPlatform: 'linux'
+        terminalPlatform: 'linux',
+        wslDistro: 'Ubuntu'
       })
       expect(getProjects).toHaveBeenCalledTimes(1)
       expect(getSettings).toHaveBeenCalledTimes(2)
@@ -27895,8 +27896,12 @@ describe('OrcaRuntimeService', () => {
       const staleResult = await stalePoll
 
       // Why: invalidation can let a newer scan finish first; each result keeps the platform map from its own generation.
-      expect(staleResult.worktrees[0]).toMatchObject({ terminalPlatform: 'linux' })
+      expect(staleResult.worktrees[0]).toMatchObject({
+        terminalPlatform: 'linux',
+        wslDistro: 'Ubuntu'
+      })
       expect(freshPoll.worktrees[0]).toMatchObject({ terminalPlatform: 'win32' })
+      expect(freshPoll.worktrees[0]?.wslDistro).toBeUndefined()
     })
   })
 

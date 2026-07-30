@@ -378,6 +378,7 @@ import {
 } from '../../shared/tui-agent-config'
 import { createDraftPasteReadyScanner } from '../../shared/draft-paste-ready-scanner'
 import { detectInstalledAgentsWithShellPathHydration, detectRemoteAgents } from '../ipc/preflight'
+import { resolveRuntimeAgentCommandOverrides } from './runtime-cursor-command'
 import {
   markCodexProjectTrusted,
   markCopilotFolderTrusted,
@@ -2367,6 +2368,7 @@ class WorktreeIdRequiresFullPathError extends Error {
 type ResolvedWorktreeSnapshot = {
   worktrees: ResolvedWorktree[]
   platformByRepoId: ReadonlyMap<string, NodeJS.Platform>
+  wslDistroByRepoId: ReadonlyMap<string, string>
 }
 
 type ResolvedWorktreeCache = ResolvedWorktreeSnapshot & {
@@ -14827,6 +14829,7 @@ export class OrcaRuntimeService {
     const freshPtyLiveness = await this.refreshPtyWorktreeRecordsFromController(resolvedWorktrees)
     const repoById = new Map((this.store?.getRepos() ?? []).map((repo) => [repo.id, repo]))
     const platformByRepoId = resolvedWorktreeSnapshot.platformByRepoId
+    const wslDistroByRepoId = resolvedWorktreeSnapshot.wslDistroByRepoId
     const summaries = new Map<string, RuntimeWorktreePsSummary>()
 
     // Why: the GitHub cache is keyed by `repoPath::branch` (no refs/heads/ prefix),
@@ -14856,6 +14859,7 @@ export class OrcaRuntimeService {
         linkedPR = { number: meta.linkedPR, state: 'unknown' }
       }
       const terminalPlatform = platformByRepoId.get(worktree.repoId) ?? process.platform
+      const wslDistro = wslDistroByRepoId.get(worktree.repoId)
       // Why: use the instance-validated lineage from attachLineageToResolvedWorktrees,
       // not the raw store entry — shipped mobile clients trust parentWorktreeId as-is,
       // so a stale same-path entry would nest replacement checkouts under old parents.
@@ -14868,6 +14872,7 @@ export class OrcaRuntimeService {
         repoId: worktree.repoId,
         ...((worktree.hostId ?? meta?.hostId) ? { hostId: worktree.hostId ?? meta?.hostId } : {}),
         terminalPlatform,
+        ...(wslDistro ? { wslDistro } : {}),
         repo: repo?.displayName ?? worktree.repoId,
         path: worktree.path,
         branch: worktree.branch,
@@ -14916,12 +14921,14 @@ export class OrcaRuntimeService {
         continue
       }
       const worktree = folderWorkspaceToWorktree(folderWorkspace)
+      const wslDistro = parseWslUncPath(worktree.path)?.distro
       summaries.set(worktree.id, {
         // Why: folder workspaces use the same mobile grouping/order contract as
         // git worktrees, but legacy records may be missing order metadata.
         workspaceKind: 'folder-workspace',
         worktreeId: worktree.id,
         repoId: worktree.repoId,
+        ...(wslDistro ? { wslDistro } : {}),
         repo: projectGroup.name,
         path: worktree.path,
         branch: worktree.branch,
@@ -16484,6 +16491,27 @@ export class OrcaRuntimeService {
       ? undefined
       : resolveLocalProjectRuntimeForRepo(this.requireStore(), repo)
     return getAgentLaunchPlatformForRepo(repo, projectRuntime)
+  }
+
+  private getAgentLaunchWslDistroForRepo(repo: Repo): string | null {
+    if (repo.connectionId) {
+      return null
+    }
+    const projectRuntime = resolveLocalProjectRuntimeForRepo(this.requireStore(), repo)
+    const runtime =
+      projectRuntime?.status === 'resolved'
+        ? projectRuntime.runtime
+        : projectRuntime?.repair.preferredRuntime
+    return runtime?.kind === 'wsl' ? runtime.distro : (parseWslUncPath(repo.path)?.distro ?? null)
+  }
+
+  private getAgentLaunchWslDistroForWorkspace(scope: TerminalWorkspaceLaunchScope): string | null {
+    if (scope.connectionId) {
+      return null
+    }
+    return scope.repo
+      ? this.getAgentLaunchWslDistroForRepo(scope.repo)
+      : (parseWslUncPath(scope.path)?.distro ?? null)
   }
 
   private getAgentLaunchPlatformForWorkspace(scope: TerminalWorkspaceLaunchScope): NodeJS.Platform {
@@ -18221,10 +18249,17 @@ export class OrcaRuntimeService {
       isRemote,
       terminalWindowsShell: settings.terminalWindowsShell
     })
+    const cmdOverrides = await resolveRuntimeAgentCommandOverrides({
+      agent,
+      cmdOverrides: settings.agentCmdOverrides ?? {},
+      connectionId: repo.connectionId,
+      wslDistro: this.getAgentLaunchWslDistroForRepo(repo),
+      workspacePath: repo.path
+    })
     const draftLaunchPlan = buildAgentDraftLaunchPlan({
       agent,
       draft: content,
-      cmdOverrides: settings.agentCmdOverrides ?? {},
+      cmdOverrides,
       agentArgs: resolveTuiAgentLaunchArgs(agent, settings.agentDefaultArgs),
       agentEnv: resolveTuiAgentLaunchEnv(agent, settings.agentDefaultEnv),
       platform: agentLaunchPlatform,
@@ -18248,7 +18283,7 @@ export class OrcaRuntimeService {
     const startupPlan = buildAgentStartupPlan({
       agent,
       prompt: '',
-      cmdOverrides: settings.agentCmdOverrides ?? {},
+      cmdOverrides,
       agentArgs: resolveTuiAgentLaunchArgs(agent, settings.agentDefaultArgs),
       agentEnv: resolveTuiAgentLaunchEnv(agent, settings.agentDefaultEnv),
       platform: agentLaunchPlatform,
@@ -18273,11 +18308,15 @@ export class OrcaRuntimeService {
     }
   }
 
-  private buildStartupForAgent(
+  private async buildStartupForAgent(
     repo: Repo,
     agent: TuiAgent,
     prompt: string | undefined
-  ): { agent: TuiAgent; startup: WorktreeStartupLaunch; followup?: WorktreeStartupFollowup } {
+  ): Promise<{
+    agent: TuiAgent
+    startup: WorktreeStartupLaunch
+    followup?: WorktreeStartupFollowup
+  }> {
     if (!this.store) {
       throw new Error('runtime_unavailable')
     }
@@ -18294,10 +18333,17 @@ export class OrcaRuntimeService {
       isRemote,
       terminalWindowsShell: settings.terminalWindowsShell
     })
+    const cmdOverrides = await resolveRuntimeAgentCommandOverrides({
+      agent,
+      cmdOverrides: settings.agentCmdOverrides ?? {},
+      connectionId: repo.connectionId,
+      wslDistro: this.getAgentLaunchWslDistroForRepo(repo),
+      workspacePath: repo.path
+    })
     const startupPlan = buildAgentStartupPlan({
       agent,
       prompt: prompt ?? '',
-      cmdOverrides: settings.agentCmdOverrides ?? {},
+      cmdOverrides,
       agentArgs: resolveTuiAgentLaunchArgs(agent, settings.agentDefaultArgs),
       agentEnv: resolveTuiAgentLaunchEnv(agent, settings.agentDefaultEnv),
       platform: agentLaunchPlatform,
@@ -18754,7 +18800,7 @@ export class OrcaRuntimeService {
     }
     const agentStartup =
       !args.startup && args.startupAgent
-        ? this.buildStartupForAgent(repo, args.startupAgent, args.startupPrompt)
+        ? await this.buildStartupForAgent(repo, args.startupAgent, args.startupPrompt)
         : null
     const draftStartup =
       !args.startup && !agentStartup && args.startupDraft
@@ -21788,7 +21834,13 @@ export class OrcaRuntimeService {
     const startupPlan = buildAgentStartupPlan({
       agent,
       prompt: '',
-      cmdOverrides: settings.agentCmdOverrides ?? {},
+      cmdOverrides: await resolveRuntimeAgentCommandOverrides({
+        agent,
+        cmdOverrides: settings.agentCmdOverrides ?? {},
+        connectionId: workspace.connectionId,
+        wslDistro: this.getAgentLaunchWslDistroForWorkspace(workspace),
+        workspacePath: workspace.path
+      }),
       agentArgs: resolveTuiAgentLaunchArgs(agent, settings.agentDefaultArgs),
       agentEnv: resolveTuiAgentLaunchEnv(agent, settings.agentDefaultEnv),
       platform,
@@ -21923,7 +21975,13 @@ export class OrcaRuntimeService {
     const startup = buildAgentResumeStartupPlan({
       agent: request.agent,
       providerSession: identity.providerSession,
-      cmdOverrides: settings.agentCmdOverrides ?? {},
+      cmdOverrides: await resolveRuntimeAgentCommandOverrides({
+        agent: request.agent,
+        cmdOverrides: settings.agentCmdOverrides ?? {},
+        connectionId: workspace.connectionId,
+        wslDistro: this.getAgentLaunchWslDistroForWorkspace(workspace),
+        workspacePath: workspace.path
+      }),
       agentArgs:
         request.agentArgs !== undefined
           ? request.agentArgs
@@ -22086,7 +22144,13 @@ export class OrcaRuntimeService {
       })
       const startupArgs = {
         agent: request.agent,
-        cmdOverrides: settings.agentCmdOverrides ?? {},
+        cmdOverrides: await resolveRuntimeAgentCommandOverrides({
+          agent: request.agent,
+          cmdOverrides: settings.agentCmdOverrides ?? {},
+          connectionId: workspace.connectionId,
+          wslDistro: this.getAgentLaunchWslDistroForWorkspace(workspace),
+          workspacePath: workspace.path
+        }),
         agentArgs:
           request.agentArgs !== undefined
             ? request.agentArgs
@@ -22677,7 +22741,7 @@ export class OrcaRuntimeService {
     if (!repo) {
       throw new Error('Repository for the selected workspace is no longer available.')
     }
-    const startup = this.buildStartupForAgent(repo, opts.agent, opts.prompt)
+    const startup = await this.buildStartupForAgent(repo, opts.agent, opts.prompt)
     if (repo.connectionId) {
       await this.markRemoteWorkspaceTrustedForAgent(opts.agent, repo.connectionId, worktree.path)
     } else {
@@ -23035,7 +23099,13 @@ export class OrcaRuntimeService {
     const startupPlan = buildAgentStartupPlan({
       agent: opts.agent,
       prompt: opts.agentPrompt ?? '',
-      cmdOverrides: settings.agentCmdOverrides ?? {},
+      cmdOverrides: await resolveRuntimeAgentCommandOverrides({
+        agent: opts.agent,
+        cmdOverrides: settings.agentCmdOverrides ?? {},
+        connectionId: workspace.connectionId,
+        wslDistro: this.getAgentLaunchWslDistroForWorkspace(workspace),
+        workspacePath: workspace.path
+      }),
       agentArgs: resolveTuiAgentLaunchArgs(opts.agent, settings.agentDefaultArgs),
       agentEnv: resolveTuiAgentLaunchEnv(opts.agent, settings.agentDefaultEnv),
       platform,
@@ -25296,7 +25366,7 @@ export class OrcaRuntimeService {
 
   private async listResolvedWorktreeSnapshot(): Promise<ResolvedWorktreeSnapshot> {
     if (!this.store) {
-      return { worktrees: [], platformByRepoId: new Map() }
+      return { worktrees: [], platformByRepoId: new Map(), wslDistroByRepoId: new Map() }
     }
     const now = Date.now()
     if (this.resolvedWorktreeCache && this.resolvedWorktreeCache.expiresAt > now) {
@@ -25320,7 +25390,7 @@ export class OrcaRuntimeService {
 
   private async computeResolvedWorktrees(generation: number): Promise<ResolvedWorktreeSnapshot> {
     if (!this.store) {
-      return { worktrees: [], platformByRepoId: new Map() }
+      return { worktrees: [], platformByRepoId: new Map(), wslDistroByRepoId: new Map() }
     }
     const now = Date.now()
     const metaById = this.store.getAllWorktreeMeta() ?? {}
@@ -25331,6 +25401,17 @@ export class OrcaRuntimeService {
         repo.id,
         getAgentLaunchPlatformForRepo(repo, projectRuntimeByRepoId.get(repo.id))
       ])
+    )
+    const wslDistroByRepoId = new Map(
+      repos.flatMap((repo): [string, string][] => {
+        const resolution = projectRuntimeByRepoId.get(repo.id)
+        const runtime =
+          resolution?.status === 'resolved'
+            ? resolution.runtime
+            : resolution?.repair.preferredRuntime
+        const distro = runtime?.kind === 'wsl' ? runtime.distro?.trim() : null
+        return distro ? [[repo.id, distro]] : []
+      })
     )
     const perRepoWorktrees = await Promise.all(
       repos.map(async (repo) => {
@@ -25401,10 +25482,11 @@ export class OrcaRuntimeService {
       this.resolvedWorktreeCache = {
         worktrees,
         platformByRepoId,
+        wslDistroByRepoId,
         expiresAt: now + RESOLVED_WORKTREE_CACHE_TTL_MS
       }
     }
-    return { worktrees, platformByRepoId }
+    return { worktrees, platformByRepoId, wslDistroByRepoId }
   }
 
   private pruneLineageForMissingRepoWorktrees(repo: Repo, gitWorktrees: GitWorktreeInfo[]): void {

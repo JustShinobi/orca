@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { ChevronLeft, RefreshCw } from 'lucide-react-native'
 import { colors } from '../theme/mobile-theme'
 import { useHostClient } from '../transport/client-context'
-import type { RpcSuccess } from '../transport/types'
 import type { RpcClient } from '../transport/rpc-client'
 import { getWorktreeLabel } from '../session/worktree-label'
 import {
@@ -36,6 +35,9 @@ import {
 } from './agent-history-resume-target'
 import { buildMobileAgentHistoryResumeActionState } from './agent-history-session-card'
 import { styles } from './agent-history-styles'
+import { resolveRequiredMobileCursorResumeCommand } from '../session/mobile-cursor-command'
+import { parseWslUncPath } from '../../../src/shared/wsl-paths'
+import { useMobileAgentHistoryWorktrees } from './use-mobile-agent-history-worktrees'
 
 export type MobileAgentSessionHistoryPanelProps = {
   hostId: string
@@ -56,8 +58,10 @@ export function MobileAgentSessionHistoryPanel({
 }: MobileAgentSessionHistoryPanelProps) {
   const router = useRouter()
   const { client, state: connState } = useHostClient(hostId)
-  const [worktrees, setWorktrees] = useState<Worktree[]>([])
-  const [worktreesLoaded, setWorktreesLoaded] = useState(false)
+  const { worktrees, worktreesLoaded } = useMobileAgentHistoryWorktrees(
+    client,
+    connState === 'connected'
+  )
   const [query, setQuery] = useState('')
   const [resumingSessionId, setResumingSessionId] = useState<string | null>(null)
   const [resumeMessage, setResumeMessage] = useState<string | null>(null)
@@ -66,39 +70,6 @@ export function MobileAgentSessionHistoryPanel({
     createMobileAiVaultResumeMutationRegistry(createMobileAiVaultResumeMutationId)
   )
   const worktreeLabel = getWorktreeLabel(name, worktreeId)
-
-  // Why: the worktree list seeds the host-local scopePaths derivation and the
-  // active-worktree path for the "current worktree" badge.
-  useEffect(() => {
-    if (!client || connState !== 'connected') {
-      return
-    }
-    let cancelled = false
-    void (async () => {
-      try {
-        const worktreeResponse = await client.sendRequest('worktree.ps', { limit: 10000 })
-        if (cancelled) {
-          return
-        }
-        if (worktreeResponse.ok) {
-          const result = (worktreeResponse as RpcSuccess).result as { worktrees: Worktree[] }
-          setWorktrees(result.worktrees)
-        }
-      } catch {
-        // Why: worktree list is best-effort context; the session scan still runs
-        // (without it, scoped tabs can't narrow and fall back to the full list).
-      } finally {
-        // Why: mark loaded even on failure so a scoped tab proceeds with an
-        // unscoped fetch instead of holding a spinner forever.
-        if (!cancelled) {
-          setWorktreesLoaded(true)
-        }
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [client, connState])
 
   const {
     scope,
@@ -201,11 +172,21 @@ export function MobileAgentSessionHistoryPanel({
         }
 
         const preparedSession = await prepareMobileAiVaultSessionResume(client, session)
+        const resumeWorktrees = freshWorktrees ?? worktrees
+        const cursorCommand = await resolveRequiredMobileCursorResumeCommand({
+          client,
+          settings,
+          wslDistro:
+            resumeWorktrees.find((worktree) => worktree.worktreeId === target.worktreeId)
+              ?.wslDistro ?? parseWslUncPath(target.workspacePath ?? '')?.distro,
+          session
+        })
         const launch = buildMobileAiVaultResumeLaunch({
           session: preparedSession,
           hostPlatform: platform,
           hostTerminalWindowsShell,
-          settings
+          settings,
+          cursorCommand
         })
         await resumeAiVaultSessionInTerminal(client, target.worktreeId, {
           ...launch,

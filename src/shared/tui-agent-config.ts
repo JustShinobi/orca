@@ -225,6 +225,7 @@ export const TUI_AGENT_CONFIG: Record<TuiAgent, TuiAgentConfig> = {
   },
   cursor: {
     detectCmd: 'cursor-agent',
+    detectCmdAliases: ['cursor'],
     launchCmd: 'cursor-agent',
     expectedProcess: 'cursor-agent',
     promptInjectionMode: 'argv',

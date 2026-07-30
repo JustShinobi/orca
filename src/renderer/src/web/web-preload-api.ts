@@ -7,6 +7,7 @@ import type {
   NativeChatAppendedMessages
 } from '../../../preload/api-types'
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
+import type { DetectedAgentInventoryV1 } from '../../../shared/detected-agent-inventory'
 import type { AiVaultListArgs, AiVaultListResult } from '../../../shared/ai-vault-types'
 import type {
   AiVaultPrepareSessionResumeArgs,
@@ -2674,6 +2675,27 @@ function createPreflightApi(): NonNullable<Partial<PreloadApi>['preflight']> {
       }
       return callRuntimeResult<string[]>('preflight.detectAgents').catch(() => [])
     },
+    detectAgentInventory: async () => {
+      if (!requireActiveEnvironmentOrNull()) {
+        return { version: 1, agents: [], matchedCommands: {} }
+      }
+      return callRuntimeResult<DetectedAgentInventoryV1>('preflight.detectAgentInventory').catch(
+        () => ({
+          version: 1,
+          agents: [],
+          matchedCommands: {}
+        })
+      )
+    },
+    detectAgentCommands: async () => {
+      if (!requireActiveEnvironmentOrNull()) {
+        return { agents: [], matchedCommands: {} }
+      }
+      return callRuntimeResult<{
+        agents: string[]
+        matchedCommands?: Record<string, string>
+      }>('preflight.detectAgentCommands').catch(() => ({ agents: [], matchedCommands: {} }))
+    },
     refreshAgents: () =>
       requireActiveEnvironmentOrNull()
         ? callRuntimeResult('preflight.refreshAgents')
@@ -2684,6 +2706,27 @@ function createPreflightApi(): NonNullable<Partial<PreloadApi>['preflight']> {
       requireActiveEnvironmentOrNull()
         ? callRuntimeResult<string[]>('preflight.detectRemoteAgents', args).catch(() => [])
         : [],
+    detectRemoteAgentInventory: async (args) =>
+      requireActiveEnvironmentOrNull()
+        ? callRuntimeResult<DetectedAgentInventoryV1>(
+            'preflight.detectRemoteAgentInventory',
+            args
+          ).catch(() => ({
+            version: 1,
+            agents: [],
+            matchedCommands: {}
+          }))
+        : { version: 1, agents: [], matchedCommands: {} },
+    detectRemoteAgentCommands: async (args) =>
+      requireActiveEnvironmentOrNull()
+        ? callRuntimeResult<{
+            agents: string[]
+            matchedCommands?: Record<string, string>
+          }>('preflight.detectRemoteAgentCommands', args).catch(() => ({
+            agents: [],
+            matchedCommands: {}
+          }))
+        : { agents: [], matchedCommands: {} },
     detectRemoteWindowsTerminalCapabilities: async (args) =>
       requireActiveEnvironmentOrNull()
         ? callRuntimeResult<WindowsTerminalCapabilityBridgeResult>(

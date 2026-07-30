@@ -10,6 +10,7 @@ import {
   MAX_PREVIEWABLE_BINARY_SIZE,
   MAX_TEXT_FILE_SIZE
 } from './fs-handler-utils'
+import { openNoFollow, readBoundedFileHandle } from '../shared/node-verified-bounded-text-file'
 
 type TerminalArtifactStat = {
   size: number
@@ -28,8 +29,6 @@ type VerifiedTerminalArtifactOptions = {
   maxBytes?: number
 }
 
-const OPEN_NOFOLLOW = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0
-
 export async function readVerifiedTerminalArtifact(params: Record<string, unknown>) {
   const filePath = stringParam(params.filePath)
   const options = verifiedTerminalArtifactOptions(params)
@@ -41,7 +40,7 @@ export async function readVerifiedTerminalArtifact(params: Record<string, unknow
       options.maxBytes ?? (mimeType ? MAX_PREVIEWABLE_BINARY_SIZE : MAX_TEXT_FILE_SIZE),
       mimeType ? MAX_PREVIEWABLE_BINARY_SIZE : MAX_TEXT_FILE_SIZE
     )
-    const buffer = await readBoundedFileFromHandle(handle, sizeLimit)
+    const buffer = await readBoundedFileHandle(handle, sizeLimit)
     if (mimeType) {
       return { content: buffer.toString('base64'), isBinary: true, isImage: true, mimeType }
     }
@@ -69,7 +68,7 @@ export async function writeVerifiedTerminalArtifact(
   let originalMode: number | null = null
   try {
     originalMode = (await verifiedHandleStat(handle, options)).mode ?? null
-    const existing = await readBoundedFileFromHandle(handle, writeLimit)
+    const existing = await readBoundedFileHandle(handle, writeLimit)
     if (isBinaryBuffer(existing)) {
       throw new Error('binary_file')
     }
@@ -111,16 +110,6 @@ function terminalArtifactImageMimeType(filePath: string): string | undefined {
   return mimeType === 'image/svg+xml' ? undefined : mimeType
 }
 
-async function readBoundedFileFromHandle(handle: FileHandle, maxBytes: number): Promise<Buffer> {
-  const safeLimit = Math.max(0, Math.floor(maxBytes))
-  const buffer = Buffer.alloc(safeLimit + 1)
-  const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-  if (bytesRead > safeLimit) {
-    throw new Error('file_too_large')
-  }
-  return buffer.subarray(0, bytesRead)
-}
-
 async function openVerifiedTerminalArtifact(
   filePath: string,
   options: VerifiedTerminalArtifactOptions,
@@ -128,9 +117,15 @@ async function openVerifiedTerminalArtifact(
 ): Promise<FileHandle> {
   await assertRealPathStillGranted(filePath, options.expectedRealPath)
   try {
-    return await open(filePath, flags | OPEN_NOFOLLOW)
+    if (flags === constants.O_RDONLY) {
+      return await openNoFollow(filePath)
+    }
+    return await open(filePath, flags)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
+    if (
+      (error as NodeJS.ErrnoException).code === 'ELOOP' ||
+      (error as Error).message === 'verified_file_changed'
+    ) {
       throw new Error('terminal_file_grant_stale')
     }
     throw error
