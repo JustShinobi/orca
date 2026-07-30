@@ -9430,18 +9430,17 @@
           "cloudVmTitle": "Runtimes de VM en la nube",
           "cloudVmRefresh": "Actualizar runtimes de VM en la nube",
           "cloudVmLoading": "Comprobando runtimes de VM en la nube…",
-          "cloudVmEmpty": "Ningún runtime de VM en la nube necesita limpieza."
+          "cloudVmEmptyWithSetup": "Aún no hay runtimes de VM en la nube. Crea uno desde un espacio de trabajo mediante una receta de entorno."
         },
         "ephemeralVms": {
           "search": {
-            "title": "Entornos por espacio de trabajo",
-            "description": "Aprende cómo las recetas del repositorio dan a cada espacio de trabajo su propio entorno desechable bajo demanda."
+            "description": "Aprende cómo las recetas del repositorio dan a cada espacio de trabajo su propio entorno desechable bajo demanda.",
+            "cloudVmTitle": "VM en la nube"
           }
         },
         "EphemeralVmsPane": {
           "loadError": "No se pudieron cargar las recetas.",
           "copyError": "No se pudo copiar el prompt.",
-          "skillTitle": "Skill de entornos por espacio de trabajo",
           "skillDescription": "Configura, construye, autentica y valida recetas de entornos del repositorio.",
           "whatTitle": "Lo que la skill hace contigo",
           "whatScaffold": "Escribe la receta y los scripts para tu proveedor, conectados mediante un servidor Orca o SSH.",
@@ -9452,13 +9451,16 @@
           "copied": "Copiado",
           "recipes": "Recetas",
           "recipesHelp": "Las recetas de orca.yaml y de los plugins activados aparecen aquí, listas para iniciar un espacio de trabajo.",
-          "refresh": "Actualizar recetas de VMs efímeras",
           "checking": "Comprobando recetas…",
-          "none": "Aún no se han encontrado recetas."
+          "none": "Aún no se han encontrado recetas.",
+          "cloudVmSkillTitle": "Skill de configuración de VM en la nube",
+          "cloudVmRefresh": "Actualizar recetas de VM en la nube",
+          "cloudVmTerminalTitle": "Configuración de VM en la nube",
+          "cloudVmTerminalAriaLabel": "Terminal de instalación de la skill de VM en la nube"
         },
         "ephemeralVmsExperimentalSetting": {
           "description": "Muestra controles de configuración y destinos de ejecución de espacios de trabajo para entornos bajo demanda del repositorio.",
-          "toggleLabel": "Activar o desactivar entornos por espacio de trabajo"
+          "cloudVmToggleLabel": "Activar o desactivar VM en la nube"
         },
         "SourceControlActionRepoOverrideNote": {
           "agent": "Agente",
@@ -9941,6 +9943,13 @@
           "endpointKind": "Tipo de destino",
           "networkConnection": "Conexión de red",
           "notAttempted": "No se intentó"
+        },
+        "CloudVmSetupGuide": {
+          "title": "Crear una VM en la nube",
+          "description": "Las VMs en la nube se crean a partir de recetas de entorno al crear un espacio de trabajo.",
+          "setupRecipe": "Configura una receta de entorno para tu proveedor de nube.",
+          "createWorkspace": "Crea un espacio de trabajo y selecciona esa receta en Ejecutar en.",
+          "openSetup": "Configurar recetas de entorno"
         }
       },
       "right": {
@@ -11593,7 +11602,6 @@
           "2f077ef4eb": ", y escanea el código.",
           "3aa7bb2d8b": "Emparejar escritorio",
           "d1495e5e64": "Abre Orca Mobile, toca",
-          "901c98bb93": "Empareja este",
           "3960f5c339": "Paso 2 de 2",
           "3241f3c26a": "QR de instalación",
           "7af266b80d": "Código QR de instalación",

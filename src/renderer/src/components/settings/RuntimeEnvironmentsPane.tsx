@@ -47,6 +47,7 @@ import {
 } from '../ui/dialog'
 import { RuntimePairingUrlGenerator } from './RuntimePairingUrlGenerator'
 import { EphemeralVmRuntimesSection } from './EphemeralVmRuntimesSection'
+import { CloudVmSetupGuide } from './CloudVmSetupGuide'
 import {
   getRuntimeEnvironmentsSearchEntry,
   getWebRuntimeEnvironmentsSearchEntry
@@ -1116,7 +1117,8 @@ export function RuntimeEnvironmentsPane({
         </div>
       </div>
 
-      <div className={visibleWorkflow !== 'cloud-vm' ? 'hidden' : undefined}>
+      <div className={cn('space-y-5 pt-2', visibleWorkflow !== 'cloud-vm' && 'hidden')}>
+        <CloudVmSetupGuide />
         <EphemeralVmRuntimesSection />
       </div>
 

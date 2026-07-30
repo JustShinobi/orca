@@ -139,7 +139,9 @@ describe('EphemeralVmRuntimesSection', () => {
     const container = await renderSection()
 
     await vi.waitFor(() =>
-      expect(container.textContent).toContain('No Cloud VM runtimes need cleanup.')
+      expect(container.textContent).toContain(
+        'No Cloud VM runtimes yet. Create one from a workspace using an environment recipe.'
+      )
     )
   })
 

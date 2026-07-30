@@ -210,8 +210,8 @@ export function EphemeralVmRuntimesSection(): React.JSX.Element {
                   'Checking Cloud VM runtimes…'
                 )
               : translate(
-                  'auto.components.settings.EphemeralVmRuntimesSection.cloudVmEmpty',
-                  'No Cloud VM runtimes need cleanup.'
+                  'auto.components.settings.EphemeralVmRuntimesSection.cloudVmEmptyWithSetup',
+                  'No Cloud VM runtimes yet. Create one from a workspace using an environment recipe.'
                 )}
           </div>
         ) : (

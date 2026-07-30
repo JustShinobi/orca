@@ -24,31 +24,6 @@ import type { TaskSourceContext } from '../../src/shared/task-source-context'
 
 const SECOND_PROJECT_NAME = 'linked-item-second-project'
 
-// Why: useComposerState drops Jira seeds that lack a matching taskSourceContext
-// (site + project identity). E2E must pass the same paired metadata real Jira
-// picks write through onSmartJiraIssueSelect.
-const JIRA_LINKED_ITEM: LinkedWorkItemSummary = {
-  type: 'issue',
-  provider: 'jira',
-  number: 0,
-  title: 'RDG-344 Migrate homepage from NuxtJS to NextJS',
-  url: 'https://example.atlassian.net/browse/RDG-344',
-  jiraIdentifier: 'RDG-344'
-}
-
-const JIRA_TASK_SOURCE_CONTEXT: TaskSourceContext = {
-  kind: 'task-source',
-  provider: 'jira',
-  projectId: 'e2e-jira-project',
-  hostId: 'local',
-  providerIdentity: {
-    provider: 'jira',
-    siteId: 'site-e2e',
-    siteUrl: 'https://example.atlassian.net',
-    projectKey: 'RDG'
-  }
-}
-
 function runGit(repoPath: string, args: string[]): void {
   execFileSync('git', args, { cwd: repoPath, stdio: 'pipe' })
 }
@@ -80,7 +55,7 @@ async function openComposerWithLinkedWorkItem(
   page: Page,
   linkedWorkItem: LinkedWorkItemSummary,
   prefilledName: string,
-  taskSourceContext?: TaskSourceContext | null
+  taskSourceContext: TaskSourceContext | null = null
 ): Promise<void> {
   await page.evaluate(
     ({ linkedWorkItem, prefilledName, taskSourceContext }) => {
@@ -91,11 +66,41 @@ async function openComposerWithLinkedWorkItem(
       store.getState().openModal('new-workspace-composer', {
         linkedWorkItem,
         prefilledName,
-        ...(taskSourceContext ? { taskSourceContext } : {})
+        taskSourceContext
       })
     },
-    { linkedWorkItem, prefilledName, taskSourceContext: taskSourceContext ?? null }
+    { linkedWorkItem, prefilledName, taskSourceContext }
   )
+}
+
+// Why: useComposerState drops Jira seeds that lack a matching taskSourceContext
+// (site + project identity). Derive host/project from the active setup so the
+// seed mirrors real onSmartJiraIssueSelect metadata.
+async function getJiraSourceContext(page: Page): Promise<TaskSourceContext> {
+  return page.evaluate(() => {
+    const state = window.__store?.getState()
+    const activeWorktreeId = state?.activeWorktreeId
+    const setup = state?.projectHostSetups.find((candidate) =>
+      state.worktreesByRepo[candidate.repoId]?.some((worktree) => worktree.id === activeWorktreeId)
+    )
+    if (!setup) {
+      throw new Error('Active project host setup is unavailable')
+    }
+    return {
+      kind: 'task-source',
+      provider: 'jira',
+      projectId: setup.projectId,
+      hostId: setup.hostId,
+      projectHostSetupId: setup.id,
+      repoId: setup.repoId,
+      providerIdentity: {
+        provider: 'jira',
+        siteId: 'e2e-jira-site',
+        siteUrl: 'https://example.atlassian.net',
+        projectKey: 'RDG'
+      }
+    }
+  })
 }
 
 async function switchComposerProject(page: Page, projectName: string): Promise<void> {
@@ -125,11 +130,19 @@ test.describe('New workspace composer linked item across project switches', () =
   })
 
   test('keeps a Jira issue linked when the project changes', async ({ orcaPage }) => {
+    const jiraSourceContext = await getJiraSourceContext(orcaPage)
     await openComposerWithLinkedWorkItem(
       orcaPage,
-      JIRA_LINKED_ITEM,
+      {
+        type: 'issue',
+        provider: 'jira',
+        number: 0,
+        title: 'RDG-344 Migrate homepage from NuxtJS to NextJS',
+        url: 'https://example.atlassian.net/browse/RDG-344',
+        jiraIdentifier: 'RDG-344'
+      },
       'rdg-344-nuxtjs-nextjs',
-      JIRA_TASK_SOURCE_CONTEXT
+      jiraSourceContext
     )
 
     const composer = orcaPage.getByRole('dialog')

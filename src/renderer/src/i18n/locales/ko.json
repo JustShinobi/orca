@@ -9430,18 +9430,17 @@
           "cloudVmTitle": "클라우드 VM 런타임",
           "cloudVmRefresh": "클라우드 VM 런타임 새로 고침",
           "cloudVmLoading": "클라우드 VM 런타임 확인 중…",
-          "cloudVmEmpty": "정리가 필요한 클라우드 VM 런타임이 없습니다."
+          "cloudVmEmptyWithSetup": "아직 클라우드 VM 런타임이 없습니다. 환경 레시피를 사용해 워크스페이스에서 생성하세요."
         },
         "ephemeralVms": {
           "search": {
-            "title": "워크스페이스별 환경",
-            "description": "repo 소유 레시피가 각 워크스페이스에 고유한 주문형 일회용 환경을 제공하는 방법을 알아보세요."
+            "description": "repo 소유 레시피가 각 워크스페이스에 고유한 주문형 일회용 환경을 제공하는 방법을 알아보세요.",
+            "cloudVmTitle": "클라우드 VM"
           }
         },
         "EphemeralVmsPane": {
           "loadError": "레시피를 로드할 수 없습니다.",
           "copyError": "프롬프트를 복사할 수 없습니다.",
-          "skillTitle": "워크스페이스별 환경 기술",
           "skillDescription": "repo 소유 환경 레시피를 설정, 빌드, 인증 및 검증합니다.",
           "whatTitle": "당신과 함께 기술이 하는 일",
           "whatScaffold": "Orca 서버 또는 SSH를 통해 연결된 공급자를 위한 레시피 및 스크립트를 작성합니다.",
@@ -9452,13 +9451,16 @@
           "copied": "복사됨",
           "recipes": "조리법",
           "recipesHelp": "orca.yaml과 활성화된 플러그인의 레시피가 여기에 표시되어 워크스페이스를 시작할 수 있습니다.",
-          "refresh": "임시 VM 레시피 새로 고침",
           "checking": "레시피 확인 중...",
-          "none": "아직 레시피를 찾을 수 없습니다."
+          "none": "아직 레시피를 찾을 수 없습니다.",
+          "cloudVmSkillTitle": "클라우드 VM 설정 스킬",
+          "cloudVmRefresh": "클라우드 VM 레시피 새로 고침",
+          "cloudVmTerminalTitle": "클라우드 VM 설정",
+          "cloudVmTerminalAriaLabel": "클라우드 VM 스킬 설치 터미널"
         },
         "ephemeralVmsExperimentalSetting": {
           "description": "repo 소유 온디맨드 환경에 대한 설정 제어 및 워크스페이스 실행 대상을 표시합니다.",
-          "toggleLabel": "워크스페이스별 환경 전환"
+          "cloudVmToggleLabel": "클라우드 VM 전환"
         },
         "SourceControlActionRepoOverrideNote": {
           "agent": "에이전트",
@@ -9941,6 +9943,13 @@
           "endpointKind": "대상 유형",
           "networkConnection": "네트워크 연결",
           "notAttempted": "시도하지 않음"
+        },
+        "CloudVmSetupGuide": {
+          "title": "클라우드 VM 만들기",
+          "description": "클라우드 VM은 워크스페이스를 만들 때 환경 레시피에서 생성됩니다.",
+          "setupRecipe": "클라우드 공급자를 위한 환경 레시피를 설정하세요.",
+          "createWorkspace": "워크스페이스를 만들고 실행 위치에서 해당 레시피를 선택하세요.",
+          "openSetup": "환경 레시피 설정"
         }
       },
       "right": {
@@ -11593,7 +11602,6 @@
           "2f077ef4eb": "을 클릭하고 코드를 스캔하세요.",
           "3aa7bb2d8b": "데스크탑 페어링",
           "d1495e5e64": "Orca Mobile을 열고",
-          "901c98bb93": "페어링",
           "3960f5c339": "2/2단계",
           "3241f3c26a": "QR 설치",
           "7af266b80d": "QR코드 설치",

@@ -9430,18 +9430,17 @@
           "cloudVmTitle": "クラウド VM ランタイム",
           "cloudVmRefresh": "クラウド VM ランタイムを更新",
           "cloudVmLoading": "クラウド VM ランタイムを確認中…",
-          "cloudVmEmpty": "クリーンアップが必要なクラウド VM ランタイムはありません。"
+          "cloudVmEmptyWithSetup": "クラウド VM ランタイムはまだありません。環境レシピを使用してワークスペースから作成してください。"
         },
         "ephemeralVms": {
           "search": {
-            "title": "ワークスペースごとの環境",
-            "description": "repo 所有のレシピが各ワークスペースに独自のオンデマンドの使い捨て環境を与える方法を学びましょう。"
+            "description": "repo 所有のレシピが各ワークスペースに独自のオンデマンドの使い捨て環境を与える方法を学びましょう。",
+            "cloudVmTitle": "クラウド VM"
           }
         },
         "EphemeralVmsPane": {
           "loadError": "レシピを読み込めませんでした。",
           "copyError": "プロンプトをコピーできませんでした。",
-          "skillTitle": "ワークスペースごとの環境スキル",
           "skillDescription": "repo が所有する環境レシピをセットアップ、構築、認証、および検証します。",
           "whatTitle": "スキルが何をするのか、あなたと一緒に",
           "whatScaffold": "Orca サーバーまたは SSH 経由で接続されているプロバイダーのレシピとスクリプトを作成します。",
@@ -9452,13 +9451,16 @@
           "copied": "コピーされました",
           "recipes": "レシピ",
           "recipesHelp": "orca.yaml と有効なプラグインのレシピがここに表示され、ワークスペースを起動できます。",
-          "refresh": "一時的な VM レシピを更新する",
           "checking": "レシピを確認中...",
-          "none": "レシピはまだ見つかりません。"
+          "none": "レシピはまだ見つかりません。",
+          "cloudVmSkillTitle": "クラウド VM セットアップスキル",
+          "cloudVmRefresh": "クラウド VM レシピを更新",
+          "cloudVmTerminalTitle": "クラウド VM のセットアップ",
+          "cloudVmTerminalAriaLabel": "クラウド VM スキルインストールターミナル"
         },
         "ephemeralVmsExperimentalSetting": {
           "description": "repo が所有するオンデマンド環境のセットアップ コントロールとワークスペース実行ターゲットを示します。",
-          "toggleLabel": "ワークスペースごとの環境を切り替える"
+          "cloudVmToggleLabel": "クラウド VM を切り替える"
         },
         "SourceControlActionRepoOverrideNote": {
           "agent": "エージェント",
@@ -9941,6 +9943,13 @@
           "endpointKind": "接続先の種類",
           "networkConnection": "ネットワーク接続",
           "notAttempted": "未試行"
+        },
+        "CloudVmSetupGuide": {
+          "title": "クラウド VM を作成",
+          "description": "クラウド VM は、ワークスペースの作成時に環境レシピから作成されます。",
+          "setupRecipe": "クラウドプロバイダー用の環境レシピをセットアップします。",
+          "createWorkspace": "ワークスペースを作成し、「実行先」でそのレシピを選択します。",
+          "openSetup": "環境レシピをセットアップ"
         }
       },
       "right": {
@@ -11593,7 +11602,6 @@
           "2f077ef4eb": "をクリックしてコードをスキャンします。",
           "3aa7bb2d8b": "デスクトップのペアリング",
           "d1495e5e64": "Orca モバイルを開き、 をタップします",
-          "901c98bb93": "これをペアリングします",
           "3960f5c339": "ステップ 2/2",
           "3241f3c26a": "QRをインストールする",
           "7af266b80d": "QRコードをインストールする",
