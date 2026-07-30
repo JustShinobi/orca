@@ -6,66 +6,28 @@ import {
 } from '@/lib/tui-agent-startup'
 import { resolveQuickCreateLinkedWorkItemPrompt } from '@/lib/linked-work-item-context'
 import { pickQuickWorkspaceAgent } from '@/lib/quick-workspace-agent-selection'
-import type {
-  PendingWorktreeCreation,
-  WorktreeCreationRequest
-} from '@/lib/pending-worktree-creation'
+import type { WorktreeCreationRequest } from '@/lib/pending-worktree-creation'
 import { CLIENT_PLATFORM, getWorkspaceIntentName, getWorkspaceSeedName } from '@/lib/new-workspace'
 import { getLocalRepoProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import { resolveSourceControlLaunchPlatform } from '@/lib/source-control-launch-platform'
 import { repoIsRemote } from '../../../shared/agent-launch-remote'
 import { resolveGitHubWorkItemIdentity } from '@/lib/github-work-item-identity'
+import { buildGitHubWorkspaceSource } from '../../../shared/new-workspace/workspace-source'
 import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
 } from '../../../shared/tui-agent-launch-defaults'
 import { tuiAgentToAgentKind } from '@/lib/telemetry'
-import type { GitHubWorkItem, GlobalSettings, Repo, TuiAgent } from '../../../shared/types'
+import type { GitHubWorkItem, Repo, TuiAgent } from '../../../shared/types'
 import type { TaskSourceContext, WorkspaceRunContext } from '../../../shared/task-source-context'
 import type { AgentStartedTelemetry } from '@/lib/worktree-activation'
 import { getRepoExecutionHostId, parseExecutionHostId } from '../../../shared/execution-host'
 import { projectHostSetupProjectionFromRepos } from '../../../shared/project-host-setup-projection'
 import { resolveLocalWindowsAgentStartupShell } from '../../../shared/windows-terminal-shell'
 import { resolveCursorCommandOverrides } from '@/lib/ai-vault-cursor-command'
+import type { GitHubWorkItemBackgroundStoreSnapshot } from './github-work-item-background-store-snapshot'
 
-export type GitHubWorkItemBackgroundStoreSnapshot = {
-  repos: readonly Repo[]
-  pendingWorktreeCreations: Record<string, PendingWorktreeCreation>
-  sshConnectionStates: ReturnType<typeof useAppStore.getState>['sshConnectionStates']
-  runtimeStatusByEnvironmentId: ReturnType<
-    typeof useAppStore.getState
-  >['runtimeStatusByEnvironmentId']
-  settings:
-    | Partial<
-        Pick<
-          GlobalSettings,
-          | 'activeRuntimeEnvironmentId'
-          | 'defaultTuiAgent'
-          | 'disabledTuiAgents'
-          | 'agentCmdOverrides'
-          | 'agentDefaultArgs'
-          | 'agentDefaultEnv'
-          | 'terminalWindowsShell'
-        >
-      >
-    | null
-    | undefined
-  ensureDetectedAgents: ReturnType<typeof useAppStore.getState>['ensureDetectedAgents']
-  ensureRemoteDetectedAgents: ReturnType<typeof useAppStore.getState>['ensureRemoteDetectedAgents']
-  ensureRuntimeDetectedAgents: ReturnType<
-    typeof useAppStore.getState
-  >['ensureRuntimeDetectedAgents']
-  detectedAgentCommands?: ReturnType<typeof useAppStore.getState>['detectedAgentCommands']
-  detectedAgentCommandsByContext?: ReturnType<
-    typeof useAppStore.getState
-  >['detectedAgentCommandsByContext']
-  remoteDetectedAgentCommands?: ReturnType<
-    typeof useAppStore.getState
-  >['remoteDetectedAgentCommands']
-  runtimeDetectedAgentCommands?: ReturnType<
-    typeof useAppStore.getState
-  >['runtimeDetectedAgentCommands']
-}
+export type { GitHubWorkItemBackgroundStoreSnapshot } from './github-work-item-background-store-snapshot'
 
 export type BuildInitialGitHubWorkItemRequestArgs = {
   item: GitHubWorkItem
@@ -290,10 +252,26 @@ export function buildInitialGitHubWorkItemRequest(
   const workspaceRunContext = getWorkspaceRunContextForRepo(repo, args.workspaceRunContext)
   const ownerHost = parseExecutionHostId(getRepoExecutionHostId(repo))
   const identity = resolveGitHubWorkItemIdentity(args.item)
+  const linkedWorkItem =
+    identity.number !== null
+      ? buildGitHubWorkspaceSource({
+          type: identity.type,
+          number: identity.number,
+          title: args.item.title,
+          url: args.item.url,
+          repoId: args.repoId
+        })
+      : null
   return {
     repoId: args.repoId,
     worktreeCreateProgressMode: ownerHost?.kind === 'local' ? 'stepped' : 'indeterminate',
     ...(args.taskSourceContext ? { taskSourceContext: args.taskSourceContext } : {}),
+    ...(linkedWorkItem
+      ? {
+          linkedWorkItem,
+          ...(args.taskSourceContext ? { linkedTaskSourceContext: args.taskSourceContext } : {})
+        }
+      : {}),
     ...(workspaceRunContext ? { workspaceRunContext } : {}),
     name: seedName,
     ...(displayName ? { displayName } : {}),
