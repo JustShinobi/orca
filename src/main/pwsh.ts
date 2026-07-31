@@ -18,13 +18,15 @@ function isCacheFresh(cache: PwshAvailabilityCache): boolean {
   )
 }
 
+// Why: execFileSync reports a timeout as ETIMEDOUT, but the execFile callback reports it as a
+// SIGTERM kill with no code — both shapes must be recognised or the async probe caches a
+// cold-start timeout as "pwsh missing".
 function isTimeoutError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as NodeJS.ErrnoException).code === 'ETIMEDOUT'
-  )
+  if (typeof error !== 'object' || error === null) {
+    return false
+  }
+  const failure = error as { code?: unknown; killed?: unknown; signal?: unknown }
+  return failure.code === 'ETIMEDOUT' || (failure.killed === true && failure.signal === 'SIGTERM')
 }
 
 function cachePwshProbeFailure(error: unknown): void {

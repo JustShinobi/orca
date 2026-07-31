@@ -34,12 +34,14 @@ function wslAvailabilityRetryDelayMs(cache: { retryable: boolean; failures: numb
   return Math.min(base * 2 ** (cache.failures - 1), WSL_AVAILABILITY_MAX_RETRY_DELAY_MS)
 }
 
-// Why: a numeric `status` (wsl.exe ran and said no) or ENOENT (not installed) is
-// answer-shaped, so it earns a long window rather than the short one a timeout gets.
+// Why: a non-zero exit (wsl.exe ran and said no) or ENOENT (not installed) is answer-shaped,
+// so it earns a long window rather than the short one a timeout gets. execFileSync reports the
+// exit code as `status`, the execFile callback as a numeric `code`; both must count as
+// definitive or the async twin poisons the shared cache with the short retryable window.
 // Same numeric-status rule as `wslUncDirectoryExists`; neither latches forever.
 function isRetryableWslProbeFailure(error: unknown): boolean {
   const failure = error as { status?: unknown; code?: unknown } | null
-  if (typeof failure?.status === 'number') {
+  if (typeof failure?.status === 'number' || typeof failure?.code === 'number') {
     return false
   }
   return failure?.code !== 'ENOENT'

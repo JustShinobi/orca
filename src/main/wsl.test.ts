@@ -540,6 +540,31 @@ describe('WSL availability cache', () => {
     })
   })
 
+  // Why: wsl.exe ships in System32 on every modern Windows, so a host without WSL answers
+  // with a non-zero exit, not ENOENT — and execFile reports that as a numeric `code`, not the
+  // `status` execFileSync uses. Misreading it as retryable would shrink the shared cache window
+  // to 45s and make the sync callers pay their blocking spawn ~13x more often.
+  it('treats a non-zero async exit as definitive, so the sync probe keeps the long window', async () => {
+    vi.useFakeTimers()
+    execFileMock.mockImplementation((_command, _args, _options, callback) => {
+      callback(Object.assign(new Error('wsl.exe exited 1'), { code: 1 }), '', '')
+    })
+    execFileSyncMock.mockReturnValue('')
+
+    try {
+      await withPlatformAsync('win32', async () => {
+        await expect(isWslAvailableAsync()).resolves.toBe(false)
+        vi.advanceTimersByTime(45_000)
+        expect(isWslAvailable()).toBe(false)
+        expect(execFileSyncMock).not.toHaveBeenCalled()
+        vi.advanceTimersByTime(10 * 60_000)
+        expect(isWslAvailable()).toBe(true)
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   // Why: the resolver reads the cached getter, not the probe. Reporting the last
   // observed answer keeps the `wsl-unavailable` repair prompt reachable; going null
   // on staleness would let git and PTY silently resolve to a WSL that just failed.

@@ -177,6 +177,24 @@ describe('isPwshAvailable', () => {
     }
   })
 
+  // Why: execFile reports a timeout as a SIGTERM kill, not ETIMEDOUT, so caching it as a
+  // failure would disable the user's PowerShell 7 preference for 30s on every slow cold start.
+  it('does not cache a cold-start timeout from the async probe', async () => {
+    const restorePlatform = setPlatform('win32')
+    execFileMock.mockImplementation((_file, _args, _options, callback) => {
+      callback(Object.assign(new Error('pwsh.exe timed out'), { killed: true, signal: 'SIGTERM' }))
+    })
+    execFileSyncMock.mockReturnValue('PowerShell 7.5.0')
+
+    try {
+      const { isPwshAvailable, isPwshAvailableAsync } = await import('./pwsh')
+      await expect(isPwshAvailableAsync()).resolves.toBe(false)
+      expect(isPwshAvailable()).toBe(true)
+    } finally {
+      restorePlatform()
+    }
+  })
+
   it('retries non-timeout failures after the negative cache TTL', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)

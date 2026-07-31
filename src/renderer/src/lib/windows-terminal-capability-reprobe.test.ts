@@ -86,7 +86,11 @@ describe('windows terminal capability re-probe', () => {
   it('stops entirely once the last consumer unregisters', async () => {
     vi.useFakeTimers()
     const { probe, readCached } = createWatcher()
-    const stopFirst = startWindowsTerminalCapabilityReprobe({ ownerKey: 'local', probe, readCached })
+    const stopFirst = startWindowsTerminalCapabilityReprobe({
+      ownerKey: 'local',
+      probe,
+      readCached
+    })
     const stopSecond = startWindowsTerminalCapabilityReprobe({
       ownerKey: 'local',
       probe,
@@ -117,6 +121,20 @@ describe('windows terminal capability re-probe', () => {
     globalThis.dispatchEvent(new Event('focus'))
     await vi.advanceTimersByTimeAsync(30_000)
     expect(probe).toHaveBeenCalledTimes(4)
+  })
+
+  // Why: each re-arm reschedules the first probe to now+30s, so an un-guarded focus handler
+  // lets a user alt-tabbing right after mount defer the re-check indefinitely.
+  it('does not let focus churn right after mount defer the first probe', async () => {
+    vi.useFakeTimers()
+    const { probe, readCached } = createWatcher()
+    startWindowsTerminalCapabilityReprobe({ ownerKey: 'local', probe, readCached })
+
+    for (let i = 0; i < 3; i += 1) {
+      await vi.advanceTimersByTimeAsync(10_000)
+      globalThis.dispatchEvent(new Event('focus'))
+    }
+    expect(probe).toHaveBeenCalledTimes(1)
   })
 
   it('drops the focus listener when no owner is watched', () => {
