@@ -126,7 +126,7 @@ export function resolveSharedControlReadyWaiters(waiters: SharedControlReadyWait
 
 export function rejectSharedControlReadyWaiters(
   waiters: SharedControlReadyWaiter[],
-  error: Error
+  error: Error = remoteRuntimeUnavailableError()
 ): void {
   for (const waiter of waiters.splice(0)) {
     waiter.reject(error)
