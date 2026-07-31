@@ -240,7 +240,10 @@ import { OffscreenBrowserBackend } from './browser/offscreen-browser-backend'
 import { initializeBrowserSessionsForApp } from './browser/browser-session-startup'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { AutomationService } from './automations/service'
-import { createHeadlessAutomationOutputSnapshotBuffer } from './automations/headless-dispatch'
+import {
+  createHeadlessAutomationOutputSnapshotBuffer,
+  DEFAULT_CODEX_HEADLESS_LAUNCH_TIMEOUT_MS
+} from './automations/headless-dispatch'
 import { buildHeadlessAutomationWorktreeCreateArgs } from './automations/headless-workspace-create'
 import { AgentAwakeService } from './agent-awake-service'
 import { registerSystemResumeBroadcast } from './system-resume-broadcast'
@@ -366,6 +369,44 @@ let localPtyStartupReady: Promise<void> = Promise.resolve()
 let localPtyProviderStartupReady: Promise<void> = Promise.resolve()
 const AGENT_STATE_CRASH_BREADCRUMB_MIN_INTERVAL_MS = 30_000
 const isServeMode = process.argv.includes('--serve')
+
+function waitForHeadlessAgentLaunch(paneKey: string | null, agentType: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now()
+    let timer: ReturnType<typeof setInterval> | null = null
+    let settled = false
+    const finish = (error?: Error): void => {
+      settled = true
+      if (timer) {
+        clearInterval(timer)
+        timer = null
+      }
+      if (error) {
+        reject(error)
+      } else {
+        resolve()
+      }
+    }
+    const check = (): void => {
+      if (
+        paneKey &&
+        agentHookServer
+          .getStatusSnapshotForPane(paneKey)
+          .some((status) => status.agentType === agentType && status.providerSessionOnly !== true)
+      ) {
+        finish()
+        return
+      }
+      if (Date.now() - startedAt >= DEFAULT_CODEX_HEADLESS_LAUNCH_TIMEOUT_MS) {
+        finish(new Error(`Headless ${agentType} agent did not report a launch status.`))
+      }
+    }
+    check()
+    if (!settled) {
+      timer = setInterval(check, 250)
+    }
+  })
+}
 
 function updateGpuAccelerationAboutPanel(): void {
   app.setAboutPanelOptions(
@@ -2421,6 +2462,10 @@ void app.whenReady().then(async () => {
             terminalSessionId,
             terminalPaneKey,
             terminalPtyId,
+            launchReady:
+              automation.agentId === 'codex'
+                ? waitForHeadlessAgentLaunch(terminalPaneKey, automation.agentId)
+                : undefined,
             completion
           }
         }
