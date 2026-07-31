@@ -37,6 +37,21 @@ describe('SharedControlSessionProbe', () => {
     expect(vi.getTimerCount()).toBe(1)
   })
 
+  it('keeps a hard probe cadence through continuous lifecycle reconciliation', async () => {
+    vi.useFakeTimers()
+    const { probe, run, state } = createProbe()
+    state.hasSubscriptions = true
+
+    probe.schedule()
+    for (let elapsed = 90; elapsed <= 990; elapsed += 90) {
+      await vi.advanceTimersByTimeAsync(90)
+      probe.schedule()
+    }
+
+    expect(run).toHaveBeenCalledTimes(9)
+    expect(vi.getTimerCount()).toBe(1)
+  })
+
   it('does not re-arm after the last subscription closes during a probe', async () => {
     vi.useFakeTimers()
     let resolveProbe: () => void = () => undefined

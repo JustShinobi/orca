@@ -45,6 +45,7 @@ export function rejectSharedControlPendingRequest(
   }
   pendingRequests.delete(requestId)
   clearTimeout(pending.timeout)
+  releasePendingRequestCancellation(pending)
   releaseRemoteRuntimePreparedRequest(pending)
   pending.reject(error)
 }
@@ -60,6 +61,7 @@ export function resolveSharedControlPendingResponse(
   }
   pendingRequests.delete(requestId)
   clearTimeout(pending.timeout)
+  releasePendingRequestCancellation(pending)
   releaseRemoteRuntimePreparedRequest(pending)
   pending.resolve(response)
 }
@@ -86,9 +88,15 @@ export function rejectAllSharedControlPendingRequests(
   for (const [requestId, pending] of pendingRequests) {
     clearTimeout(pending.timeout)
     pendingRequests.delete(requestId)
+    releasePendingRequestCancellation(pending)
     releaseRemoteRuntimePreparedRequest(pending)
     pending.reject(closeError)
   }
+}
+
+function releasePendingRequestCancellation(pending: SharedControlPendingRequest<unknown>): void {
+  pending.releaseCancellation?.()
+  pending.releaseCancellation = undefined
 }
 
 export function markSharedControlSubscriptionsUnsent(

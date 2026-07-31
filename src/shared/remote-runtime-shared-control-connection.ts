@@ -63,7 +63,7 @@ export class RemoteRuntimeSharedControlConnection {
       isReady: () =>
         isSharedControlReady({ state: this.state, ws: this.ws, sharedKey: this.sharedKey }),
       getSocket: () => this.ws,
-      probe: (timeoutMs) => this.request('status.get', undefined, timeoutMs),
+      probe: (timeoutMs, signal) => this.request('status.get', undefined, timeoutMs, signal),
       // Why: the probe's socket identity guard makes the current generation authoritative.
       forceClose: (error) =>
         this.handleSocketClosed(error, this.socketGeneration.currentGeneration())
@@ -73,7 +73,8 @@ export class RemoteRuntimeSharedControlConnection {
   request<TResult>(
     method: string,
     params: unknown,
-    timeoutMs: number
+    timeoutMs: number,
+    signal?: AbortSignal
   ): Promise<RuntimeRpcResponse<TResult>> {
     return requestSharedControl({
       pendingRequests: this.pendingRequests,
@@ -83,7 +84,8 @@ export class RemoteRuntimeSharedControlConnection {
       timeoutMs,
       ensureReady: () => this.ensureReadyWithTimeout(timeoutMs),
       send: (requestId) => this.sendRequest(requestId),
-      retireRequestId: (requestId) => this.retiredRequestIds.retire(requestId)
+      retireRequestId: (requestId) => this.retiredRequestIds.retire(requestId),
+      signal
     })
   }
 

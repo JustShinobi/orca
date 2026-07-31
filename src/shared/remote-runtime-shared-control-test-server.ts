@@ -15,6 +15,7 @@ export type SharedControlTestServer = {
   requests: { id: string; method: string; params?: unknown }[]
   auths: unknown[]
   connectionCount: () => number
+  endActiveSubscriptions: () => void
   flushDelayedResponses: () => void
 }
 
@@ -59,6 +60,7 @@ export async function createSharedControlTestServer(
   const requests: SharedControlTestServer['requests'] = []
   const auths: unknown[] = []
   const delayedResponses: (() => void)[] = []
+  const subscriptionEnds: (() => void)[] = []
   let connectionCount = 0
   let closedAfterFirstStreamingResponse = false
   const wss = new WebSocketServer({ port: 0, autoPong: options.disableAutoPong !== true })
@@ -130,7 +132,8 @@ export async function createSharedControlTestServer(
             return true
           }
         },
-        delayedResponses
+        delayedResponses,
+        subscriptionEnds
       )
     })
   })
@@ -153,6 +156,7 @@ export async function createSharedControlTestServer(
     requests,
     auths,
     connectionCount: () => connectionCount,
+    endActiveSubscriptions: () => subscriptionEnds.splice(0).forEach((send) => send()),
     flushDelayedResponses: () => delayedResponses.splice(0).forEach((send) => send())
   }
 }
@@ -163,7 +167,8 @@ function handleRequest(
   requests: SharedControlTestServer['requests'],
   request: { id: string; method: string; params?: unknown },
   options: SharedControlTestServerOptions & { closeAfterStreamingResponse: () => boolean },
-  delayedResponses: (() => void)[]
+  delayedResponses: (() => void)[],
+  subscriptionEnds: (() => void)[]
 ): void {
   requests.push(request)
   if (options.sendKeepaliveBeforeResponse && options.keepaliveDelayMs !== undefined) {
@@ -200,7 +205,7 @@ function handleRequest(
       streaming: streaming ? true : undefined,
       _meta: { runtimeId: 'runtime-test' }
     })
-    if (streaming && options.endStreamingResponseAfterReady) {
+    const sendEnd = (): void => {
       sendEncrypted(ws, sharedKey, {
         id: request.id,
         ok: true,
@@ -208,6 +213,11 @@ function handleRequest(
         streaming: true,
         _meta: { runtimeId: 'runtime-test' }
       })
+    }
+    if (streaming && options.endStreamingResponseAfterReady) {
+      sendEnd()
+    } else if (streaming) {
+      subscriptionEnds.push(sendEnd)
     }
   }
   const closeAfterResponse = streaming && options.closeAfterStreamingResponse()

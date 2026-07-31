@@ -14,23 +14,27 @@ export type SharedControlSessionProbeHooks = {
   hasSubscriptions: () => boolean
   isReady: () => boolean
   getSocket: () => WebSocket | null
-  probe: (timeoutMs: number) => Promise<unknown>
+  probe: (timeoutMs: number, signal: AbortSignal) => Promise<unknown>
   // Why: the socket-closed path already owns reconnect and subscription replay.
   forceClose: (error: RemoteRuntimeClientError) => void
 }
 
 export class SharedControlSessionProbe {
   private timer: ReturnType<typeof setTimeout> | null = null
+  private probeAbortController: AbortController | null = null
 
   constructor(private readonly hooks: SharedControlSessionProbeHooks) {}
 
   schedule(): void {
-    this.clear()
     if (
       this.hooks.isIntentionallyClosed() ||
       !this.hooks.hasSubscriptions() ||
       !this.hooks.isReady()
     ) {
+      this.clear()
+      return
+    }
+    if (this.timer || this.probeAbortController) {
       return
     }
     const timer = setTimeout(() => {
@@ -50,6 +54,9 @@ export class SharedControlSessionProbe {
       clearTimeout(this.timer)
       this.timer = null
     }
+    const probeAbortController = this.probeAbortController
+    this.probeAbortController = null
+    probeAbortController?.abort()
   }
 
   private async runProbe(): Promise<void> {
@@ -61,13 +68,26 @@ export class SharedControlSessionProbe {
       return
     }
     const probedSocket = this.hooks.getSocket()
+    const probeAbortController = new AbortController()
+    this.probeAbortController = probeAbortController
     try {
-      await this.hooks.probe(this.hooks.timeoutMs)
+      await this.hooks.probe(this.hooks.timeoutMs, probeAbortController.signal)
+      if (this.probeAbortController !== probeAbortController) {
+        return
+      }
+      this.probeAbortController = null
       // Why: a replacement socket owns its own probe schedule.
       if (this.hooks.getSocket() === probedSocket) {
         this.schedule()
       }
     } catch (error) {
+      const wasCancelled = probeAbortController.signal.aborted
+      if (this.probeAbortController === probeAbortController) {
+        this.probeAbortController = null
+      }
+      if (wasCancelled) {
+        return
+      }
       const probeError = toRemoteRuntimeClientError(error)
       if (probeError.code === 'remote_runtime_busy' && this.hooks.getSocket() === probedSocket) {
         this.schedule()

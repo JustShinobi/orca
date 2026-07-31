@@ -638,6 +638,61 @@ describe('RemoteRuntimeSharedControlConnection', () => {
     }
   })
 
+  it('retires an in-flight probe when the server ends the final subscription', async () => {
+    const server = await createServer({ silentMethods: ['status.get'] })
+    const connection = new RemoteRuntimeSharedControlConnection(server.pairing, {
+      sessionProbeIntervalMs: 20,
+      sessionProbeTimeoutMs: 10_000
+    })
+    const onClose = vi.fn()
+    const onResponse = vi.fn()
+
+    try {
+      await connection.subscribe('runtime.clientEvents.subscribe', null, 1000, {
+        onResponse,
+        onError: vi.fn(),
+        onClose
+      })
+      await vi.waitFor(() =>
+        expect(server.requests.map((request) => request.method)).toContain('status.get')
+      )
+      expect(connection.getDiagnostics()).toMatchObject({
+        state: 'ready',
+        pendingRequestCount: 1,
+        subscriptionCount: 1
+      })
+      expect(getRemoteRuntimeRequestAdmissionEvidence().pendingRequestCount).toBe(1)
+      const probeRequestId = server.requests.find((request) => request.method === 'status.get')!.id
+
+      server.endActiveSubscriptions()
+
+      await vi.waitFor(() => expect(onResponse).toHaveBeenCalledTimes(2))
+      const unsafe = connection as unknown as {
+        retiredRequestIds: { has: (requestId: string) => boolean }
+        sessionProbe: {
+          probeAbortController: AbortController | null
+          timer: ReturnType<typeof setTimeout> | null
+        }
+      }
+      expect(connection.getDiagnostics()).toMatchObject({
+        state: 'ready',
+        pendingRequestCount: 0,
+        subscriptionCount: 0
+      })
+      expect(getRemoteRuntimeRequestAdmissionEvidence()).toEqual({
+        pendingRequestCount: 0,
+        retainedBytes: 0
+      })
+      expect(unsafe.sessionProbe.probeAbortController).toBeNull()
+      expect(unsafe.sessionProbe.timer).toBeNull()
+      expect(unsafe.retiredRequestIds.has(probeRequestId)).toBe(true)
+      expect(server.connectionCount()).toBe(1)
+      expect(onClose).not.toHaveBeenCalled()
+    } finally {
+      connection.close()
+    }
+  })
+
   it('keeps a responsive connection on one socket while session probes succeed', async () => {
     const server = await createServer()
     const connection = new RemoteRuntimeSharedControlConnection(server.pairing, {

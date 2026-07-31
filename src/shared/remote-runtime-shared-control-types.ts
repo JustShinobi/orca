@@ -23,6 +23,7 @@ export type SharedControlPendingRequest<TResult> = {
   reject: (error: Error) => void
   timeout: ReturnType<typeof setTimeout>
   preparedRequest?: RemoteRuntimePreparedRequest | null
+  releaseCancellation?: () => void
   // Why: keepalives on the shared socket are armed for an unrelated long-poll,
   // not this request. Only requests that opt in (long-polls issued via the
   // short-RPC path) may have their deadline refreshed by a keepalive; ordinary
