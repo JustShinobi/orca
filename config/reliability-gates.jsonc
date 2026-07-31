@@ -1587,22 +1587,29 @@
       "providers": ["remote-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["remote-runtime"],
-      "coverageNotes": "Deterministic fake-timer and encrypted-WebSocket tests cover active cadence, exact socket-generation fencing, subscription replay, idle cleanup, and in-flight final-subscription retirement. Byte-identical headed desktop and headless serve journeys use a loopback terminating relay that keeps answering control pings after losing the server-facing encrypted session, then require host worktree authority and the paired client's rendered sidebar to converge. Linux, Windows, production relay, mixed-version, and folder-workspace live evidence remain uncollected.",
+      "coverageNotes": "Deterministic fake-timer and encrypted-WebSocket tests cover active cadence, admission saturation, exact socket-generation fencing, subscription replay, server-driven retirement, idle cleanup, and in-flight final-subscription retirement. Byte-identical headed desktop and headless serve journeys use a loopback terminating relay that keeps answering control pings after losing the server-facing encrypted session, then require a newer authenticated shared-control generation, host worktree authority, and the paired client's rendered sidebar to converge. Linux, Windows, production relay, mixed-version, and folder-workspace live evidence remain uncollected.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/pull/10235",
         "https://github.com/stablyai/orca/issues/7718"
       ],
       "invariant": "A shared-control connection with passive subscriptions must not treat RFC 6455 pong traffic from a terminating relay as proof that the server still owns its encrypted session or subscription registry. While ready and subscribed, one bounded encrypted session probe per connection must detect lost authority, close only the probed socket generation, reconnect, and replay every live logical subscription. No probe timer or recovery may survive the last subscription, intentional close, socket replacement, or idle one-shot request.",
-      "oracle": "Use fake timers to require zero retained probe timers without subscriptions, exactly one timer while ready and subscribed, one successful re-arm, and no re-arm or forced recovery when the last subscription retires during an in-flight success or failure. In both a visible isolated desktop host and a separate headless `orca serve`, forward the initial encrypted session through a terminating relay, sever only its server-facing socket, retain the client-facing socket and automatic pongs, and add a real host repo/worktree. Require the host inventory to contain the worktree while the paired client's store and sidebar are initially absent, require at least one control ping during that false-liveness window, then require a replacement authenticated connection plus the exact worktree in both client state and rendered DOM.",
+      "oracle": "Use fake timers to require zero retained probe timers without subscriptions, exactly one timer while ready and subscribed, one successful re-arm, and no re-arm or forced recovery when the last subscription retires during an in-flight success or failure. Saturate all 256 local request admissions and require a probe to re-arm without an encrypted send, socket close, or pending-RPC rejection. Deliver a server-driven final `{type:end}` and require immediate probe retirement. In both a visible isolated desktop host and a separate headless `orca serve`, forward the initial encrypted session through a terminating relay, sever only its server-facing socket, retain the client-facing socket and automatic pongs, and add a real host repo/worktree. Require the host inventory to contain the worktree while the paired client's store and sidebar are initially absent, require at least one control ping during that false-liveness window, then require the shared-control `lastConnectedAt` generation to advance plus the exact worktree in both client state and rendered DOM.",
       "commands": [
-        "pnpm exec vitest run --config config/vitest.config.ts src/shared/remote-runtime-shared-control-session-probe.test.ts src/shared/remote-runtime-shared-control-connection.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/shared/remote-runtime-shared-control-boundary.test.ts src/shared/remote-runtime-shared-control-connection.test.ts src/shared/remote-runtime-shared-control-keepalive-refresh.test.ts src/shared/remote-runtime-shared-control-reconnect.test.ts src/shared/remote-runtime-shared-control-retired-request-ids.test.ts src/shared/remote-runtime-shared-control-session-probe.test.ts src/shared/remote-runtime-shared-control-socket-generation.test.ts src/shared/remote-runtime-shared-control-subscription-close.test.ts src/shared/remote-runtime-shared-control-subscriptions.test.ts --reporter=dot",
         "pnpm exec electron-vite build --mode e2e",
         "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/pr10235-stale-subscription-restart.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
         "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/pr10235-stale-subscription-restart.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1"
       ],
       "testFiles": [
+        "src/shared/remote-runtime-shared-control-boundary.test.ts",
+        "src/shared/remote-runtime-shared-control-keepalive-refresh.test.ts",
+        "src/shared/remote-runtime-shared-control-reconnect.test.ts",
+        "src/shared/remote-runtime-shared-control-retired-request-ids.test.ts",
         "src/shared/remote-runtime-shared-control-session-probe.test.ts",
         "src/shared/remote-runtime-shared-control-connection.test.ts",
+        "src/shared/remote-runtime-shared-control-socket-generation.test.ts",
+        "src/shared/remote-runtime-shared-control-subscription-close.test.ts",
+        "src/shared/remote-runtime-shared-control-subscriptions.test.ts",
         "tests/e2e/pr10235-stale-subscription-restart.spec.ts"
       ],
       "assertionRefs": [
@@ -1619,8 +1626,16 @@
           "file": "src/shared/remote-runtime-shared-control-connection.test.ts",
           "assertions": [
             "detects a dead E2EE session via the session probe when the relay still answers pings",
+            "reschedules a locally admission-blocked probe without closing a healthy socket",
+            "clears the session probe when the server ends the final subscription",
             "keeps a responsive connection on one socket while session probes succeed",
             "does not run session probes when no subscriptions are active"
+          ]
+        },
+        {
+          "file": "src/shared/remote-runtime-shared-control-socket-generation.test.ts",
+          "assertions": [
+            "ignores stale close callbacks and accepts one close for the current socket"
           ]
         },
         {
@@ -1636,10 +1651,10 @@
           "date": "2026-07-31",
           "runner": "local",
           "platform": "macos",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/remote-runtime-shared-control-session-probe.test.ts src/shared/remote-runtime-shared-control-connection.test.ts --reporter=dot",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/remote-runtime-shared-control-boundary.test.ts src/shared/remote-runtime-shared-control-connection.test.ts src/shared/remote-runtime-shared-control-keepalive-refresh.test.ts src/shared/remote-runtime-shared-control-reconnect.test.ts src/shared/remote-runtime-shared-control-retired-request-ids.test.ts src/shared/remote-runtime-shared-control-session-probe.test.ts src/shared/remote-runtime-shared-control-socket-generation.test.ts src/shared/remote-runtime-shared-control-subscription-close.test.ts src/shared/remote-runtime-shared-control-subscriptions.test.ts --reporter=dot",
           "result": "passed",
           "durationSeconds": 4,
-          "summary": "Two shared-control files and 34 tests passed with encrypted-session failure recovery, exact socket-generation fencing, responsive-session stability, fake-timer cadence, and zero idle re-arm or recovery."
+          "summary": "Nine shared-control files and 55 tests passed with encrypted-session failure recovery, 256-request admission saturation, server-driven final-subscription retirement, exact socket-generation fencing, responsive-session stability, fake-timer cadence, and zero idle re-arm or recovery."
         },
         {
           "date": "2026-07-31",
@@ -1647,8 +1662,8 @@
           "platform": "macos",
           "command": "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/pr10235-stale-subscription-restart.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
           "result": "passed",
-          "durationSeconds": 32,
-          "summary": "A visible isolated Orca host and separate paired desktop client recovered one zombified encrypted session after two relay-served control pings; a replacement connection delivered the new host worktree to client state and the rendered sidebar."
+          "durationSeconds": 33,
+          "summary": "A visible isolated Orca host and separate paired desktop client recovered one zombified encrypted session after two relay-served control pings; the authenticated shared-control generation advanced and delivered the new host worktree to client state and the rendered sidebar."
         },
         {
           "date": "2026-07-31",
@@ -1656,8 +1671,8 @@
           "platform": "macos",
           "command": "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/pr10235-stale-subscription-restart.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
           "result": "passed",
-          "durationSeconds": 30,
-          "summary": "An isolated headless `orca serve` and separate paired desktop client passed the same relay-pong, host-inventory, replacement-connection, client-state, and rendered-sidebar oracle."
+          "durationSeconds": 29,
+          "summary": "An isolated headless `orca serve` and separate paired desktop client passed the same relay-pong, host-inventory, authenticated-generation, client-state, and rendered-sidebar oracle."
         }
       ],
       "runtimeBudget": {
@@ -1666,11 +1681,11 @@
       },
       "flakeHistory": {
         "status": "unknown",
-        "evidence": "Deterministic contracts plus two consecutive headed and three consecutive isolated-headless macOS journeys pass. CI and cross-platform soak history are not yet available."
+        "evidence": "Deterministic contracts, earlier fixture-isolation repeats, and the current causal-generation headed/headless macOS journeys pass. CI and cross-platform soak history are not yet available."
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "The byte-identical headed and headless oracle stayed stale for 40 seconds on pinned latest main and on the candidate reverted, despite at least three relay-served control pings and authoritative host inventory. The rebased candidate and factory head opened a replacement authenticated connection and rendered the new worktree without reload. The original idle-timer implementation retained a scheduled wakeup after subscriptions closed; the factory lifecycle tests fail that implementation and pass with subscription-owned scheduling and in-flight retirement guards."
+        "evidence": "The byte-identical headed and headless oracle stayed stale for 40 seconds on pinned latest main and on the candidate reverted, despite at least three relay-served control pings, authoritative host inventory, and possible unrelated connection churn. The revised factory target advanced the authenticated shared-control generation and rendered the new worktree without reload. The original idle-timer implementation retained a scheduled wakeup after subscriptions closed; the factory lifecycle tests fail that implementation and pass with subscription-owned scheduling, admission-safe rescheduling, server-driven retirement reconciliation, and in-flight retirement guards."
       },
       "performanceBudget": {
         "required": true,

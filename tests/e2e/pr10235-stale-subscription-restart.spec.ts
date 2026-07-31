@@ -69,6 +69,20 @@ async function readWorktreeSurface(
   )
 }
 
+async function readSharedControlGeneration(page: Page, environmentId: string): Promise<number> {
+  return page.evaluate(async (selector) => {
+    const response = await window.api.runtimeEnvironments.getStatus({
+      selector,
+      timeoutMs: 5000
+    })
+    const generation = response.ok ? response.result.remoteControl?.lastConnectedAt : null
+    if (typeof generation !== 'number') {
+      throw new Error('Shared-control generation is unavailable')
+    }
+    return generation
+  }, environmentId)
+}
+
 async function runStaleSubscriptionOracle(args: {
   host: RuntimeClient
   initialRepoPath: string
@@ -105,7 +119,10 @@ async function runStaleSubscriptionOracle(args: {
       .poll(() => relay.evidence().activeConnectionCount, { timeout: 10_000 })
       .toBeGreaterThan(0)
 
-    const connectionCountBeforeFault = relay.evidence().connectionCount
+    const sharedControlGenerationBeforeFault = await readSharedControlGeneration(
+      client.page,
+      client.environmentId
+    )
     await relay.zombifyActiveSessions()
     const added = await args.host.call<{ repo: { id: string } }>('repo.add', {
       path: addedRepoPath,
@@ -150,14 +167,31 @@ async function runStaleSubscriptionOracle(args: {
       )
     }
 
+    await expect
+      .poll(() => readSharedControlGeneration(client.page, client.environmentId), {
+        timeout: 10_000
+      })
+      .toBeGreaterThan(sharedControlGenerationBeforeFault)
+
     const evidence = relay.evidence()
     expect(evidence.controlPingCount).toBeGreaterThan(0)
-    expect(evidence.connectionCount).toBeGreaterThan(connectionCountBeforeFault)
+    expect(evidence.zombifiedConnectionCount).toBeGreaterThan(0)
+    const sharedControlGenerationAfterFault = await readSharedControlGeneration(
+      client.page,
+      client.environmentId
+    )
     await client.page.screenshot({
       path: args.testInfo.outputPath(`${args.topology}-self-healed.png`),
       fullPage: true
     })
-    console.info(`[pr10235] ${JSON.stringify({ topology: args.topology, ...evidence })}`)
+    console.info(
+      `[pr10235] ${JSON.stringify({
+        topology: args.topology,
+        sharedControlGenerationBeforeFault,
+        sharedControlGenerationAfterFault,
+        ...evidence
+      })}`
+    )
   } finally {
     await client.dispose()
     await relay.close()

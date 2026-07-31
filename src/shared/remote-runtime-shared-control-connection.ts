@@ -215,7 +215,8 @@ export class RemoteRuntimeSharedControlConnection {
         })
         this.sessionProbe.schedule()
       },
-      replaySubscriptions: () => this.replaySubscriptions()
+      replaySubscriptions: () => this.replaySubscriptions(),
+      reconcileSubscriptionLifecycle: () => this.reconcileSubscriptionLifecycle()
     })
   }
 
@@ -262,6 +263,10 @@ export class RemoteRuntimeSharedControlConnection {
       deviceToken: this.pairing.deviceToken,
       send: (payload) => this.sendEncrypted(payload)
     })
+    this.reconcileSubscriptionLifecycle()
+  }
+
+  private reconcileSubscriptionLifecycle(): void {
     this.sessionProbe.schedule()
     this.reconnect.clearWhenIdle(this.subscriptions.size === 0 && this.state === 'closed')
   }

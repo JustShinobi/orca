@@ -68,13 +68,18 @@ export class SharedControlSessionProbe {
         this.schedule()
       }
     } catch (error) {
+      const probeError = toRemoteRuntimeClientError(error)
+      if (probeError.code === 'remote_runtime_busy' && this.hooks.getSocket() === probedSocket) {
+        this.schedule()
+        return
+      }
       // Why: force-closing a replacement socket would kill a recovered session.
       if (
         this.hooks.getSocket() === probedSocket &&
         this.hooks.hasSubscriptions() &&
         !this.hooks.isIntentionallyClosed()
       ) {
-        this.hooks.forceClose(toRemoteRuntimeClientError(error))
+        this.hooks.forceClose(probeError)
       }
     }
   }

@@ -22,6 +22,7 @@ export function dispatchSharedControlFrame(args: {
   retiredRequestIds: SharedControlRetiredRequestIds
   deviceToken: string
   send: (payload: unknown) => boolean
+  reconcileSubscriptionLifecycle: () => void
 }): void {
   if (args.frame.type === 'keepalive') {
     refreshSharedControlPendingRequestTimeouts(args.pendingRequests)
@@ -46,6 +47,7 @@ export function dispatchSharedControlFrame(args: {
     })
     if (!args.subscriptions.has(response.id)) {
       args.retiredRequestIds.retire(response.id)
+      args.reconcileSubscriptionLifecycle()
     }
     return
   }

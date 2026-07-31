@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  REMOTE_RUNTIME_MAX_PENDING_REQUESTS,
   REMOTE_RUNTIME_MAX_PENDING_RPC_BYTES,
   retainedRemoteRuntimeJsonStringBytes,
   serializeRemoteRuntimeRpcRequest
@@ -561,6 +562,80 @@ describe('RemoteRuntimeSharedControlConnection', () => {
     expect(onClose).not.toHaveBeenCalled()
 
     connection.close()
+  })
+
+  it('reschedules a locally admission-blocked probe without closing a healthy socket', async () => {
+    const server = await createServer({ silentMethods: ['worktree.hang'] })
+    const connection = new RemoteRuntimeSharedControlConnection(server.pairing, {
+      sessionProbeIntervalMs: 60_000,
+      sessionProbeTimeoutMs: 1000
+    })
+    const onClose = vi.fn()
+    const onError = vi.fn()
+    await connection.subscribe('runtime.clientEvents.subscribe', null, 1000, {
+      onResponse: vi.fn(),
+      onError,
+      onClose
+    })
+    const pending = Array.from({ length: REMOTE_RUNTIME_MAX_PENDING_REQUESTS }, () =>
+      connection.request('worktree.hang', undefined, 60_000).catch(() => undefined)
+    )
+    try {
+      await vi.waitFor(
+        () =>
+          expect(
+            server.requests.filter((request) => request.method === 'worktree.hang')
+          ).toHaveLength(REMOTE_RUNTIME_MAX_PENDING_REQUESTS),
+        { timeout: 5000 }
+      )
+      const unsafe = connection as unknown as {
+        sessionProbe: {
+          runProbe: () => Promise<void>
+          timer: ReturnType<typeof setTimeout> | null
+        }
+      }
+
+      await unsafe.sessionProbe.runProbe()
+
+      expect(server.requests.map((request) => request.method)).not.toContain('status.get')
+      expect(unsafe.sessionProbe.timer).not.toBeNull()
+      expect(server.connectionCount()).toBe(1)
+      expect(connection.getDiagnostics()).toMatchObject({
+        state: 'ready',
+        pendingRequestCount: REMOTE_RUNTIME_MAX_PENDING_REQUESTS,
+        subscriptionCount: 1
+      })
+      expect(onError).not.toHaveBeenCalled()
+      expect(onClose).not.toHaveBeenCalled()
+    } finally {
+      connection.close()
+      await Promise.all(pending)
+    }
+  })
+
+  it('clears the session probe when the server ends the final subscription', async () => {
+    const server = await createServer({ endStreamingResponseAfterReady: true })
+    const connection = new RemoteRuntimeSharedControlConnection(server.pairing, {
+      sessionProbeIntervalMs: 15_000
+    })
+    const onResponse = vi.fn()
+
+    try {
+      await connection.subscribe('runtime.clientEvents.subscribe', null, 1000, {
+        onResponse,
+        onError: vi.fn()
+      })
+      await vi.waitFor(() => expect(onResponse).toHaveBeenCalledTimes(2))
+      const unsafe = connection as unknown as {
+        sessionProbe: { timer: ReturnType<typeof setTimeout> | null }
+      }
+
+      expect(connection.getDiagnostics().subscriptionCount).toBe(0)
+      expect(unsafe.sessionProbe.timer).toBeNull()
+      expect(server.requests.map((request) => request.method)).not.toContain('status.get')
+    } finally {
+      connection.close()
+    }
   })
 
   it('keeps a responsive connection on one socket while session probes succeed', async () => {

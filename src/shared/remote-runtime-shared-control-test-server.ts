@@ -33,6 +33,7 @@ export type SharedControlTestServerOptions = {
   delayedMethods?: string[]
   silentMethods?: string[]
   goSilentOnFirstConnectionAfterFirstStreamingResponse?: boolean
+  endStreamingResponseAfterReady?: boolean
 }
 
 const servers: WebSocketServer[] = []
@@ -199,6 +200,15 @@ function handleRequest(
       streaming: streaming ? true : undefined,
       _meta: { runtimeId: 'runtime-test' }
     })
+    if (streaming && options.endStreamingResponseAfterReady) {
+      sendEncrypted(ws, sharedKey, {
+        id: request.id,
+        ok: true,
+        result: { type: 'end' },
+        streaming: true,
+        _meta: { runtimeId: 'runtime-test' }
+      })
+    }
   }
   const closeAfterResponse = streaming && options.closeAfterStreamingResponse()
   if (options.sendKeepaliveBeforeResponse && options.keepaliveDelayMs === undefined) {
