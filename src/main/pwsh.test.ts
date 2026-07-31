@@ -132,6 +132,51 @@ describe('isPwshAvailable', () => {
     }
   })
 
+  // Why: the renderer's Windows capability read reaches this over IPC, and the sync probe
+  // blocks the Electron main thread for the full timeout when pwsh.exe cold-starts.
+  it('answers IPC callers without blocking the main thread', async () => {
+    const restorePlatform = setPlatform('win32')
+    execFileMock.mockImplementation((_file, _args, _options, callback) => {
+      setTimeout(() => callback(null, 'PowerShell 7.5.0', ''), 0)
+    })
+
+    try {
+      const { isPwshAvailableAsync } = await import('./pwsh')
+      const results = await Promise.all([isPwshAvailableAsync(), isPwshAvailableAsync()])
+      expect(results).toEqual([true, true])
+      // Concurrent readers share one spawn.
+      expect(execFileMock).toHaveBeenCalledTimes(1)
+      expect(execFileMock).toHaveBeenCalledWith(
+        'pwsh.exe',
+        ['-Version'],
+        { timeout: 5000 },
+        expect.any(Function)
+      )
+      expect(execFileSyncMock).not.toHaveBeenCalled()
+    } finally {
+      restorePlatform()
+    }
+  })
+
+  it('reuses the negative cache for async callers so a missing pwsh is not re-spawned', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const restorePlatform = setPlatform('win32')
+    execFileMock.mockImplementation((_file, _args, _options, callback) => {
+      callback(new Error('missing pwsh'), '', '')
+    })
+
+    try {
+      const { isPwshAvailableAsync } = await import('./pwsh')
+      await expect(isPwshAvailableAsync()).resolves.toBe(false)
+      await expect(isPwshAvailableAsync()).resolves.toBe(false)
+      expect(execFileMock).toHaveBeenCalledTimes(1)
+    } finally {
+      restorePlatform()
+      vi.useRealTimers()
+    }
+  })
+
   it('retries non-timeout failures after the negative cache TTL', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)

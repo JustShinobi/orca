@@ -23,6 +23,7 @@ import {
   hasCachedWslAvailability,
   hasCachedWslDistros,
   isWslAvailable,
+  isWslAvailableAsync,
   listWslDistros,
   listWslDistrosAsync,
   parseWslPath,
@@ -493,6 +494,49 @@ describe('WSL availability cache', () => {
       expect(isWslAvailable()).toBe(true)
       expect(isWslAvailable()).toBe(true)
       expect(execFileSyncMock).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // Why: the renderer's capability read reaches this over IPC; a blocking spawn there
+  // stalls every PTY message and window IPC for as long as wsl.exe takes to answer.
+  it('probes availability for IPC callers without blocking the main thread', async () => {
+    execFileMock.mockImplementation((_command, _args, _options, callback) => {
+      callback(null, '', '')
+    })
+
+    await withPlatformAsync('win32', async () => {
+      await expect(isWslAvailableAsync()).resolves.toBe(true)
+      expect(execFileMock).toHaveBeenCalledWith(
+        'wsl.exe',
+        ['--status'],
+        expect.anything(),
+        expect.any(Function)
+      )
+      expect(execFileSyncMock).not.toHaveBeenCalled()
+    })
+  })
+
+  it('shares one wsl.exe spawn between concurrent async probes', async () => {
+    execFileMock.mockImplementation((_command, _args, _options, callback) => {
+      setTimeout(() => callback(null, '', ''), 0)
+    })
+
+    await withPlatformAsync('win32', async () => {
+      const results = await Promise.all([isWslAvailableAsync(), isWslAvailableAsync()])
+      expect(results).toEqual([true, true])
+      expect(execFileMock).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('shares the failure backoff between the async and sync probes', async () => {
+    execFileMock.mockImplementation((_command, _args, _options, callback) => {
+      callback(Object.assign(new Error('not installed'), { code: 'ENOENT' }), '', '')
+    })
+
+    await withPlatformAsync('win32', async () => {
+      await expect(isWslAvailableAsync()).resolves.toBe(false)
+      expect(isWslAvailable()).toBe(false)
+      expect(execFileSyncMock).not.toHaveBeenCalled()
     })
   })
 

@@ -10,6 +10,7 @@ type PwshAvailabilityCache =
 
 let pwshAvailableCache: PwshAvailabilityCache | null = null
 let pwshWarmupInFlight: Promise<boolean> | null = null
+let pwshProbeInFlight: Promise<boolean> | null = null
 
 function isCacheFresh(cache: PwshAvailabilityCache): boolean {
   return (
@@ -62,6 +63,40 @@ export function isPwshAvailable(): boolean {
   }
 
   return pwshAvailableCache?.available ?? false
+}
+
+/**
+ * Async twin of `isPwshAvailable`, sharing its cache.
+ *
+ * Why: the renderer's capability read reaches this over IPC, and the sync probe blocks the
+ * Electron main thread for up to 5s when pwsh.exe cold-starts. Concurrent callers share one spawn.
+ */
+export function isPwshAvailableAsync(): Promise<boolean> {
+  if (pwshAvailableCache && isCacheFresh(pwshAvailableCache)) {
+    return Promise.resolve(pwshAvailableCache.available)
+  }
+
+  if (process.platform !== 'win32') {
+    pwshAvailableCache = { available: false, cachedAt: Date.now(), retryable: false }
+    return Promise.resolve(false)
+  }
+
+  if (pwshProbeInFlight) {
+    return pwshProbeInFlight
+  }
+
+  pwshProbeInFlight = new Promise((resolve) => {
+    execFile('pwsh.exe', ['-Version'], { timeout: PWSH_SYNC_PROBE_TIMEOUT_MS }, (error) => {
+      pwshProbeInFlight = null
+      if (error) {
+        cachePwshProbeFailure(error)
+      } else {
+        pwshAvailableCache = { available: true }
+      }
+      resolve(pwshAvailableCache?.available ?? false)
+    })
+  })
+  return pwshProbeInFlight
 }
 
 export function warmPwshAvailabilityCache(): Promise<boolean> {

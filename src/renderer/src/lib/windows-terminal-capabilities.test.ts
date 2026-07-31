@@ -3,6 +3,7 @@
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { resetWindowsTerminalCapabilityReprobeForTests } from './windows-terminal-capability-reprobe'
 import {
   getCachedWindowsTerminalCapabilities,
   getWindowsTerminalCapabilityOwnerKey,
@@ -104,6 +105,7 @@ describe('windows terminal capabilities', () => {
       act(() => root.unmount())
     }
     resetWindowsTerminalCapabilitiesForTests()
+    resetWindowsTerminalCapabilityReprobeForTests()
     vi.unstubAllGlobals()
   })
 
@@ -614,6 +616,44 @@ describe('windows terminal capabilities', () => {
       expect(wslIsAvailable).toHaveBeenCalledTimes(2)
       vi.advanceTimersByTime(30_000)
       expect(wslIsAvailable).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops re-probing a Windows host that keeps answering "no WSL"', async () => {
+    vi.useFakeTimers()
+    const { wslIsAvailable, pwshIsAvailable } = stubTerminalCapabilityApi({
+      wslAvailable: false,
+      pwshAvailable: false,
+      wslDistros: []
+    })
+
+    function HookProbe(): null {
+      useWindowsTerminalCapabilities(true)
+      return null
+    }
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    hookRoots.push(root)
+
+    try {
+      await act(async () => {
+        root.render(createElement(HookProbe))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30 * 60_000)
+      })
+
+      // Each read spawns a blocking wsl.exe/pwsh.exe on the main process, so the backoff
+      // must park rather than keep firing every 30s for the lifetime of the app.
+      expect(wslIsAvailable.mock.calls.length).toBeLessThanOrEqual(4)
+      expect(pwshIsAvailable.mock.calls.length).toBeLessThanOrEqual(4)
     } finally {
       vi.useRealTimers()
     }
