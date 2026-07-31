@@ -105,6 +105,7 @@ async function runStaleSubscriptionOracle(args: {
       .poll(() => relay.evidence().activeConnectionCount, { timeout: 10_000 })
       .toBeGreaterThan(0)
 
+    const connectionCountBeforeFault = relay.evidence().connectionCount
     await relay.zombifyActiveSessions()
     const added = await args.host.call<{ repo: { id: string } }>('repo.add', {
       path: addedRepoPath,
@@ -150,7 +151,8 @@ async function runStaleSubscriptionOracle(args: {
     }
 
     const evidence = relay.evidence()
-    expect(evidence.connectionCount).toBeGreaterThan(evidence.zombifiedConnectionCount)
+    expect(evidence.controlPingCount).toBeGreaterThan(0)
+    expect(evidence.connectionCount).toBeGreaterThan(connectionCountBeforeFault)
     await client.page.screenshot({
       path: args.testInfo.outputPath(`${args.topology}-self-healed.png`),
       fullPage: true
@@ -195,13 +197,17 @@ test('self-heals a headed server worktree subscription behind a zombie relay @he
 })
 
 test('self-heals a headless serve worktree subscription behind a zombie relay', async ({
-  testRepoPath
+  testRepoPath: _testRepoPath
 }, testInfo) => {
   test.setTimeout(150_000)
-  const host = await launchHeadlessPairedRuntimeHost()
+  const initialRepoPath = createGitRepo()
+  const host = await launchHeadlessPairedRuntimeHost().catch((error) => {
+    rmSync(initialRepoPath, { recursive: true, force: true })
+    throw error
+  })
   try {
     const added = await host.client.call<{ repo: { id: string } }>('repo.add', {
-      path: testRepoPath,
+      path: initialRepoPath,
       kind: 'git'
     })
     await host.client.call('repo.update', {
@@ -210,12 +216,13 @@ test('self-heals a headless serve worktree subscription behind a zombie relay', 
     })
     await runStaleSubscriptionOracle({
       host: host.client,
-      initialRepoPath: testRepoPath,
+      initialRepoPath,
       offer: host.offer,
       testInfo,
       topology: 'headless'
     })
   } finally {
     await host.dispose()
+    rmSync(initialRepoPath, { recursive: true, force: true })
   }
 })
