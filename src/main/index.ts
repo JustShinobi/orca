@@ -2438,11 +2438,20 @@ void app.whenReady().then(async () => {
                       })
                 : undefined,
             cleanup: async () => {
-              await runtimeService.closeTerminal(terminalHandle).catch(() => {})
+              await runtimeService.closeTerminal(terminalHandle).catch((error) => {
+                console.warn('[automations] failed to close headless launch terminal:', error)
+              })
               if (automation.workspaceMode === 'new_per_run') {
+                // Why: a surviving per-run worktree is the user's to reclaim, so name it.
                 await runtimeService
                   .removeManagedWorktree(`id:${workspaceId}`, true, false)
-                  .catch(() => {})
+                  .catch((error) => {
+                    console.warn(
+                      '[automations] failed to remove per-run worktree after launch failure:',
+                      workspaceId,
+                      error
+                    )
+                  })
               }
             },
             completion

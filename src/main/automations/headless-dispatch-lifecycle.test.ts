@@ -256,6 +256,69 @@ describe('headless automation dispatch lifecycle', () => {
     })
   })
 
+  it('runs the launch cleanup when the completion observable rejects', async () => {
+    const store = await createStore()
+    const automation = await createAutomation(store, 'codex')
+    const cleanup = vi.fn(async () => {})
+    let rejectCompletion!: (error: Error) => void
+    const completion = new Promise<never>((_resolve, reject) => {
+      rejectCompletion = reject
+    })
+    const service = new AutomationService(store, {
+      allowRemoteHostScheduling: true,
+      headlessDispatcher: vi.fn().mockResolvedValue({
+        workspaceId: 'wt1',
+        terminalSessionId: 'tab-1',
+        terminalPaneKey: null,
+        cleanup,
+        completion
+      })
+    })
+
+    const run = await service.runNow(automation.id)
+    rejectCompletion(new Error('terminal read failed'))
+
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledTimes(1))
+    expect(
+      store.listAutomationRuns(automation.id).find((entry) => entry.id === run.id)
+    ).toMatchObject({
+      status: 'dispatch_failed',
+      error: 'terminal read failed'
+    })
+  })
+
+  it('releases the registered cleanup when the dispatched persist throws', async () => {
+    const store = await createStore()
+    const automation = await createAutomation(store, 'codex')
+    const cleanup = vi.fn(async () => {})
+    const service = new AutomationService(store, {
+      allowRemoteHostScheduling: true,
+      headlessDispatcher: vi.fn().mockResolvedValue({
+        workspaceId: 'wt1',
+        terminalSessionId: 'tab-1',
+        terminalPaneKey: null,
+        cleanup
+      })
+    })
+    const original = store.updateAutomationRun.bind(store)
+    vi.spyOn(store, 'updateAutomationRun').mockImplementationOnce((result) => {
+      if (result.status === 'dispatched') {
+        throw new Error('Automation run not found.')
+      }
+      return original(result)
+    })
+
+    const run = await service.runNow(automation.id)
+
+    expect(cleanup).toHaveBeenCalledTimes(1)
+    expect(
+      store.listAutomationRuns(automation.id).find((entry) => entry.id === run.id)
+    ).toMatchObject({
+      status: 'dispatch_failed',
+      error: 'Automation run not found.'
+    })
+  })
+
   it('allows an interactive terminal identity clear on a completed run', async () => {
     const store = await createStore()
     const automation = await createAutomation(store, 'claude')

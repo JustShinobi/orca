@@ -152,8 +152,8 @@ export async function requestHeadlessAutomationDispatch(params: {
           })
           params.clearLaunchCleanup?.(run.id)
         })
-        .catch((error) =>
-          params
+        .catch(async (error) => {
+          await params
             .markDispatchResult({
               runId: run.id,
               status: 'dispatch_failed',
@@ -161,12 +161,23 @@ export async function requestHeadlessAutomationDispatch(params: {
               error: error instanceof Error ? error.message : String(error)
             })
             .catch(() => {})
-            .finally(() => params.clearLaunchCleanup?.(run.id))
-        )
+          // Why: an unexpected completion rejection still owns the PTY and any
+          // per-run worktree; clearing the registration alone would leak both.
+          if (params.cleanupLaunch) {
+            await params.cleanupLaunch(run.id).catch(() => {})
+          }
+          params.clearLaunchCleanup?.(run.id)
+        })
     }
     return updated
   } catch (error) {
-    return params.store.updateAutomationRun({
+    // Why: a throw after the cleanup registration leaves no later trigger for it,
+    // and markDispatchResult owns dispatch-token clearing plus the final-state guard.
+    if (params.cleanupLaunch) {
+      await params.cleanupLaunch(run.id).catch(() => {})
+    }
+    params.clearLaunchCleanup?.(run.id)
+    return params.markDispatchResult({
       runId: run.id,
       status: 'dispatch_failed',
       workspaceId: automation.workspaceId,
