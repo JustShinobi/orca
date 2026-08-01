@@ -4,7 +4,6 @@ import type {
   AutomationPrecheckResult,
   AutomationRun
 } from '../../shared/automations-types'
-import { isFinalAutomationRunStatus } from '../../shared/automations-types'
 import type { Store } from '../persistence'
 import type { HeadlessAutomationDispatcher } from './headless-dispatch'
 import type { AutomationRunTargetResult } from './run-target-resolution'
@@ -12,6 +11,48 @@ import {
   didAutomationPrecheckPass,
   formatAutomationPrecheckFailure
 } from '../../shared/automation-precheck'
+
+const HEADLESS_LAUNCH_CLEANUP_TIMEOUT_MS = 10_000
+
+export class HeadlessLaunchCleanupRegistry {
+  private readonly cleanups = new Map<string, () => Promise<void>>()
+
+  register(runId: string, cleanup: () => Promise<void>): void {
+    this.cleanups.set(runId, cleanup)
+  }
+
+  clear(runId: string): void {
+    this.cleanups.delete(runId)
+  }
+
+  async run(runId: string): Promise<void> {
+    const cleanup = this.cleanups.get(runId)
+    this.cleanups.delete(runId)
+    if (!cleanup) {
+      return
+    }
+    let timer: ReturnType<typeof setTimeout> | null = null
+    await new Promise<void>((resolve) => {
+      let settled = false
+      const finish = (): void => {
+        if (settled) {
+          return
+        }
+        settled = true
+        if (timer) {
+          clearTimeout(timer)
+          timer = null
+        }
+        resolve()
+      }
+      timer = setTimeout(finish, HEADLESS_LAUNCH_CLEANUP_TIMEOUT_MS)
+      void Promise.resolve()
+        .then(cleanup)
+        .catch(() => {})
+        .then(finish)
+    })
+  }
+}
 
 export async function requestHeadlessAutomationDispatch(params: {
   store: Store
@@ -22,6 +63,9 @@ export async function requestHeadlessAutomationDispatch(params: {
   codexHeadlessLaunchTimeoutMs: number
   runPrecheck: (automationId: string, runId: string) => Promise<AutomationPrecheckResult | null>
   markDispatchResult: (result: AutomationDispatchResult) => Promise<AutomationRun>
+  registerLaunchCleanup?: (runId: string, cleanup: () => Promise<void>) => void
+  clearLaunchCleanup?: (runId: string) => void
+  cleanupLaunch?: (runId: string) => Promise<void>
 }): Promise<AutomationRun> {
   const { automation, run } = params
   const precheckResult =
@@ -38,26 +82,14 @@ export async function requestHeadlessAutomationDispatch(params: {
     })
   }
 
-  const launchDeadlineAt =
-    automation.agentId === 'codex' ? Date.now() + params.codexHeadlessLaunchTimeoutMs : null
-  const dispatchRun =
-    launchDeadlineAt === null
-      ? run
-      : params.store.updateAutomationRun({
-          runId: run.id,
-          status: 'pending',
-          workspaceId: run.workspaceId,
-          launchDeadlineAt,
-          launchEvidenceAt: null,
-          error: null
-        })
-
   try {
     const launch = await params.headlessDispatcher({
       automation,
-      run: dispatchRun,
+      run,
       target: params.target
     })
+    const launchDeadlineAt =
+      automation.agentId === 'codex' ? Date.now() + params.codexHeadlessLaunchTimeoutMs : null
     const launchRunTarget = {
       workspaceId: launch.workspaceId,
       workspaceDisplayName: launch.workspaceDisplayName ?? null,
@@ -65,7 +97,10 @@ export async function requestHeadlessAutomationDispatch(params: {
       terminalPaneKey: launch.terminalPaneKey ?? null,
       terminalPtyId: launch.terminalPtyId ?? null
     }
-    const updated = params.store.updateAutomationRun({
+    if (launch.cleanup) {
+      params.registerLaunchCleanup?.(run.id, launch.cleanup)
+    }
+    const updated = await params.markDispatchResult({
       runId: run.id,
       status: 'dispatched',
       ...launchRunTarget,
@@ -73,22 +108,41 @@ export async function requestHeadlessAutomationDispatch(params: {
       launchEvidenceAt: null,
       error: null
     })
-    if (launch.launchReady) {
-      void launch.launchReady.then(
-        () => markHeadlessLaunchReady(params.store, run.id),
-        (error) =>
-          void params.markDispatchResult({
+    const launchReady =
+      typeof launch.launchReady === 'function'
+        ? launchDeadlineAt === null
+          ? null
+          : launch.launchReady(launchDeadlineAt)
+        : launch.launchReady
+    if (launchReady) {
+      void launchReady
+        .then(async () => {
+          await params.markDispatchResult({
             runId: run.id,
-            status: 'dispatch_failed',
-            ...launchRunTarget,
-            error: error instanceof Error ? error.message : String(error)
+            status: 'dispatched',
+            launchEvidenceAt: Date.now()
           })
-      )
+          params.clearLaunchCleanup?.(run.id)
+        })
+        .catch(async (error) => {
+          await params
+            .markDispatchResult({
+              runId: run.id,
+              status: 'dispatch_failed',
+              ...launchRunTarget,
+              error: error instanceof Error ? error.message : String(error)
+            })
+            .catch(() => {})
+          if (params.cleanupLaunch) {
+            await params.cleanupLaunch(run.id).catch(() => {})
+          }
+          params.clearLaunchCleanup?.(run.id)
+        })
     }
     if (launch.completion) {
       void launch.completion
-        .then((completion) =>
-          params.markDispatchResult({
+        .then(async (completion) => {
+          await params.markDispatchResult({
             runId: run.id,
             status: completion.status,
             ...launchRunTarget,
@@ -96,14 +150,18 @@ export async function requestHeadlessAutomationDispatch(params: {
             outputSnapshot: completion.outputSnapshot ?? null,
             error: completion.error ?? null
           })
-        )
+          params.clearLaunchCleanup?.(run.id)
+        })
         .catch((error) =>
-          params.markDispatchResult({
-            runId: run.id,
-            status: 'dispatch_failed',
-            ...launchRunTarget,
-            error: error instanceof Error ? error.message : String(error)
-          })
+          params
+            .markDispatchResult({
+              runId: run.id,
+              status: 'dispatch_failed',
+              ...launchRunTarget,
+              error: error instanceof Error ? error.message : String(error)
+            })
+            .catch(() => {})
+            .finally(() => params.clearLaunchCleanup?.(run.id))
         )
     }
     return updated
@@ -117,25 +175,33 @@ export async function requestHeadlessAutomationDispatch(params: {
   }
 }
 
-export function reconcileStaleCodexHeadlessDispatches(params: {
+export async function reconcileStaleCodexHeadlessDispatches(params: {
   store: Store
   now: number
   markDispatchResult: (result: AutomationDispatchResult) => Promise<AutomationRun>
-}): void {
+  cleanupLaunch?: (runId: string) => Promise<void>
+  clearLaunchCleanup?: (runId: string) => void
+}): Promise<void> {
+  const staleRuns: AutomationRun[] = []
   for (const automation of params.store.listAutomations()) {
     if (automation.agentId !== 'codex') {
       continue
     }
     for (const run of params.store.listAutomationRuns(automation.id)) {
       if (
-        (run.status !== 'pending' && run.status !== 'dispatched') ||
+        run.status !== 'dispatched' ||
         run.launchEvidenceAt != null ||
         run.launchDeadlineAt == null ||
         run.launchDeadlineAt > params.now
       ) {
         continue
       }
-      void params
+      staleRuns.push(run)
+    }
+  }
+  await Promise.all(
+    staleRuns.map(async (run) => {
+      await params
         .markDispatchResult({
           runId: run.id,
           status: 'dispatch_failed',
@@ -146,27 +212,11 @@ export function reconcileStaleCodexHeadlessDispatches(params: {
           terminalPtyId: run.terminalPtyId,
           error: 'Codex headless agent did not produce launch evidence before the deadline.'
         })
-        .catch(() => {
-          // A retained run can disappear while stale reconciliation collects usage.
-        })
-    }
-  }
-}
-
-function markHeadlessLaunchReady(store: Store, runId: string): void {
-  const run = store.listAutomationRuns().find((entry) => entry.id === runId)
-  if (!run || isFinalAutomationRunStatus(run.status)) {
-    return
-  }
-  store.updateAutomationRun({
-    runId,
-    status: 'dispatched',
-    workspaceId: run.workspaceId,
-    workspaceDisplayName: run.workspaceDisplayName,
-    terminalSessionId: run.terminalSessionId,
-    terminalPaneKey: run.terminalPaneKey,
-    terminalPtyId: run.terminalPtyId,
-    launchEvidenceAt: Date.now(),
-    error: null
-  })
+        .catch(() => {})
+      if (params.cleanupLaunch) {
+        await params.cleanupLaunch(run.id).catch(() => {})
+      }
+      params.clearLaunchCleanup?.(run.id)
+    })
+  )
 }

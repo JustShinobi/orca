@@ -6994,6 +6994,9 @@ describe('Last-status persistence', () => {
           agentType: 'claude'
         })
       ])
+      expect(server.getStatusSnapshotForPane('tab-1:0')).toEqual([
+        expect.objectContaining({ paneKey: PANE, prompt: 'legacy cached' })
+      ])
     } finally {
       server.stop()
     }

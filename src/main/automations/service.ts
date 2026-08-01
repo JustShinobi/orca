@@ -16,13 +16,13 @@ import { collectAutomationRunUsage } from './run-usage-collection'
 import type { HeadlessAutomationDispatcher } from './headless-dispatch'
 import { DEFAULT_CODEX_HEADLESS_LAUNCH_TIMEOUT_MS } from './headless-dispatch'
 import {
+  HeadlessLaunchCleanupRegistry,
   reconcileStaleCodexHeadlessDispatches,
   requestHeadlessAutomationDispatch
 } from './headless-dispatch-lifecycle'
 import { clearAutomationDispatchTokens, createAutomationDispatchToken } from './dispatch-tokens'
 
 const DEFAULT_TICK_MS = 60 * 1000
-
 export class AutomationService {
   private readonly store: Store
   private readonly tickMs: number
@@ -35,6 +35,7 @@ export class AutomationService {
   private readonly allowRemoteHostScheduling: boolean
   private readonly headlessDispatcher: HeadlessAutomationDispatcher | null
   private readonly codexHeadlessLaunchTimeoutMs: number
+  private readonly headlessLaunchCleanups = new HeadlessLaunchCleanupRegistry()
 
   constructor(
     store: Store,
@@ -140,12 +141,24 @@ export class AutomationService {
   async markDispatchResult(result: AutomationDispatchResult): Promise<AutomationRun> {
     const current = this.store.listAutomationRuns().find((entry) => entry.id === result.runId)
     // Why: completion and launch-timeout observers race; the first persisted terminal state is authoritative.
-    if (current && isFinalAutomationRunStatus(current.status)) {
+    const clearsRetiredTerminalIdentity =
+      current &&
+      result.status === current.status &&
+      result.terminalSessionId === null &&
+      result.terminalPaneKey === null &&
+      result.terminalPtyId === null &&
+      Object.hasOwn(result, 'terminalSessionId') &&
+      Object.hasOwn(result, 'terminalPaneKey') &&
+      Object.hasOwn(result, 'terminalPtyId')
+    if (current && isFinalAutomationRunStatus(current.status) && !clearsRetiredTerminalIdentity) {
       clearAutomationDispatchTokens(current.automationId, current.id)
       return current
     }
     const run = this.store.updateAutomationRun(result)
     clearAutomationDispatchTokens(run.automationId, run.id)
+    if (isFinalAutomationRunStatus(run.status) && run.status !== 'dispatch_failed') {
+      this.headlessLaunchCleanups.clear(run.id)
+    }
     if (!isFinalAutomationRunStatus(run.status)) {
       return run
     }
@@ -184,10 +197,12 @@ export class AutomationService {
     this.evaluating = true
     try {
       const now = Date.now()
-      reconcileStaleCodexHeadlessDispatches({
+      await reconcileStaleCodexHeadlessDispatches({
         store: this.store,
         now,
-        markDispatchResult: (result) => this.markDispatchResult(result)
+        markDispatchResult: (result) => this.markDispatchResult(result),
+        cleanupLaunch: (runId) => this.headlessLaunchCleanups.run(runId),
+        clearLaunchCleanup: (runId) => this.headlessLaunchCleanups.clear(runId)
       })
       for (const automation of this.store.listAutomations()) {
         if (!automation.enabled || automation.nextRunAt > now) {
@@ -278,7 +293,11 @@ export class AutomationService {
       headlessDispatcher: this.headlessDispatcher!,
       codexHeadlessLaunchTimeoutMs: this.codexHeadlessLaunchTimeoutMs,
       runPrecheck: (automationId, runId) => this.runPrecheck(automationId, runId),
-      markDispatchResult: (result) => this.markDispatchResult(result)
+      markDispatchResult: (result) => this.markDispatchResult(result),
+      registerLaunchCleanup: (runId, cleanup) =>
+        this.headlessLaunchCleanups.register(runId, cleanup),
+      clearLaunchCleanup: (runId) => this.headlessLaunchCleanups.clear(runId),
+      cleanupLaunch: (runId) => this.headlessLaunchCleanups.run(runId)
     })
   }
 }
