@@ -447,6 +447,49 @@ describe.skipIf(process.platform === 'win32')('RuntimeClient', () => {
     expect(response.result).toEqual({ satisfied: true })
   })
 
+  it('widens the socket deadline for orchestration.workerStart so a slow agent-ready wait is not cut short', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-client-'))
+    const endpoint = join(userDataPath, 'runtime.sock')
+    const server = createServer((socket) => {
+      sockets.add(socket)
+      socket.once('close', () => sockets.delete(socket))
+      socket.once('data', (data) => {
+        const request = JSON.parse(String(data).trim()) as { id: string; method: string }
+        const result =
+          request.method === 'status.get'
+            ? { capabilities: [ORCHESTRATION_CONTRACT_RUNTIME_CAPABILITY] }
+            : { dispatchId: 'ctx_test', state: 'ready' }
+        // Why: workerStart blocks server-side until the agent reaches tui-idle;
+        // delay the reply past the 25 ms client default so the call only
+        // succeeds when the per-method policy widens the deadline.
+        const delay = request.method === 'orchestration.workerStart' ? 40 : 0
+        setTimeout(() => {
+          socket.write(
+            `${JSON.stringify({
+              id: request.id,
+              ok: true,
+              result,
+              _meta: { runtimeId: 'runtime-1' }
+            })}\n`
+          )
+        }, delay)
+      })
+    })
+    servers.add(server)
+    await new Promise<void>((resolve) => server.listen(endpoint, resolve))
+    writeMetadata(userDataPath, endpoint)
+
+    const client = new RuntimeClient(userDataPath, 25)
+    const response = await client.call<{ dispatchId: string }>('orchestration.workerStart', {
+      task: 'task_x',
+      from: 'term_coord',
+      agent: 'codex',
+      timeoutMs: 250
+    })
+
+    expect(response.result.dispatchId).toBe('ctx_test')
+  })
+
   it('preserves structured runtime failures', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-client-'))
     const endpoint = join(userDataPath, 'runtime.sock')

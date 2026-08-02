@@ -21,7 +21,7 @@ import {
   RUNTIME_PROTOCOL_VERSION
 } from '../../shared/protocol-version'
 import { createOrchestrationCompatibilityEnvelope } from './orchestration-compatibility-envelope'
-import { getTimeoutMsParam, isWaitingCheck } from './runtime-request-timeout'
+import { resolveLongPollInnerBudgetMs } from './runtime-request-timeout'
 
 // Why: for long-poll methods the caller's method-level
 // `params.timeoutMs` is the inner waiter budget; we extend the client-side
@@ -142,16 +142,10 @@ export class RuntimeClient {
   // to resolve. Without this, a 5 min wait would still die at the 60 s default.
   // See design doc §3.1.
   private resolveMethodTimeoutMs(method: string, params?: unknown): number {
-    if (
-      (method === 'orchestration.check' && isWaitingCheck(params)) ||
-      method === 'terminal.wait'
-    ) {
-      const inner = Number(getTimeoutMsParam(params))
-      if (Number.isFinite(inner) && inner > 0) {
-        return Math.max(inner + LONG_POLL_CLIENT_GRACE_MS, this.requestTimeoutMs)
-      }
-    }
-    return this.requestTimeoutMs
+    const inner = resolveLongPollInnerBudgetMs(method, params)
+    return inner > 0
+      ? Math.max(inner + LONG_POLL_CLIENT_GRACE_MS, this.requestTimeoutMs)
+      : this.requestTimeoutMs
   }
 
   async getCliStatus(): Promise<RuntimeRpcSuccess<CliStatusResult>> {

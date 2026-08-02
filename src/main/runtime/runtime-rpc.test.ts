@@ -4947,6 +4947,92 @@ describe('OrcaRuntimeRpcServer', () => {
       }
     })
 
+    it('emits keepalive frames while orchestration.workerStart blocks for agent readiness', async () => {
+      const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
+      const runtime = new OrcaRuntimeService()
+      const db = new OrchestrationDb(':memory:')
+      runtime.setOrchestrationDb(db)
+      const workerPaneKey = 'tab_worker:cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+      const coordinatorPaneKey = 'tab_coord:dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+      vi.spyOn(runtime, 'getTerminalPaneKey').mockImplementation((handle) =>
+        handle === 'term_coord'
+          ? coordinatorPaneKey
+          : handle === 'term_worker'
+            ? workerPaneKey
+            : null
+      )
+      vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockImplementation((handle) =>
+        handle === 'term_worker' ? 'runtime_test:term_worker:1' : null
+      )
+      vi.spyOn(runtime, 'validateOrchestrationAgentLauncher').mockImplementation(() => {})
+      vi.spyOn(runtime, 'showTerminal').mockImplementation(
+        async (handle) => ({ handle, worktreeId: 'repo::worktree', status: 'running' }) as never
+      )
+      vi.spyOn(runtime, 'showManagedWorktree').mockResolvedValue({ id: 'repo::worktree' } as never)
+      vi.spyOn(runtime, 'createTerminal').mockResolvedValue({
+        handle: 'term_worker',
+        worktreeId: 'repo::worktree',
+        title: 'worker'
+      } as never)
+      // Why: workerStart blocks here until the spawned agent reaches tui-idle;
+      // hold it 300ms so the 50ms keepalive emits several frames before it
+      // resolves. Without workerStart classified as a long-poll, the 30s socket
+      // idle timer tears the connection down before any frame fires.
+      vi.spyOn(runtime, 'waitForTerminal').mockImplementation(async () => {
+        await sleep(300)
+        return {
+          handle: 'term_worker',
+          condition: 'tui-idle',
+          satisfied: true,
+          status: 'running',
+          exitCode: null
+        } as never
+      })
+      vi.spyOn(runtime, 'getTerminalOrchestrationCliCommand').mockReturnValue('orca')
+      vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
+        handle: 'term_worker',
+        accepted: true,
+        bytesWritten: 1
+      } as never)
+      const run = db.createRun({
+        objective: 'workerStart keepalive',
+        coordinatorHandle: 'term_coord',
+        coordinatorPaneKey
+      })
+      const task = db.createTask({ spec: 'spawn a worker', runId: run.id })
+      const server = new OrcaRuntimeRpcServer({
+        runtime,
+        userDataPath,
+        keepaliveIntervalMs: 50
+      })
+      await server.start()
+
+      try {
+        const metadata = readRuntimeMetadata(userDataPath)
+        const session = openFramedSession(metadata!.transports[0]!.endpoint, {
+          id: 'req_worker_start',
+          authToken: metadata!.authToken,
+          method: 'orchestration.workerStart',
+          params: {
+            task: task.id,
+            from: 'term_coord',
+            agent: 'codex',
+            timeoutMs: 5000
+          }
+        })
+        await session.done
+
+        const keepalives = session.frames.filter((f) => f._keepalive === true)
+        const terminals = session.frames.filter((f) => f.ok !== undefined)
+        expect(terminals).toHaveLength(1)
+        expect(terminals[0]).toMatchObject({ id: 'req_worker_start', ok: true })
+        expect(keepalives.length).toBeGreaterThanOrEqual(3)
+      } finally {
+        db.close()
+        await server.stop()
+      }
+    })
+
     it('releases terminal.wait long-poll slot when the client closes mid-wait', async () => {
       const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
       const runtime = new OrcaRuntimeService()

@@ -457,6 +457,13 @@ function longPollClassOf(request: RpcRequest): LongPollClass | null {
     const params = request.params as { wait?: unknown } | undefined
     return params?.wait === true ? 'wait' : null
   }
+  // Why: workerStart blocks in waitForTerminal('tui-idle') for up to its
+  // timeoutMs (default 60 s) before responding. Without long-poll classification
+  // no keepalive frames are emitted, so the 30 s Unix-socket idle timer tears
+  // the connection down mid-spawn and the coordinator sees runtime_unavailable.
+  if (request.method === 'orchestration.workerStart') {
+    return 'wait'
+  }
   return null
 }
 
