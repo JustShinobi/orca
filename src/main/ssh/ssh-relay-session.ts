@@ -1894,8 +1894,9 @@ export class SshRelaySession {
 
   /**
    * D7 — ask the relay who it is before trusting any lease. `relay.js --connect` is a pure byte pipe, so
-   * the reply comes from the detached daemon that actually owns the PTYs. Fails open in every direction:
-   * an unavailable RPC, an unparseable reply, or no stored identity is a no-op, never a retirement.
+   * the reply comes from the detached daemon that actually owns the PTYs. Fails open on retirement — an
+   * unavailable RPC or an unparseable reply retires nothing — but never on reaping: only a proven-unchanged
+   * incarnation leaves the drain armed, because `pty-N` means a different PTY in the next one.
    */
   private async retireLeasesOnRelayIncarnationChange(mux: SshChannelMultiplexer): Promise<void> {
     let status: unknown
@@ -1907,15 +1908,23 @@ export class SshRelaySession {
           error instanceof Error ? error.message : String(error)
         }`
       )
+      this.disarmReapDrain('relay.status was unavailable')
       return
     }
     const identity = parseRelayIncarnation(this.targetId, status)
     if (!identity) {
+      this.disarmReapDrain('relay.status did not identify an incarnation')
       return
     }
     const previous = this.store.getSshRelayIncarnation(this.targetId)
     this.store.setSshRelayIncarnation(identity)
-    if (!previous || isSameRelayIncarnation(previous, identity)) {
+    if (previous && isSameRelayIncarnation(previous, identity)) {
+      return
+    }
+    this.disarmReapDrain(
+      previous ? 'the relay incarnation changed' : 'no previous relay incarnation was recorded'
+    )
+    if (!previous) {
       return
     }
     const retired = this.store.retireAllLeasesSparingPtys(
@@ -1927,6 +1936,16 @@ export class SshRelaySession {
     if (retired > 0) {
       console.warn(
         `[ssh-relay-session] Retired ${retired} lease(s) for ${this.targetId}: a different relay incarnation owns the socket`
+      )
+    }
+  }
+
+  /** Abandoning a flag leaks a remote shell; honouring a stale one kills a live pane, so leak. */
+  private disarmReapDrain(why: string): void {
+    const cleared = this.store.clearAllSshRemotePtyLeaseReapFlags(this.targetId)
+    if (cleared > 0) {
+      console.warn(
+        `[ssh-relay-session] Abandoned ${cleared} pending PTY reap(s) for ${this.targetId}: ${why}`
       )
     }
   }

@@ -9450,6 +9450,29 @@ describe('Store', () => {
     expect(store.getSshRemotePtyLeases('target-1')[0].pendingRemoteShutdown).toBeUndefined()
   })
 
+  it('empties the reap queue for one target when the incarnation can no longer be proven', async () => {
+    const store = await createStore()
+    for (const [targetId, ptyId] of [
+      ['target-1', 'pty-1'],
+      ['target-1', 'pty-2'],
+      ['target-other', 'pty-1']
+    ]) {
+      store.upsertSshRemotePtyLease({ targetId, ptyId, state: 'attached' })
+      store.retireLeaseAndReap(targetId, ptyId, 'pane closed')
+    }
+
+    expect(store.clearAllSshRemotePtyLeaseReapFlags('target-1')).toBe(2)
+
+    expect(store.claimSshRemotePtyLeasesToReap('target-1')).toEqual([])
+    // Incarnations are per target, so one target's doubt must not disarm another's queue.
+    expect(store.claimSshRemotePtyLeasesToReap('target-other')).toEqual(['pty-1'])
+    // Retirement itself is unaffected — only the authority to kill the remote PTY is withdrawn.
+    expect(store.getSshRemotePtyLeases('target-1').every((l) => l.state === 'terminated')).toBe(
+      true
+    )
+    expect(store.clearAllSshRemotePtyLeaseReapFlags('target-1')).toBe(0)
+  })
+
   it('strips retirement metadata when a fresh binding reuses a retired pty id', async () => {
     const store = await createStore()
     store.upsertSshRemotePtyLease({

@@ -98,6 +98,24 @@ describe('SSH relay lease retirement and orphan reaping', () => {
     mockDeploySuccess()
   })
 
+  // D7: `relay.status` is answered by the detached daemon that owns the PTYs, even through `--connect`.
+  const relayStatus =
+    (pid: number, uptimeMs: number, incarnationToken?: string) => (method: string) =>
+      method === 'relay.status'
+        ? Promise.resolve({ pid, uptimeMs, ...(incarnationToken ? { incarnationToken } : {}) })
+        : Promise.resolve([])
+
+  /** D3 only reaps within the incarnation that minted the flags, so a drain test must prove one. */
+  const armReapDrain = (mockStore: ReturnType<typeof createMockDeps>['mockStore']): void => {
+    muxRequestMock.mockImplementation(relayStatus(4242, 60_000, 'tok-a'))
+    vi.mocked(mockStore.getSshRelayIncarnation).mockReturnValue({
+      targetId: 'target-1',
+      pid: 4242,
+      derivedStartAt: Date.now() - 60_000,
+      token: 'tok-a'
+    })
+  }
+
   it('reaps orphaned remote PTYs on connect and clears the flag once the relay accepts', async () => {
     const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
     const { getSshPtyProvider } = await import('../ipc/pty')
@@ -113,6 +131,7 @@ describe('SSH relay lease retirement and orphan reaping', () => {
     } as unknown as ReturnType<typeof getSshPtyProvider>)
     vi.mocked(getPtyIdsForConnection).mockReturnValue([])
     vi.mocked(mockStore.claimSshRemotePtyLeasesToReap).mockReturnValue(['pty-dead', 'pty-stuck'])
+    armReapDrain(mockStore)
 
     const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
     await session.establish(mockConn)
@@ -141,6 +160,7 @@ describe('SSH relay lease retirement and orphan reaping', () => {
     } as unknown as ReturnType<typeof getSshPtyProvider>)
     vi.mocked(getPtyIdsForConnection).mockReturnValue([])
     vi.mocked(mockStore.claimSshRemotePtyLeasesToReap).mockReturnValue(['pty-1'])
+    armReapDrain(mockStore)
 
     const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
     await session.establish(mockConn)
@@ -161,6 +181,7 @@ describe('SSH relay lease retirement and orphan reaping', () => {
     } as unknown as ReturnType<typeof getSshPtyProvider>)
     vi.mocked(getPtyIdsForConnection).mockReturnValue([])
     vi.mocked(mockStore.claimSshRemotePtyLeasesToReap).mockReturnValue(['pty-gone'])
+    armReapDrain(mockStore)
 
     const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
     await session.establish(mockConn)
@@ -218,13 +239,6 @@ describe('SSH relay lease retirement and orphan reaping', () => {
     expect(mockStore.retireLeaseAndReap).not.toHaveBeenCalled()
     expect(deletePtyOwnership).toHaveBeenCalledWith('ssh:target-1@@pty-1')
   })
-
-  // D7: `relay.status` is answered by the detached daemon that owns the PTYs, even through `--connect`.
-  const relayStatus =
-    (pid: number, uptimeMs: number, incarnationToken?: string) => (method: string) =>
-      method === 'relay.status'
-        ? Promise.resolve({ pid, uptimeMs, ...(incarnationToken ? { incarnationToken } : {}) })
-        : Promise.resolve([])
 
   it('retires every lease for the target when a different relay incarnation owns the socket', async () => {
     const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
@@ -351,5 +365,52 @@ describe('SSH relay lease retirement and orphan reaping', () => {
 
     expect(mockStore.setSshRelayIncarnation).toHaveBeenCalledOnce()
     expect(mockStore.retireAllLeasesSparingPtys).not.toHaveBeenCalled()
+  })
+
+  // D3/D7: a flag authorizes killing `pty-N` only in the incarnation that minted it. These three cases are
+  // the ones where the id may since have been recycled onto a live pane, so the drain must not run at all.
+  it.each([
+    [
+      'the relay incarnation changed',
+      relayStatus(4242, 1_000, 'tok-b'),
+      { targetId: 'target-1', pid: 111, derivedStartAt: Date.now() - 900_000, token: 'tok-a' }
+    ],
+    ['no previous incarnation was recorded', relayStatus(4242, 1_000, 'tok-b'), null],
+    [
+      'the relay could not say who it is',
+      (method: string) =>
+        method === 'relay.status'
+          ? Promise.reject(new Error('unknown method'))
+          : Promise.resolve([]),
+      { targetId: 'target-1', pid: 4242, derivedStartAt: Date.now() - 60_000, token: 'tok-a' }
+    ]
+  ])('abandons pending reaps when %s', async (_case, statusImpl, previous) => {
+    const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    const { getSshPtyProvider } = await import('../ipc/pty')
+    const mockShutdown = vi.fn().mockResolvedValue(undefined)
+    vi.mocked(getSshPtyProvider).mockReturnValue({
+      attachForReconnect: vi.fn().mockResolvedValue(undefined),
+      shutdown: mockShutdown,
+      hasPty: vi.fn().mockReturnValue(false),
+      dispose: vi.fn()
+    } as unknown as ReturnType<typeof getSshPtyProvider>)
+    vi.mocked(getPtyIdsForConnection).mockReturnValue([])
+    muxRequestMock.mockImplementation(statusImpl)
+    vi.mocked(mockStore.getSshRelayIncarnation).mockReturnValue(previous)
+    // A real store answers the claim out of the flags, so the fake must too — otherwise the drain would
+    // reap from a queue that clearing had already emptied and the ordering here would prove nothing.
+    const flagged = new Set(['pty-1'])
+    vi.mocked(mockStore.claimSshRemotePtyLeasesToReap).mockImplementation(() => [...flagged])
+    vi.mocked(mockStore.clearAllSshRemotePtyLeaseReapFlags).mockImplementation(() => {
+      const cleared = flagged.size
+      flagged.clear()
+      return cleared
+    })
+
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+    await session.establish(mockConn)
+
+    expect(mockStore.clearAllSshRemotePtyLeaseReapFlags).toHaveBeenCalledWith('target-1')
+    expect(mockShutdown).not.toHaveBeenCalled()
   })
 })

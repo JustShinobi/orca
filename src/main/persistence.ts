@@ -7483,6 +7483,26 @@ export class Store {
     this.flush()
   }
 
+  /**
+   * D3/D7 — a flag says "this relay id is ours to kill", which is only true within the incarnation that
+   * minted it. Once the connect cannot prove the incarnation is unchanged, every outstanding flag names an
+   * id that may since have been recycled onto a live pane, so abandon them rather than aim the drain blind.
+   */
+  clearAllSshRemotePtyLeaseReapFlags(targetId: string): number {
+    let cleared = 0
+    for (const lease of this.state.sshRemotePtyLeases ?? []) {
+      if (lease.targetId !== targetId || !lease.pendingRemoteShutdown) {
+        continue
+      }
+      delete lease.pendingRemoteShutdown
+      cleared += 1
+    }
+    if (cleared > 0) {
+      this.flush()
+    }
+    return cleared
+  }
+
   getSshRelayIncarnation(targetId: string): SshRelayIncarnation | null {
     return this.state.sshRelayIncarnations?.find((entry) => entry.targetId === targetId) ?? null
   }
