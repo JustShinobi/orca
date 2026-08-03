@@ -155,6 +155,14 @@ export type SshRemotePtyLease = {
   updatedAt: number
   lastAttachedAt?: number
   lastDetachedAt?: number
+  /**
+   * Present iff Orca retired this row itself; a relay-driven expiry leaves it absent. That distinction
+   * is load-bearing, not triage colour: `'expired'` alone cannot authorize pane recovery, because we
+   * write it too. Free-form so a retirement can carry its detail (expected vs managed identity).
+   */
+  retiredReason?: string
+  /** Set only by `retireLeaseAndReap` (I3): the pane is provably gone, so this relay PTY is ours to kill. */
+  pendingRemoteShutdown?: boolean
 }
 
 /** Main-owned relay lease needed to reclaim PTY delivery after a desktop restart. */

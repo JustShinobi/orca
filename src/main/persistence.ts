@@ -1605,7 +1605,13 @@ function normalizeSshRemotePtyLease(value: unknown): SshRemotePtyLease | null {
     createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : now,
     updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now,
     ...(typeof raw.lastAttachedAt === 'number' ? { lastAttachedAt: raw.lastAttachedAt } : {}),
-    ...(typeof raw.lastDetachedAt === 'number' ? { lastDetachedAt: raw.lastDetachedAt } : {})
+    ...(typeof raw.lastDetachedAt === 'number' ? { lastDetachedAt: raw.lastDetachedAt } : {}),
+    // Why: this is a strict allowlist — an unlisted field is dropped on load, so a retirement flag would
+    // work in every in-process test and vanish on the first restart, in exactly the durable case it exists for.
+    ...(typeof raw.retiredReason === 'string' && raw.retiredReason.length <= 512
+      ? { retiredReason: raw.retiredReason }
+      : {}),
+    ...(raw.pendingRemoteShutdown === true ? { pendingRemoteShutdown: true } : {})
   }
 }
 
@@ -7163,6 +7169,51 @@ export class Store {
     if (shouldClearBindings) {
       this.clearSshRemotePtyBindingsForLeases(targetId, [lease])
     }
+    this.flush()
+  }
+
+  // Why: D0 — the only two ways to retire a lease. The split is by what the evidence proves, not by which
+  // handler produced it: I3 (the pane is provably gone) authorizes reaping the remote PTY; I6 (the row is
+  // wrong about the PTY it names) never does.
+  retireLeaseAndReap(targetId: string, ptyId: string, reason: string): void {
+    this.retireSshRemotePtyLease(targetId, ptyId, 'terminated', reason, true)
+  }
+
+  // `pendingRemoteShutdown` is unreachable from here by construction, and that is the point: a reset relay
+  // reuses `pty-N`, so the id a wrong row names may already be another pane's live shell.
+  retireLeaseSparingPty(targetId: string, ptyId: string, reason: string): void {
+    this.retireSshRemotePtyLease(targetId, ptyId, 'expired', reason, false)
+  }
+
+  private retireSshRemotePtyLease(
+    targetId: string,
+    ptyId: string,
+    state: Extract<SshRemotePtyLease['state'], 'terminated' | 'expired'>,
+    reason: string,
+    pendingRemoteShutdown: boolean
+  ): void {
+    const relayPtyId = this.getRelayPtyIdForSshLeaseStorage(targetId, ptyId)
+    const lease = this.state.sshRemotePtyLeases?.find(
+      (entry) => entry.targetId === targetId && entry.ptyId === relayPtyId
+    )
+    if (!lease) {
+      return
+    }
+    // Why: retirement is terminal. Re-retiring would let a spared row later acquire a reap flag for a PTY
+    // we already decided we have no claim on; keep binding cleanup idempotent as the singular setter does.
+    if (lease.state === 'terminated' || lease.state === 'expired') {
+      if (this.clearSshRemotePtyBindingsForLeases(targetId, [lease])) {
+        this.flush()
+      }
+      return
+    }
+    lease.state = state
+    lease.updatedAt = Date.now()
+    lease.retiredReason = reason
+    if (pendingRemoteShutdown) {
+      lease.pendingRemoteShutdown = true
+    }
+    this.clearSshRemotePtyBindingsForLeases(targetId, [lease])
     this.flush()
   }
 

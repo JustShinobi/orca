@@ -9386,6 +9386,114 @@ describe('Store', () => {
     }
   })
 
+  it('retires and flags for reaping when the evidence is that the pane is gone', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-1',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+
+    store.retireLeaseAndReap('target-1', 'pty-1', 'superseded by a later write for the same pane')
+
+    const lease = store.getSshRemotePtyLeases('target-1')[0]
+    expect(lease.state).toBe('terminated')
+    expect(lease.retiredReason).toBe('superseded by a later write for the same pane')
+    expect(lease.pendingRemoteShutdown).toBe(true)
+  })
+
+  it('retires without ever flagging a reap when the evidence is only that the row is wrong', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-1',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+
+    store.retireLeaseSparingPty('target-1', 'pty-1', 'relay generation replaced')
+
+    const lease = store.getSshRemotePtyLeases('target-1')[0]
+    expect(lease.state).toBe('expired')
+    expect(lease.retiredReason).toBe('relay generation replaced')
+    // A reset relay reuses `pty-N`, so this id may already be another pane's live shell.
+    expect(lease.pendingRemoteShutdown).toBeUndefined()
+  })
+
+  it('refuses to re-retire, so a spared lease can never later acquire a reap flag', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-1',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+
+    store.retireLeaseSparingPty('target-1', 'pty-1', 'relay generation replaced')
+    store.retireLeaseAndReap('target-1', 'pty-1', 'pane closed')
+
+    const lease = store.getSshRemotePtyLeases('target-1')[0]
+    expect(lease.state).toBe('expired')
+    expect(lease.retiredReason).toBe('relay generation replaced')
+    expect(lease.pendingRemoteShutdown).toBeUndefined()
+  })
+
+  it('round-trips retirement fields through normalize on restart', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-1',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-2',
+      worktreeId: 'wt1',
+      tabId: 'tab-2',
+      leafId: TEST_LEAF_2,
+      state: 'attached'
+    })
+    store.retireLeaseAndReap('target-1', 'pty-1', 'pane closed')
+    store.retireLeaseSparingPty('target-1', 'pty-2', 'relay pty missing')
+    store.flush()
+
+    // Why: normalize is a strict allowlist, so set-then-read would pass even if the fields never persisted.
+    const reloaded = await createStore()
+    const reaped = reloaded.getSshRemotePtyLeases('target-1').find((l) => l.ptyId === 'pty-1')
+    const spared = reloaded.getSshRemotePtyLeases('target-1').find((l) => l.ptyId === 'pty-2')
+    expect(reaped?.state).toBe('terminated')
+    expect(reaped?.retiredReason).toBe('pane closed')
+    expect(reaped?.pendingRemoteShutdown).toBe(true)
+    expect(spared?.state).toBe('expired')
+    expect(spared?.retiredReason).toBe('relay pty missing')
+    expect(spared?.pendingRemoteShutdown).toBeUndefined()
+  })
+
+  it('ignores retirement of a lease that does not exist', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-1',
+      state: 'attached'
+    })
+    const before = structuredClone(store.getSshRemotePtyLeases())
+
+    store.retireLeaseAndReap('target-1', 'pty-absent', 'pane closed')
+    store.retireLeaseSparingPty('target-other', 'pty-1', 'relay generation replaced')
+
+    expect(store.getSshRemotePtyLeases()).toEqual(before)
+  })
+
   it('keeps worktree deletion authoritative against stale writes and later same-path reuse', async () => {
     const store = await createStore()
     store.setWorktreeMeta('wt1', { displayName: 'Worktree' })
