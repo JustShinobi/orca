@@ -220,8 +220,11 @@ describe('SSH relay lease retirement and orphan reaping', () => {
   })
 
   // D7: `relay.status` is answered by the detached daemon that owns the PTYs, even through `--connect`.
-  const relayStatus = (pid: number, uptimeMs: number) => (method: string) =>
-    method === 'relay.status' ? Promise.resolve({ pid, uptimeMs }) : Promise.resolve([])
+  const relayStatus =
+    (pid: number, uptimeMs: number, incarnationToken?: string) => (method: string) =>
+      method === 'relay.status'
+        ? Promise.resolve({ pid, uptimeMs, ...(incarnationToken ? { incarnationToken } : {}) })
+        : Promise.resolve([])
 
   it('retires every lease for the target when a different relay incarnation owns the socket', async () => {
     const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
@@ -257,6 +260,67 @@ describe('SSH relay lease retirement and orphan reaping', () => {
     await session.establish(mockConn)
 
     expect(mockStore.retireAllLeasesSparingPtys).not.toHaveBeenCalled()
+  })
+
+  it('keeps leases when the token matches, however far the derived start has drifted', async () => {
+    const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    // An NTP step on either host moves `derivedStartAt` arbitrarily far. Without the token this is
+    // exactly the reading that would retire every lease on a relay that never restarted.
+    muxRequestMock.mockImplementation(relayStatus(4242, 60_000, 'tok-a'))
+    vi.mocked(mockStore.getSshRelayIncarnation).mockReturnValue({
+      targetId: 'target-1',
+      pid: 4242,
+      derivedStartAt: Date.now() - 9_000_000,
+      token: 'tok-a'
+    })
+
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+    await session.establish(mockConn)
+
+    expect(mockStore.retireAllLeasesSparingPtys).not.toHaveBeenCalled()
+    expect(mockStore.setSshRelayIncarnation).toHaveBeenCalledWith(
+      expect.objectContaining({ token: 'tok-a' })
+    )
+  })
+
+  it('retires on a new token even when the pid was reused inside the start tolerance', async () => {
+    const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    muxRequestMock.mockImplementation(relayStatus(4242, 1_000, 'tok-b'))
+    vi.mocked(mockStore.getSshRelayIncarnation).mockReturnValue({
+      targetId: 'target-1',
+      pid: 4242,
+      derivedStartAt: Date.now() - 2_000,
+      token: 'tok-a'
+    })
+
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+    await session.establish(mockConn)
+
+    expect(mockStore.retireAllLeasesSparingPtys).toHaveBeenCalledWith(
+      'target-1',
+      expect.stringContaining('relay incarnation changed')
+    )
+  })
+
+  it('falls back to pid and start time when the running relay predates the token', async () => {
+    const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    muxRequestMock.mockImplementation(relayStatus(4242, 60_000))
+    // A stored token cannot decide against a reading that has none — that pairing means the deployed
+    // relay is older than the token, not that the process changed.
+    vi.mocked(mockStore.getSshRelayIncarnation).mockReturnValue({
+      targetId: 'target-1',
+      pid: 4242,
+      derivedStartAt: Date.now() - 60_000 - 5_000,
+      token: 'tok-a'
+    })
+
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+    await session.establish(mockConn)
+
+    expect(mockStore.retireAllLeasesSparingPtys).not.toHaveBeenCalled()
+    expect(mockStore.setSshRelayIncarnation).toHaveBeenCalledWith(
+      expect.not.objectContaining({ token: expect.anything() })
+    )
   })
 
   it('fails open when the relay cannot answer who it is', async () => {

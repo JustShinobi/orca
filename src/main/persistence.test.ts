@@ -9757,16 +9757,26 @@ describe('Store', () => {
   it('round-trips the recorded relay incarnation and drops malformed rows on load', async () => {
     const store = await createStore()
     store.setSshRelayIncarnation({ targetId: 'target-1', pid: 4242, derivedStartAt: 1_700_000 })
-    store.setSshRelayIncarnation({ targetId: 'target-1', pid: 99, derivedStartAt: 1_800_000 })
+    store.setSshRelayIncarnation({
+      targetId: 'target-1',
+      pid: 99,
+      derivedStartAt: 1_800_000,
+      token: 'tok-a'
+    })
+    store.setSshRelayIncarnation({ targetId: 'target-2', pid: 7, derivedStartAt: 1_900_000 })
     store.flush()
 
     // Why: normalize is a strict allowlist, so set-then-read would pass even if the field never persisted.
+    // Losing `token` here would silently demote D7 to its clock-based fallback on every restart.
     const reloaded = await createStore()
     expect(reloaded.getSshRelayIncarnation('target-1')).toEqual({
       targetId: 'target-1',
       pid: 99,
-      derivedStartAt: 1_800_000
+      derivedStartAt: 1_800_000,
+      token: 'tok-a'
     })
+    // A token-less relay must stay token-less, not gain an empty one.
+    expect(reloaded.getSshRelayIncarnation('target-2')).not.toHaveProperty('token')
     expect(reloaded.getSshRelayIncarnation('target-absent')).toBeNull()
   })
 

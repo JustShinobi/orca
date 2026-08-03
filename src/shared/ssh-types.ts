@@ -166,18 +166,23 @@ export type SshRemotePtyLease = {
 }
 
 /**
- * D7 — which relay incarnation owned this target's PTYs at the last connect. `pid` alone is not enough
- * (pids are reused), so it is paired with a start time derived from the relay's own uptime, which makes
- * the comparison immune to clock skew between the two machines.
+ * D7 — which relay incarnation owned this target's PTYs at the last connect. `token` is authoritative
+ * when both readings carry one: it is minted per relay process, so comparing it needs no clock at all.
+ * `pid` + `derivedStartAt` is the fallback for relays deployed before the token existed.
  */
 export type SshRelayIncarnation = {
   targetId: string
   pid: number
   /** ms epoch, derived as `now - uptimeMs` at the moment the relay answered. */
   derivedStartAt: number
+  /** Absent only for a pre-token relay still running from an older deploy. */
+  token?: string
 }
 
-/** Clock skew and RPC latency both perturb `derivedStartAt`; a relay restart moves it far more than this. */
+/**
+ * Tolerance for the token-less fallback only. `derivedStartAt` is measured against the local clock, so
+ * remote skew cancels — but an NTP step on either host still moves it, which is why the token exists.
+ */
 export const SSH_RELAY_INCARNATION_START_TOLERANCE_MS = 30_000
 
 /** Main-owned relay lease needed to reclaim PTY delivery after a desktop restart. */

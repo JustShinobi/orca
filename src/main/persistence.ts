@@ -1636,7 +1636,9 @@ function normalizeSshRelayIncarnation(value: unknown): SshRelayIncarnation | nul
   return {
     targetId: raw.targetId,
     pid: raw.pid as number,
-    derivedStartAt: raw.derivedStartAt as number
+    derivedStartAt: raw.derivedStartAt as number,
+    // Dropping this on load would silently demote every comparison to the clock-based fallback.
+    ...(typeof raw.token === 'string' && raw.token.length > 0 ? { token: raw.token } : {})
   }
 }
 
@@ -7393,19 +7395,31 @@ export class Store {
     reason: string,
     pendingRemoteShutdown: boolean
   ): void {
+    if (
+      this.retireSshRemotePtyLeaseInMemory(targetId, ptyId, state, reason, pendingRemoteShutdown)
+    ) {
+      this.flush()
+    }
+  }
+
+  /** Returns whether anything changed, so a bulk caller can pay for one sync write instead of N. */
+  private retireSshRemotePtyLeaseInMemory(
+    targetId: string,
+    ptyId: string,
+    state: Extract<SshRemotePtyLease['state'], 'terminated' | 'expired'>,
+    reason: string,
+    pendingRemoteShutdown: boolean
+  ): boolean {
     const relayPtyId = this.getRelayPtyIdForSshLeaseStorage(targetId, ptyId)
     const lease = this.state.sshRemotePtyLeases?.find(
       (entry) => entry.targetId === targetId && entry.ptyId === relayPtyId
     )
     if (!lease) {
-      return
+      return false
     }
     // D1b's rule, so `expired` → `terminated` stays legal and nothing walks back toward live.
     if (lease.state === state || !canAdvanceSshLeaseState(lease.state, state)) {
-      if (this.clearSshRemotePtyBindingsForLeases(targetId, [lease])) {
-        this.flush()
-      }
-      return
+      return this.clearSshRemotePtyBindingsForLeases(targetId, [lease])
     }
     // Why: a row already retired by the sparing primitive named a PTY we have no claim on. Advancing it
     // to `terminated` must not retroactively authorize killing that id — a reset relay reuses `pty-N`.
@@ -7417,7 +7431,7 @@ export class Store {
       lease.pendingRemoteShutdown = true
     }
     this.clearSshRemotePtyBindingsForLeases(targetId, [lease])
-    this.flush()
+    return true
   }
 
   /**
@@ -7487,8 +7501,16 @@ export class Store {
     const live = (this.state.sshRemotePtyLeases ?? []).filter(
       (lease) => lease.targetId === targetId && !isRetiredSshLeaseState(lease.state)
     )
+    let changed = false
     for (const lease of live) {
-      this.retireLeaseSparingPty(targetId, lease.ptyId, reason)
+      // Why one flush, not one per lease: `flush()` is a synchronous full-state write, and this runs on
+      // the reconnect path with every pane's lease in hand.
+      changed =
+        this.retireSshRemotePtyLeaseInMemory(targetId, lease.ptyId, 'expired', reason, false) ||
+        changed
+    }
+    if (changed) {
+      this.flush()
     }
     return live.length
   }

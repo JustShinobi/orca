@@ -158,15 +158,33 @@ function parseRelayIncarnation(targetId: string, status: unknown): SshRelayIncar
   if (!status || typeof status !== 'object') {
     return null
   }
-  const { pid, uptimeMs } = status as { pid?: unknown; uptimeMs?: unknown }
+  const { pid, uptimeMs, incarnationToken } = status as {
+    pid?: unknown
+    uptimeMs?: unknown
+    incarnationToken?: unknown
+  }
   if (!Number.isFinite(pid) || !Number.isFinite(uptimeMs)) {
     return null
   }
-  return { targetId, pid: pid as number, derivedStartAt: Date.now() - (uptimeMs as number) }
+  return {
+    targetId,
+    pid: pid as number,
+    derivedStartAt: Date.now() - (uptimeMs as number),
+    ...(typeof incarnationToken === 'string' && incarnationToken.length > 0
+      ? { token: incarnationToken }
+      : {})
+  }
 }
 
-/** `derivedStartAt` is relative to the relay's own uptime, so the tolerance absorbs latency, not clock skew. */
+/**
+ * Two readings name the same relay process. The token decides whenever both readings have one — it is
+ * exact, so a matching token is a match even if the clocks disagree wildly. Only a pre-token relay falls
+ * back to pid + start time, where the tolerance absorbs RPC latency.
+ */
 function isSameRelayIncarnation(a: SshRelayIncarnation, b: SshRelayIncarnation): boolean {
+  if (a.token !== undefined && b.token !== undefined) {
+    return a.token === b.token
+  }
   return (
     a.pid === b.pid &&
     Math.abs(a.derivedStartAt - b.derivedStartAt) <= SSH_RELAY_INCARNATION_START_TOLERANCE_MS
@@ -1903,7 +1921,7 @@ export class SshRelaySession {
     const retired = this.store.retireAllLeasesSparingPtys(
       this.targetId,
       boundedRetiredReason(
-        `relay incarnation changed: pid ${previous.pid} -> ${identity.pid}, start ${previous.derivedStartAt} -> ${identity.derivedStartAt}`
+        `relay incarnation changed: pid ${previous.pid} -> ${identity.pid}, start ${previous.derivedStartAt} -> ${identity.derivedStartAt}, token ${previous.token ?? 'none'} -> ${identity.token ?? 'none'}`
       )
     )
     if (retired > 0) {
