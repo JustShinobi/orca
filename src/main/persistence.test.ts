@@ -9140,6 +9140,252 @@ describe('Store', () => {
     })
   })
 
+  // STA-3077 I2: reattach may never create UI. `mayCreate: false` binds only to panes that already
+  // exist durably, and a refusal is non-destructive — an absence justifies "do not create", never "destroy".
+  it('refuses every creating branch under mayCreate:false and leaves the session untouched', async () => {
+    const cases = [
+      {
+        name: 'tab absent',
+        session: getDefaultWorkspaceSession(),
+        tabId: 'tab-missing'
+      },
+      {
+        name: 'layout.root absent',
+        session: {
+          ...getDefaultWorkspaceSession(),
+          tabsByWorktree: {
+            wt1: [makeTerminalTab({ id: 'tab1', worktreeId: 'wt1', ptyId: 'pty-1' })]
+          },
+          terminalLayoutsByTabId: {
+            tab1: {
+              root: null,
+              activeLeafId: null,
+              expandedLeafId: null,
+              ptyIdsByLeafId: {}
+            }
+          }
+        },
+        tabId: 'tab1'
+      },
+      {
+        name: 'leaf absent from layout',
+        session: {
+          ...getDefaultWorkspaceSession(),
+          tabsByWorktree: {
+            wt1: [makeTerminalTab({ id: 'tab1', worktreeId: 'wt1', ptyId: 'pty-1' })]
+          },
+          terminalLayoutsByTabId: {
+            tab1: {
+              root: { type: 'leaf', leafId: TEST_LEAF_1 },
+              activeLeafId: TEST_LEAF_1,
+              expandedLeafId: null,
+              ptyIdsByLeafId: { [TEST_LEAF_1]: 'pty-1' }
+            }
+          }
+        },
+        tabId: 'tab1'
+      },
+      {
+        name: 'layout absent entirely',
+        session: {
+          ...getDefaultWorkspaceSession(),
+          tabsByWorktree: {
+            wt1: [makeTerminalTab({ id: 'tab1', worktreeId: 'wt1', ptyId: 'pty-1' })]
+          }
+        },
+        tabId: 'tab1'
+      }
+    ]
+
+    for (const testCase of cases) {
+      const store = await createStore()
+      store.setWorkspaceSession(testCase.session as ReturnType<typeof getDefaultWorkspaceSession>)
+      const before = structuredClone(store.getWorkspaceSession())
+
+      const outcome = store.persistPtyBinding(
+        {
+          worktreeId: 'wt1',
+          tabId: testCase.tabId,
+          leafId: TEST_LEAF_2,
+          ptyId: 'pty-2',
+          incarnationId: 'incarnation-2'
+        },
+        undefined,
+        { mayCreate: false }
+      )
+
+      expect(outcome, testCase.name).toBe('refused')
+      // Deep-equal covers the layout, the tab list, the incarnation map and the tombstone clear at once.
+      expect(store.getWorkspaceSession(), testCase.name).toEqual(before)
+    }
+  })
+
+  it('binds under mayCreate:false when the pane exists, without bumping topology', async () => {
+    const store = await createStore()
+    store.setWorkspaceSession({
+      ...getDefaultWorkspaceSession(),
+      tabsByWorktree: {
+        wt1: [makeTerminalTab({ id: 'tab1', worktreeId: 'wt1', ptyId: 'pty-1' })]
+      },
+      terminalLayoutsByTabId: {
+        tab1: {
+          root: { type: 'leaf', leafId: TEST_LEAF_1 },
+          activeLeafId: TEST_LEAF_1,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [TEST_LEAF_1]: 'pty-1' }
+        }
+      },
+      terminalTopologyRevisionByRepoId: { wt1: 1 }
+    })
+
+    const outcome = store.persistPtyBinding(
+      { worktreeId: 'wt1', tabId: 'tab1', leafId: TEST_LEAF_1, ptyId: 'pty-rebound' },
+      undefined,
+      { mayCreate: false }
+    )
+
+    expect(outcome).toBe('bound')
+    const session = store.getWorkspaceSession()
+    expect(session.terminalLayoutsByTabId.tab1.ptyIdsByLeafId).toEqual({
+      [TEST_LEAF_1]: 'pty-rebound'
+    })
+    // A reattach is not a host-admitted spawn after a retirement, so the revision must not move.
+    expect(session.terminalTopologyRevisionByRepoId?.wt1).toBe(1)
+  })
+
+  it('guards the legacy non-terminal-leafId flush point under mayCreate:false', async () => {
+    const legacyLeafId = 'pane-legacy-1'
+    const boundStore = await createStore()
+    boundStore.setWorkspaceSession({
+      ...getDefaultWorkspaceSession(),
+      tabsByWorktree: {
+        wt1: [makeTerminalTab({ id: 'tab1', worktreeId: 'wt1', ptyId: 'pty-1' })]
+      }
+    })
+    expect(
+      boundStore.persistPtyBinding(
+        { worktreeId: 'wt1', tabId: 'tab1', leafId: legacyLeafId, ptyId: 'pty-2' },
+        undefined,
+        { mayCreate: false }
+      )
+    ).toBe('bound')
+
+    const refusedStore = await createStore()
+    refusedStore.setWorkspaceSession(getDefaultWorkspaceSession())
+    expect(
+      refusedStore.persistPtyBinding(
+        { worktreeId: 'wt1', tabId: 'tab-missing', leafId: legacyLeafId, ptyId: 'pty-2' },
+        undefined,
+        { mayCreate: false }
+      )
+    ).toBe('refused')
+    expect(refusedStore.getWorkspaceSession().tabsByWorktree.wt1).toBeUndefined()
+  })
+
+  it('leaves the default creating mode unchanged when mayCreate is omitted', async () => {
+    // Issue #217 regression gate: the creating behavior is load-bearing for the spawn path.
+    const store = await createStore()
+    store.setWorkspaceSession(getDefaultWorkspaceSession())
+
+    expect(
+      store.persistPtyBinding({
+        worktreeId: 'wt1',
+        tabId: 'tab1',
+        leafId: TEST_LEAF_1,
+        ptyId: 'pty-1'
+      })
+    ).toBe('bound')
+
+    const session = store.getWorkspaceSession()
+    expect(session.tabsByWorktree.wt1).toEqual([expect.objectContaining({ id: 'tab1' })])
+    expect(session.terminalLayoutsByTabId.tab1.root).toEqual({
+      type: 'leaf',
+      leafId: TEST_LEAF_1
+    })
+
+    expect(
+      store.persistPtyBinding({
+        worktreeId: 'wt1',
+        tabId: 'tab1',
+        leafId: TEST_LEAF_2,
+        ptyId: 'pty-2'
+      })
+    ).toBe('bound')
+    expect(store.getWorkspaceSession().terminalLayoutsByTabId.tab1.root).toEqual({
+      type: 'split',
+      direction: 'vertical',
+      first: { type: 'leaf', leafId: TEST_LEAF_1 },
+      second: { type: 'leaf', leafId: TEST_LEAF_2 }
+    })
+  })
+
+  // The ruling as an executable assertion: no absence, anywhere, may retire a lease. Two earlier
+  // revisions of the design proposed the destructive version; this is the gate against re-deriving it.
+  it('never retires a lease on any absence under mayCreate:false', async () => {
+    const absences = [
+      {
+        name: 'leaf absent from an existing layout',
+        session: {
+          ...getDefaultWorkspaceSession(),
+          tabsByWorktree: {
+            wt1: [makeTerminalTab({ id: 'tab1', worktreeId: 'wt1', ptyId: 'pty-1' })]
+          },
+          terminalLayoutsByTabId: {
+            tab1: {
+              root: { type: 'leaf', leafId: TEST_LEAF_1 },
+              activeLeafId: TEST_LEAF_1,
+              expandedLeafId: null,
+              ptyIdsByLeafId: { [TEST_LEAF_1]: 'pty-1' }
+            }
+          }
+        },
+        tabId: 'tab1'
+      },
+      {
+        name: 'tab absent from a hydrated worktree',
+        session: {
+          ...getDefaultWorkspaceSession(),
+          tabsByWorktree: {
+            wt1: [makeTerminalTab({ id: 'tab1', worktreeId: 'wt1', ptyId: 'pty-1' })]
+          }
+        },
+        tabId: 'tab-missing'
+      },
+      {
+        name: 'worktree with no session entry at all',
+        session: getDefaultWorkspaceSession(),
+        tabId: 'tab-missing'
+      }
+    ]
+
+    for (const absence of absences) {
+      const store = await createStore()
+      store.setWorkspaceSession(absence.session as ReturnType<typeof getDefaultWorkspaceSession>)
+      store.upsertSshRemotePtyLease({
+        targetId: 'target-1',
+        ptyId: 'pty-2',
+        worktreeId: 'wt1',
+        tabId: absence.tabId,
+        leafId: TEST_LEAF_2,
+        state: 'detached'
+      })
+      const sessionBefore = structuredClone(store.getWorkspaceSession())
+
+      const outcome = store.persistPtyBinding(
+        { worktreeId: 'wt1', tabId: absence.tabId, leafId: TEST_LEAF_2, ptyId: 'pty-2' },
+        undefined,
+        { mayCreate: false }
+      )
+
+      expect(outcome, absence.name).toBe('refused')
+      expect(
+        store.getSshRemotePtyLeases().find((lease) => lease.ptyId === 'pty-2')?.state,
+        absence.name
+      ).toBe('detached')
+      expect(store.getWorkspaceSession(), absence.name).toEqual(sessionBefore)
+    }
+  })
+
   it('keeps worktree deletion authoritative against stale writes and later same-path reuse', async () => {
     const store = await createStore()
     store.setWorktreeMeta('wt1', { displayName: 'Worktree' })

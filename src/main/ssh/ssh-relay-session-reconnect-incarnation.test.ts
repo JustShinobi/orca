@@ -413,13 +413,22 @@ describe('SshRelaySession reconnect incarnation ordering', () => {
       incarnationId
     })
     expect(runtime.onPtySpawned).not.toHaveBeenCalled()
-    expect(mockStore.persistPtyBinding).toHaveBeenCalledWith({
-      worktreeId: 'worktree-1',
-      tabId: 'tab-1',
-      leafId: INCARNATION_LEAF_ID,
-      ptyId: APP_PTY_ID,
-      incarnationId
-    })
+    // Reattach binds non-creatively (STA-3077 I2): it may never mint a tab, layout, or leaf.
+    expect(mockStore.persistPtyBinding).toHaveBeenCalledWith(
+      {
+        worktreeId: 'worktree-1',
+        tabId: 'tab-1',
+        leafId: INCARNATION_LEAF_ID,
+        ptyId: APP_PTY_ID,
+        incarnationId
+      },
+      undefined,
+      { mayCreate: false }
+    )
+    // The store rules before registerPty publishes a surface, so a refusal creates no UI.
+    expect(vi.mocked(mockStore.persistPtyBinding).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(runtime.registerPty).mock.invocationCallOrder[0]!
+    )
     expect(vi.mocked(mockStore.persistPtyBinding).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(mockStore.markSshRemotePtyLeasesAttachedAsync).mock.invocationCallOrder[0]!
     )
@@ -527,7 +536,9 @@ describe('SshRelaySession reconnect incarnation ordering', () => {
     })
     expect(setPtyOwnership).toHaveBeenCalledWith(APP_PTY_ID, 'target-1')
     expect(mockStore.persistPtyBinding).toHaveBeenCalledWith(
-      expect.objectContaining({ ptyId: APP_PTY_ID, incarnationId: currentIncarnationId })
+      expect.objectContaining({ ptyId: APP_PTY_ID, incarnationId: currentIncarnationId }),
+      undefined,
+      { mayCreate: false }
     )
     expect(mockWindow.webContents.send).toHaveBeenCalledWith('pty:replay', {
       id: APP_PTY_ID,

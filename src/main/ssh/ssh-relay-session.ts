@@ -2042,15 +2042,21 @@ export class SshRelaySession {
         return
       }
       setPtyOwnership(appPtyId, this.targetId)
+      let restoreOutcome: 'bound' | 'refused' = 'bound'
       if (attachResult.incarnationId) {
         restorePtyIncarnation(appPtyId, attachResult.incarnationId)
-        this.restoreReattachedPtyRuntime(
+        restoreOutcome = this.restoreReattachedPtyRuntime(
           appPtyId,
           attachResult.incarnationId,
           activeLeaseByPtyId.get(ptyId)
         )
       }
-      attachedLeaseIds.add(ptyId)
+      // Why: the relay attach succeeded, so activation bookkeeping proceeds; only the durable bind was
+      // refused, and a refused bind must not mark the lease attached. It stays detached and is retried
+      // next reconnect — retirement needs positive evidence, which an absent pane is not.
+      if (restoreOutcome === 'bound') {
+        attachedLeaseIds.add(ptyId)
+      }
       pendingReattach.activated = true
       recoveryActivationLease?.commit()
       recoveryActivationLease = undefined
@@ -2109,31 +2115,49 @@ export class SshRelaySession {
     this.runtime?.acceptPtyIncarnationForExit(appPtyId, ptyIncarnation)
   }
 
+  // Returns 'refused' when the pane no longer exists durably, so the caller leaves the lease detached.
   private restoreReattachedPtyRuntime(
     appPtyId: string,
     incarnationId: string,
     lease: SshPtyLease | undefined
-  ): void {
+  ): 'bound' | 'refused' {
     if (lease?.worktreeId && lease.tabId && lease.leafId) {
+      let outcome: 'bound' | 'refused'
+      try {
+        // Why: persist decides first — registerPty publishes a mobile surface, so binding before the
+        // store rules would create the very UI a refusal exists to prevent.
+        outcome = this.store.persistPtyBinding(
+          {
+            worktreeId: lease.worktreeId,
+            tabId: lease.tabId,
+            leafId: lease.leafId,
+            ptyId: appPtyId,
+            incarnationId
+          },
+          undefined,
+          { mayCreate: false }
+        )
+      } catch (error) {
+        console.error('[ssh-relay-session] Failed to persist reconnect incarnation:', error)
+        // Why: under mayCreate:false the refusal check precedes both flush points, so a throw proves
+        // membership did NOT change — the pane exists and only the disk write failed. Keep the live PTY.
+        outcome = 'bound'
+      }
+      if (outcome === 'refused') {
+        console.log(
+          `[ssh-relay-session] Reattach refused for ${appPtyId}: pane ${lease.tabId}:${lease.leafId} is not in durable layout; leaving lease detached`
+        )
+        return 'refused'
+      }
       this.runtime?.registerPty(appPtyId, lease.worktreeId, this.targetId, {
         tabId: lease.tabId,
         leafId: lease.leafId,
         incarnationId
       })
-      try {
-        this.store.persistPtyBinding({
-          worktreeId: lease.worktreeId,
-          tabId: lease.tabId,
-          leafId: lease.leafId,
-          ptyId: appPtyId,
-          incarnationId
-        })
-      } catch (error) {
-        console.error('[ssh-relay-session] Failed to persist reconnect incarnation:', error)
-      }
-      return
+      return 'bound'
     }
     this.runtime?.onPtySpawned(appPtyId, incarnationId, { awaitsRegistration: false })
+    return 'bound'
   }
 
   private async attachPtyWithRetry(
