@@ -91,7 +91,7 @@ vi.mock('../providers/ssh-git-dispatch', () => ({
 
 const { getPtyIdsForConnection } = await import('../ipc/pty')
 
-describe('SSH relay orphaned PTY reaping', () => {
+describe('SSH relay lease retirement and orphan reaping', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     muxRequestMock.mockResolvedValue([])
@@ -166,5 +166,126 @@ describe('SSH relay orphaned PTY reaping', () => {
     await session.establish(mockConn)
 
     expect(mockStore.clearSshRemotePtyLeaseReapFlag).toHaveBeenCalledWith('target-1', 'pty-gone')
+  })
+
+  // D6/RC4b: the relay sends one message that satisfies both the not-found and the mismatch predicate,
+  // so this exit is reachable and used to return without retiring anything.
+  it('retires an identity-mismatched lease without touching the PTY or the live pane it names', async () => {
+    const { mockConn, mockStore, mockPortForward, getMainWindow, mockWindow } = createMockDeps()
+    const { getSshPtyProvider, clearProviderPtyState, deletePtyOwnership } =
+      await import('../ipc/pty')
+    vi.mocked(getSshPtyProvider).mockReturnValue({
+      attachForReconnect: vi
+        .fn()
+        .mockRejectedValue(new Error('PTY "pty-1" not found (identity mismatch)')),
+      dispose: vi.fn()
+    } as unknown as ReturnType<typeof getSshPtyProvider>)
+    vi.mocked(getPtyIdsForConnection).mockReturnValue(['pty-1'])
+
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+    await session.establish(mockConn)
+
+    expect(mockStore.retireLeaseSparingPty).toHaveBeenCalledWith(
+      'target-1',
+      'pty-1',
+      expect.stringContaining('identity mismatch')
+    )
+    expect(mockStore.retireLeaseAndReap).not.toHaveBeenCalled()
+    // Why: after the fence, `ssh:target-1@@pty-1` is the *other* pane's app id, so local teardown here
+    // would kill a working pane.
+    expect(clearProviderPtyState).not.toHaveBeenCalled()
+    expect(deletePtyOwnership).not.toHaveBeenCalled()
+    expect(mockWindow.webContents.send).not.toHaveBeenCalledWith('pty:exit', expect.anything())
+  })
+
+  it('retires a plainly missing PTY through the sparing primitive too', async () => {
+    const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    const { getSshPtyProvider, deletePtyOwnership } = await import('../ipc/pty')
+    vi.mocked(getSshPtyProvider).mockReturnValue({
+      attachForReconnect: vi.fn().mockRejectedValue(new Error('PTY "pty-1" not found')),
+      dispose: vi.fn()
+    } as unknown as ReturnType<typeof getSshPtyProvider>)
+    vi.mocked(getPtyIdsForConnection).mockReturnValue(['pty-1'])
+
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+    await session.establish(mockConn)
+
+    expect(mockStore.retireLeaseSparingPty).toHaveBeenCalledWith(
+      'target-1',
+      'pty-1',
+      expect.stringContaining('not found')
+    )
+    expect(mockStore.retireLeaseAndReap).not.toHaveBeenCalled()
+    expect(deletePtyOwnership).toHaveBeenCalledWith('ssh:target-1@@pty-1')
+  })
+
+  // D7: `relay.status` is answered by the detached daemon that owns the PTYs, even through `--connect`.
+  const relayStatus = (pid: number, uptimeMs: number) => (method: string) =>
+    method === 'relay.status' ? Promise.resolve({ pid, uptimeMs }) : Promise.resolve([])
+
+  it('retires every lease for the target when a different relay incarnation owns the socket', async () => {
+    const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    muxRequestMock.mockImplementation(relayStatus(4242, 1_000))
+    vi.mocked(mockStore.getSshRelayIncarnation).mockReturnValue({
+      targetId: 'target-1',
+      pid: 111,
+      derivedStartAt: Date.now() - 900_000
+    })
+
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+    await session.establish(mockConn)
+
+    expect(mockStore.retireAllLeasesSparingPtys).toHaveBeenCalledWith(
+      'target-1',
+      expect.stringContaining('relay incarnation changed')
+    )
+    expect(mockStore.setSshRelayIncarnation).toHaveBeenCalledWith(
+      expect.objectContaining({ targetId: 'target-1', pid: 4242 })
+    )
+  })
+
+  it('leaves leases alone when the same relay answers, tolerating RPC latency in the derived start', async () => {
+    const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    muxRequestMock.mockImplementation(relayStatus(4242, 60_000))
+    vi.mocked(mockStore.getSshRelayIncarnation).mockReturnValue({
+      targetId: 'target-1',
+      pid: 4242,
+      derivedStartAt: Date.now() - 60_000 - 5_000
+    })
+
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+    await session.establish(mockConn)
+
+    expect(mockStore.retireAllLeasesSparingPtys).not.toHaveBeenCalled()
+  })
+
+  it('fails open when the relay cannot answer who it is', async () => {
+    const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    muxRequestMock.mockImplementation((method: string) =>
+      method === 'relay.status' ? Promise.reject(new Error('unknown method')) : Promise.resolve([])
+    )
+    vi.mocked(mockStore.getSshRelayIncarnation).mockReturnValue({
+      targetId: 'target-1',
+      pid: 111,
+      derivedStartAt: 1
+    })
+
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+    await session.establish(mockConn)
+
+    expect(mockStore.retireAllLeasesSparingPtys).not.toHaveBeenCalled()
+    expect(mockStore.setSshRelayIncarnation).not.toHaveBeenCalled()
+  })
+
+  it('records the first identity without retiring, so the reset before an upgrade is not charged to it', async () => {
+    const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    muxRequestMock.mockImplementation(relayStatus(4242, 1_000))
+    vi.mocked(mockStore.getSshRelayIncarnation).mockReturnValue(null)
+
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+    await session.establish(mockConn)
+
+    expect(mockStore.setSshRelayIncarnation).toHaveBeenCalledOnce()
+    expect(mockStore.retireAllLeasesSparingPtys).not.toHaveBeenCalled()
   })
 })

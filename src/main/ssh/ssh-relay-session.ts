@@ -74,8 +74,11 @@ import {
   type DetectedPort,
   MAX_SSH_RELAY_GRACE_PERIOD_SECONDS,
   MIN_SSH_RELAY_GRACE_PERIOD_SECONDS,
-  SSH_RELAY_CONFIGURE_GRACE_TIME_METHOD
+  SSH_RELAY_CONFIGURE_GRACE_TIME_METHOD,
+  SSH_RELAY_INCARNATION_START_TOLERANCE_MS,
+  type SshRelayIncarnation
 } from '../../shared/ssh-types'
+import { SSH_LEASE_RETIRED_REASON_MAX_LENGTH } from '../persistence'
 import type { Store } from '../persistence'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import { DEFAULT_PTY_SOURCE_WINDOW_SU } from '../../shared/pty-source-credit-contract'
@@ -150,6 +153,30 @@ type RemoteCliBridgeEnv = {
 }
 
 type ExpectedPtyIdentity = { paneKey?: string; tabId?: string }
+
+function parseRelayIncarnation(targetId: string, status: unknown): SshRelayIncarnation | null {
+  if (!status || typeof status !== 'object') {
+    return null
+  }
+  const { pid, uptimeMs } = status as { pid?: unknown; uptimeMs?: unknown }
+  if (!Number.isFinite(pid) || !Number.isFinite(uptimeMs)) {
+    return null
+  }
+  return { targetId, pid: pid as number, derivedStartAt: Date.now() - (uptimeMs as number) }
+}
+
+/** `derivedStartAt` is relative to the relay's own uptime, so the tolerance absorbs latency, not clock skew. */
+function isSameRelayIncarnation(a: SshRelayIncarnation, b: SshRelayIncarnation): boolean {
+  return (
+    a.pid === b.pid &&
+    Math.abs(a.derivedStartAt - b.derivedStartAt) <= SSH_RELAY_INCARNATION_START_TOLERANCE_MS
+  )
+}
+
+/** Over-long reasons are dropped by the lease normalizer on load, which would silently undo D6's fix. */
+function boundedRetiredReason(detail: string): string {
+  return detail.slice(0, SSH_LEASE_RETIRED_REASON_MAX_LENGTH)
+}
 
 function expectedIdentityForLease(lease: {
   tabId?: string
@@ -482,6 +509,7 @@ export class SshRelaySession {
       }
 
       // Why: explicit disconnect keeps PTY ownership, so a later manual connect must reattach those remote PTYs.
+      await this.retireLeasesOnRelayIncarnationChange(mux)
       await this.reattachKnownPtys(mux, ownsAttempt)
 
       if (!ownsAttempt()) {
@@ -630,6 +658,7 @@ export class SshRelaySession {
         return
       }
 
+      await this.retireLeasesOnRelayIncarnationChange(mux)
       await this.reattachKnownPtys(mux, ownsAttempt)
 
       if (!ownsAttempt()) {
@@ -1845,6 +1874,45 @@ export class SshRelaySession {
     }
   }
 
+  /**
+   * D7 — ask the relay who it is before trusting any lease. `relay.js --connect` is a pure byte pipe, so
+   * the reply comes from the detached daemon that actually owns the PTYs. Fails open in every direction:
+   * an unavailable RPC, an unparseable reply, or no stored identity is a no-op, never a retirement.
+   */
+  private async retireLeasesOnRelayIncarnationChange(mux: SshChannelMultiplexer): Promise<void> {
+    let status: unknown
+    try {
+      status = await mux.request('relay.status', {})
+    } catch (error) {
+      console.warn(
+        `[ssh-relay-session] relay.status unavailable for ${this.targetId}, skipping incarnation check: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+      return
+    }
+    const identity = parseRelayIncarnation(this.targetId, status)
+    if (!identity) {
+      return
+    }
+    const previous = this.store.getSshRelayIncarnation(this.targetId)
+    this.store.setSshRelayIncarnation(identity)
+    if (!previous || isSameRelayIncarnation(previous, identity)) {
+      return
+    }
+    const retired = this.store.retireAllLeasesSparingPtys(
+      this.targetId,
+      boundedRetiredReason(
+        `relay incarnation changed: pid ${previous.pid} -> ${identity.pid}, start ${previous.derivedStartAt} -> ${identity.derivedStartAt}`
+      )
+    )
+    if (retired > 0) {
+      console.warn(
+        `[ssh-relay-session] Retired ${retired} lease(s) for ${this.targetId}: a different relay incarnation owns the socket`
+      )
+    }
+  }
+
   private async reattachKnownPtys(
     mux: SshChannelMultiplexer,
     shouldContinue: () => boolean
@@ -2290,32 +2358,32 @@ export class SshRelaySession {
     pending: PendingPtyReattach,
     error: unknown
   ): void {
+    const detail = error instanceof Error ? error.message : String(error)
+    // (A) Transport-ish: nothing proves the remote PTY is gone, so keep the grace window and retry.
     if (!isSshPtyNotFoundError(error)) {
       pending.restoreRequired = 'reattachAttemptsExhausted'
       this.wakeRecovery(pending)
       console.warn(
-        `[ssh-relay-session] Leaving PTY ${ptyId} detached for ${this.targetId} after bounded reattach attempts failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+        `[ssh-relay-session] Leaving PTY ${ptyId} detached for ${this.targetId} after bounded reattach attempts failed: ${detail}`
       )
       return
     }
+    // (B) The relay proved this id names a different pane's live PTY. Retire the wrong row and stop:
+    // `appPtyId` is that other pane's app id too, so the local teardown (C) does would kill a live pane.
     if (isSshPtyIdentityMismatchError(error)) {
       console.warn(
-        `[ssh-relay-session] Ignoring stale PTY ${ptyId} for ${this.targetId} after relay identity mismatch: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+        `[ssh-relay-session] Retiring PTY ${ptyId} lease for ${this.targetId} after relay identity mismatch: ${detail}`
       )
+      this.store.retireLeaseSparingPty(this.targetId, ptyId, boundedRetiredReason(detail))
       return
     }
+    // (C) The relay says the id does not exist, so this pane's remote PTY really is gone.
     console.warn(
-      `[ssh-relay-session] Dropping stale PTY ${ptyId} for ${this.targetId} after relay reattach failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`
+      `[ssh-relay-session] Dropping stale PTY ${ptyId} for ${this.targetId} after relay reattach failed: ${detail}`
     )
     clearProviderPtyState(appPtyId)
     deletePtyOwnership(appPtyId)
-    this.store.markSshRemotePtyLease(this.targetId, ptyId, 'expired')
+    this.store.retireLeaseSparingPty(this.targetId, ptyId, boundedRetiredReason(detail))
     const win = this.getMainWindow()
     if (win && !win.isDestroyed()) {
       win.webContents.send('pty:exit', { id: appPtyId, code: -1 })

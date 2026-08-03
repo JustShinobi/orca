@@ -9754,6 +9754,55 @@ describe('Store', () => {
     expect(claimed[0]).toBe('pty-000')
   })
 
+  it('round-trips the recorded relay incarnation and drops malformed rows on load', async () => {
+    const store = await createStore()
+    store.setSshRelayIncarnation({ targetId: 'target-1', pid: 4242, derivedStartAt: 1_700_000 })
+    store.setSshRelayIncarnation({ targetId: 'target-1', pid: 99, derivedStartAt: 1_800_000 })
+    store.flush()
+
+    // Why: normalize is a strict allowlist, so set-then-read would pass even if the field never persisted.
+    const reloaded = await createStore()
+    expect(reloaded.getSshRelayIncarnation('target-1')).toEqual({
+      targetId: 'target-1',
+      pid: 99,
+      derivedStartAt: 1_800_000
+    })
+    expect(reloaded.getSshRelayIncarnation('target-absent')).toBeNull()
+  })
+
+  it('forgets the recorded incarnation when a target’s leases are removed', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({ targetId: 'target-1', ptyId: 'pty-1', state: 'attached' })
+    store.setSshRelayIncarnation({ targetId: 'target-1', pid: 7, derivedStartAt: 1_000 })
+    store.setSshRelayIncarnation({ targetId: 'target-2', pid: 8, derivedStartAt: 2_000 })
+
+    store.removeSshRemotePtyLeases('target-1')
+
+    // Why: a stale identity for a forgotten target would retire the first reconnect's fresh leases.
+    expect(store.getSshRelayIncarnation('target-1')).toBeNull()
+    expect(store.getSshRelayIncarnation('target-2')?.pid).toBe(8)
+  })
+
+  it('retires every live lease for a target while sparing the remote PTYs', async () => {
+    const store = await createStore()
+    for (const ptyId of ['pty-1', 'pty-2', 'pty-3']) {
+      store.upsertSshRemotePtyLease({ targetId: 'target-1', ptyId, state: 'attached' })
+    }
+    store.upsertSshRemotePtyLease({ targetId: 'target-other', ptyId: 'pty-9', state: 'attached' })
+    store.retireLeaseAndReap('target-1', 'pty-3', 'pane closed')
+
+    // Why: already-retired rows are not live, so they must not be recounted or have their reason rewritten.
+    expect(store.retireAllLeasesSparingPtys('target-1', 'relay incarnation changed')).toBe(2)
+
+    const leases = store.getSshRemotePtyLeases('target-1')
+    expect(leases.filter((l) => l.retiredReason === 'relay incarnation changed')).toHaveLength(2)
+    expect(leases.every((l) => l.state === 'expired' || l.state === 'terminated')).toBe(true)
+    expect(leases.find((l) => l.ptyId === 'pty-3')?.retiredReason).toBe('pane closed')
+    // I6 — a wrong row is retired, but nothing authorizes killing the process it named.
+    expect(store.claimSshRemotePtyLeasesToReap('target-1')).toEqual(['pty-3'])
+    expect(store.getSshRemotePtyLeases('target-other')[0]?.state).toBe('attached')
+  })
+
   it('keeps worktree deletion authoritative against stale writes and later same-path reuse', async () => {
     const store = await createStore()
     store.setWorktreeMeta('wt1', { displayName: 'Worktree' })

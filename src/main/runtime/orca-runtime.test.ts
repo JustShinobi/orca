@@ -1300,7 +1300,8 @@ const store = {
 function createRuntimeWithSshLease(
   ptyId: string,
   tabId: string,
-  state: 'expired' | 'terminated' = 'expired'
+  state: 'expired' | 'terminated' = 'expired',
+  retiredReason?: string
 ): OrcaRuntimeService {
   const now = Date.now()
   return new OrcaRuntimeService({
@@ -1314,7 +1315,8 @@ function createRuntimeWithSshLease(
         leafId: HEADLESS_LEAF_ID,
         state,
         createdAt: now,
-        updatedAt: now
+        updatedAt: now,
+        ...(retiredReason === undefined ? {} : { retiredReason })
       }
     ]
   })
@@ -2949,6 +2951,31 @@ describe('OrcaRuntimeService', () => {
     })
     const handle = runtime.resolveTerminalPane(paneKey, TEST_WORKTREE_ID).handle
     runtime.onPtyExit('pty-terminated', 0)
+    const createTerminal = vi.spyOn(runtime, 'createTerminal')
+
+    await expect(runtime.recoverTerminalPane(paneKey, TEST_WORKTREE_ID, handle)).rejects.toThrow(
+      'terminal_not_recoverable'
+    )
+    expect(createTerminal).not.toHaveBeenCalled()
+  })
+
+  it('does not recover a pane from a lease Orca retired itself', async () => {
+    const tabId = 'tab-retired'
+    // Why: `'expired'` is written by both the relay and our own retirements, and only the relay's
+    // expiry is evidence the remote PTY is gone. Recovering from ours would mint a duplicate pane.
+    const runtime = createRuntimeWithSshLease(
+      'pty-retired',
+      tabId,
+      'expired',
+      'relay identity mismatch'
+    )
+    const paneKey = makePaneKey(tabId, HEADLESS_LEAF_ID)
+    runtime.registerPty('pty-retired', TEST_WORKTREE_ID, null, {
+      tabId,
+      leafId: HEADLESS_LEAF_ID
+    })
+    const handle = runtime.resolveTerminalPane(paneKey, TEST_WORKTREE_ID).handle
+    runtime.onPtyExit('pty-retired', 0)
     const createTerminal = vi.spyOn(runtime, 'createTerminal')
 
     await expect(runtime.recoverTerminalPane(paneKey, TEST_WORKTREE_ID, handle)).rejects.toThrow(

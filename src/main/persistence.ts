@@ -103,6 +103,7 @@ import {
   LEGACY_DEFAULT_SSH_RELAY_GRACE_PERIOD_SECONDS,
   type RemovedSshTargetTombstone,
   type SshPtyConsumerRecovery,
+  type SshRelayIncarnation,
   type SshRemotePtyLease,
   type SshRemotePtyLeaseState,
   type SshTarget
@@ -1583,6 +1584,9 @@ function normalizeFloatingWorkspaceTrustedCwds(
   return { trustedCwds, changed }
 }
 
+/** The normalizer drops a longer reason on load, so writers must truncate to this. */
+export const SSH_LEASE_RETIRED_REASON_MAX_LENGTH = 512
+
 function normalizeSshRemotePtyLease(value: unknown): SshRemotePtyLease | null {
   if (!value || typeof value !== 'object') {
     return null
@@ -1609,10 +1613,30 @@ function normalizeSshRemotePtyLease(value: unknown): SshRemotePtyLease | null {
     ...(typeof raw.lastDetachedAt === 'number' ? { lastDetachedAt: raw.lastDetachedAt } : {}),
     // Why: this is a strict allowlist — an unlisted field is dropped on load, so a retirement flag would
     // work in every in-process test and vanish on the first restart, in exactly the durable case it exists for.
-    ...(typeof raw.retiredReason === 'string' && raw.retiredReason.length <= 512
+    ...(typeof raw.retiredReason === 'string' &&
+    raw.retiredReason.length <= SSH_LEASE_RETIRED_REASON_MAX_LENGTH
       ? { retiredReason: raw.retiredReason }
       : {}),
     ...(raw.pendingRemoteShutdown === true ? { pendingRemoteShutdown: true } : {})
+  }
+}
+
+function normalizeSshRelayIncarnation(value: unknown): SshRelayIncarnation | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+  const raw = value as Partial<SshRelayIncarnation>
+  if (
+    typeof raw.targetId !== 'string' ||
+    !Number.isFinite(raw.pid) ||
+    !Number.isFinite(raw.derivedStartAt)
+  ) {
+    return null
+  }
+  return {
+    targetId: raw.targetId,
+    pid: raw.pid as number,
+    derivedStartAt: raw.derivedStartAt as number
   }
 }
 
@@ -3736,6 +3760,9 @@ export class Store {
             }
             return leases
           })(),
+          sshRelayIncarnations: (parsed.sshRelayIncarnations ?? [])
+            .map(normalizeSshRelayIncarnation)
+            .filter((entry): entry is SshRelayIncarnation => entry !== null),
           sshPtyConsumerRecoveries: parsed.sshPtyConsumerRecoveries,
           claudeLivePtySessionIds: normalizeClaudeLivePtySessionIds(parsed.claudeLivePtySessionIds),
           migrationUnsupportedPtyEntries: normalizeMigrationUnsupportedPtyEntries(
@@ -7435,6 +7462,37 @@ export class Store {
     this.flush()
   }
 
+  getSshRelayIncarnation(targetId: string): SshRelayIncarnation | null {
+    return this.state.sshRelayIncarnations?.find((entry) => entry.targetId === targetId) ?? null
+  }
+
+  setSshRelayIncarnation(incarnation: SshRelayIncarnation): void {
+    this.state.sshRelayIncarnations ??= []
+    const existingIndex = this.state.sshRelayIncarnations.findIndex(
+      (entry) => entry.targetId === incarnation.targetId
+    )
+    if (existingIndex >= 0) {
+      this.state.sshRelayIncarnations[existingIndex] = incarnation
+    } else {
+      this.state.sshRelayIncarnations.push(incarnation)
+    }
+    this.flush()
+  }
+
+  /**
+   * D7 — a different relay incarnation owns the socket, so every lease for this target is wrong about the
+   * PTY it names. I6 evidence: retire the rows, spare the processes — we can no longer address them.
+   */
+  retireAllLeasesSparingPtys(targetId: string, reason: string): number {
+    const live = (this.state.sshRemotePtyLeases ?? []).filter(
+      (lease) => lease.targetId === targetId && !isRetiredSshLeaseState(lease.state)
+    )
+    for (const lease of live) {
+      this.retireLeaseSparingPty(targetId, lease.ptyId, reason)
+    }
+    return live.length
+  }
+
   removeSshRemotePtyLease(targetId: string, ptyId: string): void {
     const relayPtyId = this.getRelayPtyIdForSshLeaseStorage(targetId, ptyId)
     const leases = (this.state.sshRemotePtyLeases ?? []).filter(
@@ -7456,6 +7514,9 @@ export class Store {
   removeSshRemotePtyLeases(targetId: string): void {
     this.state.sshRemotePtyLeases ??= []
     this.supersededByLeaseInsert.delete(targetId)
+    this.state.sshRelayIncarnations = this.state.sshRelayIncarnations?.filter(
+      (entry) => entry.targetId !== targetId
+    )
     this.clearSshRemotePtyBindingsForTarget(targetId)
     const before = this.state.sshRemotePtyLeases.length
     this.state.sshRemotePtyLeases = this.state.sshRemotePtyLeases.filter(

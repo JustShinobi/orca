@@ -165,6 +165,21 @@ export type SshRemotePtyLease = {
   pendingRemoteShutdown?: boolean
 }
 
+/**
+ * D7 — which relay incarnation owned this target's PTYs at the last connect. `pid` alone is not enough
+ * (pids are reused), so it is paired with a start time derived from the relay's own uptime, which makes
+ * the comparison immune to clock skew between the two machines.
+ */
+export type SshRelayIncarnation = {
+  targetId: string
+  pid: number
+  /** ms epoch, derived as `now - uptimeMs` at the moment the relay answered. */
+  derivedStartAt: number
+}
+
+/** Clock skew and RPC latency both perturb `derivedStartAt`; a relay restart moves it far more than this. */
+export const SSH_RELAY_INCARNATION_START_TOLERANCE_MS = 30_000
+
 /** Main-owned relay lease needed to reclaim PTY delivery after a desktop restart. */
 export type SshPtyConsumerRecovery = {
   targetId: string
