@@ -6269,6 +6269,15 @@ export function registerPtyHandlers(
       return
     }
     const shutdownProvider = provider ?? getProviderForPty(args.id)
+    // Why: D4/I4 — the close is durable before any RPC. A wedged transport makes the `throw err` below skip
+    // `finishPtyShutdown`, and that surviving lease is what the next reattach grafts back as a ghost pane.
+    if (connectionId) {
+      store?.retireLeaseAndReap(
+        connectionId,
+        getRelayPtyId(connectionId, args.id),
+        'pty kill requested'
+      )
+    }
     let providerExitObserved = false
     try {
       providerExitObserved = await shutdownProviderAndDetectExit(shutdownProvider, args.id, {
@@ -6277,10 +6286,15 @@ export function registerPtyHandlers(
       })
     } catch (err) {
       if (!isPtyAlreadyGoneError(err)) {
-        // Why: a failed shutdown can leave the process alive (SSH relay grace window / local daemon); keep ownership/lease state so the user can retry.
+        // Why: a failed shutdown can leave the process alive (SSH relay grace window / local daemon); keep ownership so the user can retry.
+        // The lease is already retired, so a retry that never comes cannot resurrect the pane either.
         throw err
       }
       /* session already dead — cleanup below handles the rest */
+    }
+    // The remote PTY is provably gone now, so leave nothing for the next connect's reap drain to chase.
+    if (connectionId) {
+      store?.clearSshRemotePtyLeaseReapFlag(connectionId, getRelayPtyId(connectionId, args.id))
     }
     // Why: some shutdown paths do not emit onExit through the provider listener.
     // Explicit cleanup is idempotent and covers already-dead PTYs.
