@@ -285,6 +285,7 @@ describe('SSH IPC handlers', () => {
     retireAllLeasesSparingPtys: vi.fn().mockReturnValue(0),
     claimSshRemotePtyLeasesToReap: vi.fn().mockReturnValue([]),
     clearSshRemotePtyLeaseReapFlag: vi.fn(),
+    clearAllSshRemotePtyLeaseReapFlags: vi.fn().mockReturnValue(0),
     getSshRelayIncarnation: vi.fn().mockReturnValue(null),
     setSshRelayIncarnation: vi.fn(),
     markSshRemotePtyLeases: vi.fn(),
