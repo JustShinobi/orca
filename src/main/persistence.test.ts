@@ -9450,6 +9450,36 @@ describe('Store', () => {
     expect(store.getSshRemotePtyLeases('target-1')[0].pendingRemoteShutdown).toBeUndefined()
   })
 
+  it('strips retirement metadata when a fresh binding reuses a retired pty id', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-1',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+    store.retireLeaseAndReap('target-1', 'pty-1', 'pane closed')
+
+    // A reset relay restarts `pty-N` numbering, so the next spawn lands on the retired row's key.
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-1',
+      worktreeId: 'wt1',
+      tabId: 'tab-2',
+      leafId: TEST_LEAF_2,
+      state: 'attached'
+    })
+
+    const lease = store.getSshRemotePtyLeases('target-1')[0]
+    expect(lease.state).toBe('attached')
+    expect(lease.tabId).toBe('tab-2')
+    // Inheriting either field would aim D3's reap drain at this live pane's shell.
+    expect(lease.pendingRemoteShutdown).toBeUndefined()
+    expect(lease.retiredReason).toBeUndefined()
+  })
+
   it('blocks the reproduced resurrection of a retired lease back to detached', async () => {
     const store = await createStore()
     store.upsertSshRemotePtyLease({

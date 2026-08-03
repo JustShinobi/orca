@@ -7196,6 +7196,13 @@ export class Store {
       createdAt: existing?.createdAt ?? normalizedLease.createdAt ?? now,
       updatedAt: normalizedLease.updatedAt ?? now
     }
+    // Why: rows are keyed by (targetId, ptyId) and a reset relay restarts `pty-N` numbering, so a fresh
+    // binding can land on a retired row. Spreading `existing` would hand the new pane that row's
+    // `pendingRemoteShutdown`, pointing D3's reap at a live shell.
+    if (!isRetiredSshLeaseState(next.state)) {
+      delete next.retiredReason
+      delete next.pendingRemoteShutdown
+    }
     if (existingIndex >= 0) {
       this.state.sshRemotePtyLeases[existingIndex] = next
     } else {
