@@ -104,6 +104,7 @@ import {
   type RemovedSshTargetTombstone,
   type SshPtyConsumerRecovery,
   type SshRemotePtyLease,
+  type SshRemotePtyLeaseState,
   type SshTarget
 } from '../shared/ssh-types'
 import { isFolderRepo } from '../shared/repo-kind'
@@ -1615,6 +1616,95 @@ function normalizeSshRemotePtyLease(value: unknown): SshRemotePtyLease | null {
   }
 }
 
+/** D3 — a reap flag no relay ever accepts must not be retried until the profile is deleted. */
+export const SSH_LEASE_REAP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+/** D3 — a profile poisoned by a past fan-out must not stall every reconnect draining it. */
+export const SSH_LEASE_REAP_BATCH_LIMIT = 32
+
+// Why: retirement is one-way. Ordering states by finality lets a single predicate replace the ad-hoc
+// current-state guards that some lease callers remembered and others forgot.
+const SSH_LEASE_FINALITY: Record<SshRemotePtyLeaseState, number> = {
+  attached: 0,
+  detached: 0,
+  expired: 1,
+  terminated: 2
+}
+
+/**
+ * Monotonic by finality, not absorbing: `expired` → `terminated` must stay legal, or a lease the relay
+ * expired and the user then closed is stranded `expired` and visible to the 30 s recovery consumers.
+ */
+function canAdvanceSshLeaseState(
+  from: SshRemotePtyLeaseState,
+  to: SshRemotePtyLeaseState
+): boolean {
+  return SSH_LEASE_FINALITY[to] >= SSH_LEASE_FINALITY[from]
+}
+
+function isRetiredSshLeaseState(state: SshRemotePtyLeaseState): boolean {
+  return state === 'terminated' || state === 'expired'
+}
+
+/** Prior state of a lease D1a superseded, kept only long enough for the spawn-failure rollback (F8). */
+type SupersededSshLeaseSnapshot = {
+  ptyId: string
+  state: SshRemotePtyLeaseState
+  updatedAt: number
+  retiredReason?: string
+  pendingRemoteShutdown?: boolean
+}
+
+/** Legacy rows without a complete pane identity cannot be grouped, so they are exempt from supersede. */
+function sshLeasePaneGroupKey(lease: SshRemotePtyLease): string | null {
+  if (!lease.worktreeId || !lease.tabId || !lease.leafId) {
+    return null
+  }
+  return [lease.targetId, lease.worktreeId, lease.tabId, lease.leafId].join('\u0000')
+}
+
+/** Newest wins; `createdAt` then `ptyId` break ties, since a fan-out lands rows inside one second. */
+function isNewerSshLease(candidate: SshRemotePtyLease, incumbent: SshRemotePtyLease): boolean {
+  if (candidate.updatedAt !== incumbent.updatedAt) {
+    return candidate.updatedAt > incumbent.updatedAt
+  }
+  if (candidate.createdAt !== incumbent.createdAt) {
+    return candidate.createdAt > incumbent.createdAt
+  }
+  return candidate.ptyId > incumbent.ptyId
+}
+
+/**
+ * M1 — collapse each pane to one live lease at load, so profiles already poisoned by past fan-outs heal
+ * without waiting for a reconnect. Idempotent and unconditional: a no-op on clean profiles.
+ */
+function reconcileSshLeasesToOnePerPane(leases: SshRemotePtyLease[]): boolean {
+  const winners = new Map<string, SshRemotePtyLease>()
+  for (const lease of leases) {
+    const key = isRetiredSshLeaseState(lease.state) ? null : sshLeasePaneGroupKey(lease)
+    if (!key) {
+      continue
+    }
+    const incumbent = winners.get(key)
+    if (!incumbent || isNewerSshLease(lease, incumbent)) {
+      winners.set(key, lease)
+    }
+  }
+  const now = Date.now()
+  let changed = false
+  for (const lease of leases) {
+    const key = isRetiredSshLeaseState(lease.state) ? null : sshLeasePaneGroupKey(lease)
+    if (!key || winners.get(key) === lease) {
+      continue
+    }
+    lease.state = 'terminated'
+    lease.retiredReason = 'superseded on load: another lease holds this pane'
+    lease.pendingRemoteShutdown = true
+    lease.updatedAt = now
+    changed = true
+  }
+  return changed
+}
+
 const SSH_PTY_OWNER_LEASE_MAX_LENGTH = 512
 const ENCRYPTED_SSH_PTY_OWNER_LEASE_MAX_LENGTH = 4096
 
@@ -2799,6 +2889,8 @@ export class Store {
   private readonly staleGithubCacheTempCleanup: Promise<void>
   private gitUsernameCache = new Map<string, string>()
   private loadNeedsSave = false
+  // In-memory only: if the app dies before the rollback runs, M1 re-collapses the pane on next load.
+  private supersededByLeaseInsert = new Map<string, Map<string, SupersededSshLeaseSnapshot[]>>()
   private settingsChangeListeners = new Set<
     (
       updates: Partial<GlobalSettings>,
@@ -3634,9 +3726,16 @@ export class Store {
                 (alias): alias is string => typeof alias === 'string'
               )
             : [],
-          sshRemotePtyLeases: (parsed.sshRemotePtyLeases ?? [])
-            .map(normalizeSshRemotePtyLease)
-            .filter((lease): lease is SshRemotePtyLease => lease !== null),
+          sshRemotePtyLeases: (() => {
+            const leases = (parsed.sshRemotePtyLeases ?? [])
+              .map(normalizeSshRemotePtyLease)
+              .filter((lease): lease is SshRemotePtyLease => lease !== null)
+            // Why: nothing else marks dirty, so a healed profile would otherwise wait for an unrelated write.
+            if (reconcileSshLeasesToOnePerPane(leases)) {
+              this.loadNeedsSave = true
+            }
+            return leases
+          })(),
           sshPtyConsumerRecoveries: parsed.sshPtyConsumerRecoveries,
           claudeLivePtySessionIds: normalizeClaudeLivePtySessionIds(parsed.claudeLivePtySessionIds),
           migrationUnsupportedPtyEntries: normalizeMigrationUnsupportedPtyEntries(
@@ -7073,7 +7172,82 @@ export class Store {
     } else {
       this.state.sshRemotePtyLeases.push(next)
     }
+    // Why: D1a — the incoming write is the current binding for that pane, so any other live lease for it
+    // is stale by construction. Transactional with the insert so the spawn-failure rollback can undo both.
+    const superseded = this.supersedeOtherLeasesForPane(next)
+    const byPtyId = this.supersededByLeaseInsert.get(next.targetId)
+    if (superseded.length === 0) {
+      byPtyId?.delete(next.ptyId)
+    } else if (byPtyId) {
+      byPtyId.set(next.ptyId, superseded)
+    } else {
+      this.supersededByLeaseInsert.set(next.targetId, new Map([[next.ptyId, superseded]]))
+    }
     this.flush()
+  }
+
+  private supersedeOtherLeasesForPane(inserted: SshRemotePtyLease): SupersededSshLeaseSnapshot[] {
+    const key = isRetiredSshLeaseState(inserted.state) ? null : sshLeasePaneGroupKey(inserted)
+    if (!key) {
+      return []
+    }
+    const now = Date.now()
+    const snapshots: SupersededSshLeaseSnapshot[] = []
+    for (const lease of this.state.sshRemotePtyLeases ?? []) {
+      if (lease === inserted || isRetiredSshLeaseState(lease.state)) {
+        continue
+      }
+      if (sshLeasePaneGroupKey(lease) !== key) {
+        continue
+      }
+      snapshots.push({
+        ptyId: lease.ptyId,
+        state: lease.state,
+        updatedAt: lease.updatedAt,
+        retiredReason: lease.retiredReason,
+        pendingRemoteShutdown: lease.pendingRemoteShutdown
+      })
+      lease.state = 'terminated'
+      lease.retiredReason = `superseded by ${inserted.ptyId}`
+      lease.pendingRemoteShutdown = true
+      lease.updatedAt = now
+    }
+    return snapshots
+  }
+
+  /**
+   * F8 — undo a supersede when the spawn that caused it fails to persist. Assigns directly rather than
+   * going through the public setter, which D1b would correctly refuse: this restores, it does not retire.
+   */
+  private restoreLeasesSupersededByInsert(targetId: string, relayPtyId: string): boolean {
+    const snapshots = this.supersededByLeaseInsert.get(targetId)?.get(relayPtyId)
+    if (!snapshots) {
+      return false
+    }
+    this.supersededByLeaseInsert.get(targetId)?.delete(relayPtyId)
+    let restored = false
+    for (const snapshot of snapshots) {
+      const lease = this.state.sshRemotePtyLeases?.find(
+        (entry) => entry.targetId === targetId && entry.ptyId === snapshot.ptyId
+      )
+      if (!lease) {
+        continue
+      }
+      lease.state = snapshot.state
+      lease.updatedAt = snapshot.updatedAt
+      if (snapshot.retiredReason === undefined) {
+        delete lease.retiredReason
+      } else {
+        lease.retiredReason = snapshot.retiredReason
+      }
+      if (snapshot.pendingRemoteShutdown === undefined) {
+        delete lease.pendingRemoteShutdown
+      } else {
+        lease.pendingRemoteShutdown = snapshot.pendingRemoteShutdown
+      }
+      restored = true
+    }
+    return restored
   }
 
   markSshRemotePtyLeases(targetId: string, state: SshRemotePtyLease['state']): void {
@@ -7117,10 +7291,8 @@ export class Store {
       if (lease.targetId !== targetId || (ptyIds && !ptyIds.has(lease.ptyId))) {
         continue
       }
-      if (state === 'attached' && (lease.state === 'terminated' || lease.state === 'expired')) {
-        continue
-      }
-      if (state === 'detached' && lease.state !== 'attached') {
+      // D1b: subsumes the two directional special cases this guard replaced.
+      if (!canAdvanceSshLeaseState(lease.state, state)) {
         continue
       }
       if (lease.state !== state) {
@@ -7152,7 +7324,9 @@ export class Store {
       return
     }
     const shouldClearBindings = state === 'terminated' || state === 'expired'
-    if (lease.state === state) {
+    // Why: D1b — retirement must be terminal in fact. `abandonPtySourceRecovery` writes `detached` here
+    // unconditionally, which resurrected leases that had already been retired (reproduced under SIGSTOP).
+    if (lease.state === state || !canAdvanceSshLeaseState(lease.state, state)) {
       if (shouldClearBindings && this.clearSshRemotePtyBindingsForLeases(targetId, [lease])) {
         this.flush()
       }
@@ -7199,21 +7373,65 @@ export class Store {
     if (!lease) {
       return
     }
-    // Why: retirement is terminal. Re-retiring would let a spared row later acquire a reap flag for a PTY
-    // we already decided we have no claim on; keep binding cleanup idempotent as the singular setter does.
-    if (lease.state === 'terminated' || lease.state === 'expired') {
+    // D1b's rule, so `expired` → `terminated` stays legal and nothing walks back toward live.
+    if (lease.state === state || !canAdvanceSshLeaseState(lease.state, state)) {
       if (this.clearSshRemotePtyBindingsForLeases(targetId, [lease])) {
         this.flush()
       }
       return
     }
+    // Why: a row already retired by the sparing primitive named a PTY we have no claim on. Advancing it
+    // to `terminated` must not retroactively authorize killing that id — a reset relay reuses `pty-N`.
+    const wasSparedEarlier = lease.retiredReason !== undefined && !lease.pendingRemoteShutdown
     lease.state = state
     lease.updatedAt = Date.now()
     lease.retiredReason = reason
-    if (pendingRemoteShutdown) {
+    if (pendingRemoteShutdown && !wasSparedEarlier) {
       lease.pendingRemoteShutdown = true
     }
     this.clearSshRemotePtyBindingsForLeases(targetId, [lease])
+    this.flush()
+  }
+
+  /**
+   * D3 — the reap queue for one target, oldest first, in relay id space. Over-age rows are dropped here
+   * rather than returned: a flag no relay ever accepts must not be retried until the profile is deleted.
+   * The flag survives a claim, so a transient shutdown failure is retried on the next connect.
+   */
+  claimSshRemotePtyLeasesToReap(targetId: string): string[] {
+    const now = Date.now()
+    const claimed: SshRemotePtyLease[] = []
+    let expired = false
+    for (const lease of this.state.sshRemotePtyLeases ?? []) {
+      if (lease.targetId !== targetId || !lease.pendingRemoteShutdown) {
+        continue
+      }
+      if (now - lease.updatedAt > SSH_LEASE_REAP_MAX_AGE_MS) {
+        delete lease.pendingRemoteShutdown
+        expired = true
+        continue
+      }
+      claimed.push(lease)
+    }
+    if (expired) {
+      this.flush()
+    }
+    return claimed
+      .sort((a, b) => a.updatedAt - b.updatedAt || (a.ptyId < b.ptyId ? -1 : 1))
+      .slice(0, SSH_LEASE_REAP_BATCH_LIMIT)
+      .map((lease) => lease.ptyId)
+  }
+
+  /** D3 — the relay accepted the shutdown (or reports the PTY already gone), so the flag has done its job. */
+  clearSshRemotePtyLeaseReapFlag(targetId: string, ptyId: string): void {
+    const relayPtyId = this.getRelayPtyIdForSshLeaseStorage(targetId, ptyId)
+    const lease = this.state.sshRemotePtyLeases?.find(
+      (entry) => entry.targetId === targetId && entry.ptyId === relayPtyId
+    )
+    if (!lease?.pendingRemoteShutdown) {
+      return
+    }
+    delete lease.pendingRemoteShutdown
     this.flush()
   }
 
@@ -7227,13 +7445,17 @@ export class Store {
     this.state.sshRemotePtyLeases = (this.state.sshRemotePtyLeases ?? []).filter(
       (lease) => lease.targetId !== targetId || lease.ptyId !== relayPtyId
     )
-    if (this.state.sshRemotePtyLeases.length !== before) {
+    // Why: this method's only production caller is the spawn-persist rollback, so dropping the new lease
+    // must also undo the supersede it caused — otherwise a failed spawn retires a working pane's lease.
+    const restored = this.restoreLeasesSupersededByInsert(targetId, relayPtyId)
+    if (this.state.sshRemotePtyLeases.length !== before || restored) {
       this.flush()
     }
   }
 
   removeSshRemotePtyLeases(targetId: string): void {
     this.state.sshRemotePtyLeases ??= []
+    this.supersededByLeaseInsert.delete(targetId)
     this.clearSshRemotePtyBindingsForTarget(targetId)
     const before = this.state.sshRemotePtyLeases.length
     this.state.sshRemotePtyLeases = this.state.sshRemotePtyLeases.filter(

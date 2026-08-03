@@ -1917,6 +1917,51 @@ export class SshRelaySession {
         Array.from(attachedLeaseIds)
       )
     }
+    if (shouldContinue()) {
+      await this.reapOrphanedRemotePtys(ptyProvider)
+    }
+  }
+
+  /**
+   * D3 — kill the relay PTYs whose panes I3 proved gone. Deferred to connect time because that is the only
+   * moment a relay exists to accept the kill; best-effort, since a failure just leaves the flag for next time.
+   */
+  private async reapOrphanedRemotePtys(ptyProvider: SshPtyProvider): Promise<void> {
+    const claimed = this.store.claimSshRemotePtyLeasesToReap(this.targetId)
+    const relayPtyIds: string[] = []
+    for (const relayPtyId of claimed) {
+      // Why: a reset relay restarts `pty-N` numbering, so a flag minted in an earlier generation can name
+      // an id this connection just bound. Anything live here belongs to a pane; drop the stale flag instead.
+      if (ptyProvider.hasPty(toAppSshPtyId(this.targetId, relayPtyId))) {
+        this.store.clearSshRemotePtyLeaseReapFlag(this.targetId, relayPtyId)
+        continue
+      }
+      relayPtyIds.push(relayPtyId)
+    }
+    if (relayPtyIds.length === 0) {
+      return
+    }
+    const results = await Promise.allSettled(
+      relayPtyIds.map((relayPtyId) =>
+        ptyProvider.shutdown(toAppSshPtyId(this.targetId, relayPtyId), {
+          immediate: true,
+          keepHistory: false
+        })
+      )
+    )
+    for (const [index, result] of results.entries()) {
+      const relayPtyId = relayPtyIds[index]
+      // Already gone is the outcome we wanted, so it retires the flag just like a successful kill.
+      if (result.status === 'fulfilled' || isSshPtyNotFoundError(result.reason)) {
+        this.store.clearSshRemotePtyLeaseReapFlag(this.targetId, relayPtyId)
+        continue
+      }
+      console.warn(
+        `[ssh-relay-session] orphaned PTY ${relayPtyId} reap failed for ${this.targetId}: ${
+          result.reason instanceof Error ? result.reason.message : String(result.reason)
+        }`
+      )
+    }
   }
 
   private async reattachKnownPty(args: {

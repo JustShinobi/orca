@@ -38,6 +38,7 @@ import {
 import { folderWorkspaceKey, worktreeWorkspaceKey } from '../shared/workspace-scope'
 import { toRuntimeExecutionHostId, toSshExecutionHostId } from '../shared/execution-host'
 import { SshConnectionStore } from './ssh/ssh-connection-store'
+import { SSH_LEASE_REAP_BATCH_LIMIT, SSH_LEASE_REAP_MAX_AGE_MS } from './persistence'
 import { setSourceControlActionDefault } from '../shared/source-control-ai-actions'
 import { LEGACY_DEFAULT_SSH_RELAY_GRACE_PERIOD_SECONDS } from '../shared/ssh-types'
 import { closeTerminalTabInWorkspaceSession } from '../shared/workspace-session-terminal-tab-close'
@@ -9425,7 +9426,7 @@ describe('Store', () => {
     expect(lease.pendingRemoteShutdown).toBeUndefined()
   })
 
-  it('refuses to re-retire, so a spared lease can never later acquire a reap flag', async () => {
+  it('lets a spared lease advance to terminated but never acquire a reap flag', async () => {
     const store = await createStore()
     store.upsertSshRemotePtyLease({
       targetId: 'target-1',
@@ -9440,9 +9441,201 @@ describe('Store', () => {
     store.retireLeaseAndReap('target-1', 'pty-1', 'pane closed')
 
     const lease = store.getSshRemotePtyLeases('target-1')[0]
-    expect(lease.state).toBe('expired')
-    expect(lease.retiredReason).toBe('relay generation replaced')
+    // Advancing is required — otherwise a relay-expired lease whose pane is then closed stays visible
+    // to the 30 s recovery consumers — but the spared row still names a PTY we have no claim on.
+    expect(lease.state).toBe('terminated')
     expect(lease.pendingRemoteShutdown).toBeUndefined()
+
+    store.retireLeaseAndReap('target-1', 'pty-1', 'closed again')
+    expect(store.getSshRemotePtyLeases('target-1')[0].pendingRemoteShutdown).toBeUndefined()
+  })
+
+  it('blocks the reproduced resurrection of a retired lease back to detached', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-1',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+    store.retireLeaseAndReap('target-1', 'pty-1', 'pane closed')
+
+    // `abandonPtySourceRecovery` writes this unconditionally; it made retired leases reattach-eligible.
+    store.markSshRemotePtyLease('target-1', 'pty-1', 'detached')
+    expect(store.getSshRemotePtyLeases('target-1')[0].state).toBe('terminated')
+
+    store.markSshRemotePtyLease('target-1', 'pty-1', 'attached')
+    expect(store.getSshRemotePtyLeases('target-1')[0].state).toBe('terminated')
+  })
+
+  it('supersedes an older lease for the same pane, flagging it for reaping', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-1',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-2',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+
+    const leases = store.getSshRemotePtyLeases('target-1')
+    const older = leases.find((l) => l.ptyId === 'pty-1')
+    const newer = leases.find((l) => l.ptyId === 'pty-2')
+    expect(older?.state).toBe('terminated')
+    expect(older?.pendingRemoteShutdown).toBe(true)
+    expect(newer?.state).toBe('attached')
+    expect(newer?.pendingRemoteShutdown).toBeUndefined()
+  })
+
+  it('leaves leases for other panes and legacy identity-less rows alone when superseding', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-other-pane',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_2,
+      state: 'attached'
+    })
+    // Legacy pre-leafId row: cannot be grouped, so destroying it would strand a real session.
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-legacy',
+      state: 'attached'
+    })
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-other',
+      ptyId: 'pty-other-target',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-1',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+
+    for (const ptyId of ['pty-other-pane', 'pty-legacy', 'pty-other-target', 'pty-1']) {
+      const lease = store.getSshRemotePtyLeases().find((l) => l.ptyId === ptyId)
+      expect(lease?.state, ptyId).toBe('attached')
+    }
+  })
+
+  it('undoes the supersede when the spawn that caused it fails to persist', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-1',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+    const before = structuredClone(store.getSshRemotePtyLeases('target-1')[0])
+
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-2',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+    expect(store.getSshRemotePtyLeases('target-1').find((l) => l.ptyId === 'pty-1')?.state).toBe(
+      'terminated'
+    )
+
+    store.removeSshRemotePtyLease('target-1', 'pty-2')
+
+    // Restoring must survive D1b, which would refuse this transition through the public setter.
+    const leases = store.getSshRemotePtyLeases('target-1')
+    expect(leases).toHaveLength(1)
+    expect(leases[0]).toEqual(before)
+  })
+
+  it('collapses each pane to one live lease on load and keeps the newest', async () => {
+    const store = await createStore()
+    const pane = { worktreeId: 'wt1', tabId: 'tab-1', leafId: TEST_LEAF_1 }
+    // Bypass the supersede by writing rows that are already retired-free but land via distinct panes,
+    // then rewrite them to share a pane so the file on disk looks like a pre-fix poisoned profile.
+    for (const ptyId of ['pty-1', 'pty-2', 'pty-3']) {
+      store.upsertSshRemotePtyLease({ targetId: 'target-1', ptyId, state: 'attached' })
+    }
+    const raw = store.getSshRemotePtyLeases('target-1')
+    raw[0].updatedAt = 100
+    raw[0].createdAt = 100
+    raw[1].updatedAt = 300
+    raw[1].createdAt = 300
+    raw[2].updatedAt = 200
+    raw[2].createdAt = 200
+    for (const lease of raw) {
+      Object.assign(lease, pane)
+    }
+    store.flush()
+
+    const reloaded = await createStore()
+    const healed = reloaded.getSshRemotePtyLeases('target-1')
+    expect(healed.find((l) => l.ptyId === 'pty-2')?.state).toBe('attached')
+    for (const ptyId of ['pty-1', 'pty-3']) {
+      const lease = healed.find((l) => l.ptyId === ptyId)
+      expect(lease?.state, ptyId).toBe('terminated')
+      expect(lease?.pendingRemoteShutdown, ptyId).toBe(true)
+    }
+  })
+
+  it('leaves an already-clean profile untouched on load', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({
+      targetId: 'target-1',
+      ptyId: 'pty-1',
+      worktreeId: 'wt1',
+      tabId: 'tab-1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+    store.flush()
+    const before = structuredClone(store.getSshRemotePtyLeases('target-1'))
+
+    const reloaded = await createStore()
+    expect(reloaded.getSshRemotePtyLeases('target-1')).toEqual(before)
+  })
+
+  it('breaks load-time ties deterministically on createdAt then ptyId', async () => {
+    const store = await createStore()
+    for (const ptyId of ['pty-b', 'pty-a', 'pty-c']) {
+      store.upsertSshRemotePtyLease({ targetId: 'target-1', ptyId, state: 'attached' })
+    }
+    for (const lease of store.getSshRemotePtyLeases('target-1')) {
+      Object.assign(lease, {
+        worktreeId: 'wt1',
+        tabId: 'tab-1',
+        leafId: TEST_LEAF_1,
+        updatedAt: 500,
+        createdAt: 500
+      })
+    }
+    store.flush()
+
+    const healed = (await createStore()).getSshRemotePtyLeases('target-1')
+    expect(healed.find((l) => l.ptyId === 'pty-c')?.state).toBe('attached')
+    expect(healed.find((l) => l.ptyId === 'pty-a')?.state).toBe('terminated')
+    expect(healed.find((l) => l.ptyId === 'pty-b')?.state).toBe('terminated')
   })
 
   it('round-trips retirement fields through normalize on restart', async () => {
@@ -9492,6 +9685,73 @@ describe('Store', () => {
     store.retireLeaseSparingPty('target-other', 'pty-1', 'relay generation replaced')
 
     expect(store.getSshRemotePtyLeases()).toEqual(before)
+  })
+
+  it('claims only flagged leases for the target, oldest first', async () => {
+    const store = await createStore()
+    for (const [ptyId, targetId] of [
+      ['pty-1', 'target-1'],
+      ['pty-2', 'target-1'],
+      ['pty-3', 'target-1'],
+      ['pty-4', 'target-other']
+    ] as const) {
+      store.upsertSshRemotePtyLease({ targetId, ptyId, state: 'attached' })
+    }
+    store.retireLeaseAndReap('target-1', 'pty-1', 'pane closed')
+    store.retireLeaseAndReap('target-1', 'pty-2', 'pane closed')
+    store.retireLeaseSparingPty('target-1', 'pty-3', 'relay pty missing')
+    store.retireLeaseAndReap('target-other', 'pty-4', 'pane closed')
+    const leases = store.getSshRemotePtyLeases('target-1')
+    leases.find((l) => l.ptyId === 'pty-1')!.updatedAt = Date.now() - 1_000
+    leases.find((l) => l.ptyId === 'pty-2')!.updatedAt = Date.now() - 9_000
+
+    expect(store.claimSshRemotePtyLeasesToReap('target-1')).toEqual(['pty-2', 'pty-1'])
+  })
+
+  it('keeps the reap flag until the drain reports success, then drops it', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({ targetId: 'target-1', ptyId: 'pty-1', state: 'attached' })
+    store.retireLeaseAndReap('target-1', 'pty-1', 'pane closed')
+
+    // Why: a transient shutdown failure must be retried on the next connect, so claiming cannot consume it.
+    expect(store.claimSshRemotePtyLeasesToReap('target-1')).toEqual(['pty-1'])
+    expect(store.claimSshRemotePtyLeasesToReap('target-1')).toEqual(['pty-1'])
+
+    store.clearSshRemotePtyLeaseReapFlag('target-1', 'pty-1')
+    expect(store.claimSshRemotePtyLeasesToReap('target-1')).toEqual([])
+    expect(store.getSshRemotePtyLeases('target-1')[0]?.state).toBe('terminated')
+  })
+
+  it('drops reap flags older than the bounded age instead of retrying them forever', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({ targetId: 'target-1', ptyId: 'pty-old', state: 'attached' })
+    store.upsertSshRemotePtyLease({ targetId: 'target-1', ptyId: 'pty-new', state: 'attached' })
+    store.retireLeaseAndReap('target-1', 'pty-old', 'pane closed')
+    store.retireLeaseAndReap('target-1', 'pty-new', 'pane closed')
+    const stale = store.getSshRemotePtyLeases('target-1').find((l) => l.ptyId === 'pty-old')!
+    stale.updatedAt = Date.now() - SSH_LEASE_REAP_MAX_AGE_MS - 1
+
+    expect(store.claimSshRemotePtyLeasesToReap('target-1')).toEqual(['pty-new'])
+    expect(stale.pendingRemoteShutdown).toBeUndefined()
+    expect(stale.state).toBe('terminated')
+  })
+
+  it('caps one connect drain so a poisoned profile cannot stall the reconnect', async () => {
+    const store = await createStore()
+    const total = SSH_LEASE_REAP_BATCH_LIMIT + 5
+    for (let index = 0; index < total; index++) {
+      const ptyId = `pty-${String(index).padStart(3, '0')}`
+      store.upsertSshRemotePtyLease({ targetId: 'target-1', ptyId, state: 'attached' })
+      store.retireLeaseAndReap('target-1', ptyId, 'pane closed')
+    }
+    const sameInstant = Date.now()
+    for (const lease of store.getSshRemotePtyLeases('target-1')) {
+      lease.updatedAt = sameInstant
+    }
+
+    const claimed = store.claimSshRemotePtyLeasesToReap('target-1')
+    expect(claimed).toHaveLength(SSH_LEASE_REAP_BATCH_LIMIT)
+    expect(claimed[0]).toBe('pty-000')
   })
 
   it('keeps worktree deletion authoritative against stale writes and later same-path reuse', async () => {
