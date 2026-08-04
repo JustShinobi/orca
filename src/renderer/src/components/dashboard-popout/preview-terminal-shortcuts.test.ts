@@ -105,6 +105,19 @@ describe('resolvePreviewShortcutAction', () => {
     ).toEqual({ type: 'sendInput', data: '\x1b\r' })
   })
 
+  it('gates the Ctrl+Enter CSI-u chord on the preview pty kitty flags', () => {
+    expect(
+      resolvePreviewShortcutAction(
+        keydown({ key: 'Enter', ctrlKey: true }),
+        contextFor({ kitty: true })
+      )
+    ).toEqual({ type: 'sendInput', data: '\x1b[13;5u' })
+    // Why: kittyKeyboardAdvertised is only an advertisement — live flags decide (#12329).
+    expect(
+      resolvePreviewShortcutAction(keydown({ key: 'Enter', ctrlKey: true }), contextFor())
+    ).toEqual({ type: 'sendInput', data: '\r' })
+  })
+
   it('reports pane-scoped chords so the caller can swallow them', () => {
     expect(
       resolvePreviewShortcutAction(keydown({ key: 'd', code: 'KeyD', metaKey: true }), contextFor())

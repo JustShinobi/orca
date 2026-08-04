@@ -270,27 +270,42 @@ describe('resolveTerminalShortcutAction', () => {
     expect(getWindowsShiftEnterEncoding).toHaveBeenCalledTimes(2)
   })
 
-  it('forwards Ctrl+Enter as the kitty CSI-u chord so TUIs can cue instead of send', () => {
-    // Why: xterm.js collapses Ctrl+Enter to a bare CR; intercept upstream and
-    // emit the kitty sequence (modifier code 5 = Ctrl) so probing TUIs receive
-    // the distinct chord on every platform.
-    expect(
-      resolveTerminalShortcutAction(event({ key: 'Enter', code: 'Enter', ctrlKey: true }), true)
-    ).toEqual({ type: 'sendInput', data: '\x1b[13;5u' })
-    expect(
-      resolveTerminalShortcutAction(event({ key: 'Enter', code: 'Enter', ctrlKey: true }), false)
-    ).toEqual({ type: 'sendInput', data: '\x1b[13;5u' })
-    // Windows uses the same kitty sequence for now: no TUI is known to treat the
-    // CSI-u Ctrl+Enter form as inert (cf. the Shift+Enter Codex-on-PowerShell case).
-    expect(
+  it('forwards Ctrl+Enter as the kitty CSI-u chord only on a negotiated kitty pane', () => {
+    // Why: xterm.js collapses Ctrl+Enter to a bare CR; intercept upstream and emit the
+    // kitty sequence (modifier code 5 = Ctrl) so probing TUIs receive the distinct chord.
+    // Why: #12329 — CSI-u is application input; a pane that never negotiated it (local
+    // Windows ConPTY, plain shell) prints it verbatim, so send the legacy CR instead.
+    const getWindowsShiftEnterEncoding = vi.fn(() => 'csi-u' as const)
+    const csiU = { type: 'sendInput', data: '\x1b[13;5u' }
+    const legacyCr = { type: 'sendInput', data: '\r' }
+    const resolveCtrlEnter = (isMac: boolean, isWindows: boolean, kittyActive: boolean) =>
       resolveTerminalShortcutAction(
         event({ key: 'Enter', code: 'Enter', ctrlKey: true }),
-        false,
+        isMac,
         'false',
         0,
-        true
+        isWindows,
+        undefined,
+        undefined,
+        () => kittyActive,
+        undefined,
+        getWindowsShiftEnterEncoding,
+        () => true
       )
-    ).toEqual({ type: 'sendInput', data: '\x1b[13;5u' })
+    for (const [isMac, isWindows] of [
+      [true, false],
+      [false, false],
+      [false, true]
+    ] as const) {
+      expect(resolveCtrlEnter(isMac, isWindows, true)).toEqual(csiU)
+      expect(resolveCtrlEnter(isMac, isWindows, false)).toEqual(legacyCr)
+    }
+    // A Droid pane's Shift+Enter encoding is no authority over Ctrl+Enter.
+    expect(getWindowsShiftEnterEncoding).not.toHaveBeenCalled()
+    // Absent tracker (surfaces that report no flags) must not send CSI-u either.
+    expect(
+      resolveTerminalShortcutAction(event({ key: 'Enter', code: 'Enter', ctrlKey: true }), false)
+    ).toEqual(legacyCr)
 
     // Modifier combos that are NOT plain Ctrl+Enter must keep falling through.
     expect(

@@ -195,8 +195,12 @@ export function resolveTerminalShortcutAction(
     !event.shiftKey &&
     event.key === 'Enter'
   ) {
-    // Why: xterm.js collapses Ctrl+Enter to a bare CR, so forward kitty CSI-u (modifier 5 = Ctrl) so the chord reaches TUIs; no Windows fallback yet (#2418).
-    return { type: 'sendInput', data: '\x1b[13;5u' }
+    // Why: CSI-u (modifier 5 = Ctrl) only reads as a chord while KKP is negotiated; without it the pane prints it verbatim (#12329).
+    // Why: fall back to the CR xterm.js would have collapsed to, but keep intercepting so IME commit ordering and dedupe still apply.
+    return {
+      type: 'sendInput',
+      data: isKittyKeyboardActivePane?.() === true ? '\x1b[13;5u' : '\r'
+    }
   }
 
   if (

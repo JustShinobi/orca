@@ -526,13 +526,17 @@ test.describe('Terminal Shortcuts', () => {
     await pressAndExpectWrite(orcaPage, electronApp, 'Control+Alt+;', '\x1b;')
   })
 
-  test('Ctrl+Enter writes the kitty modified-enter chord for terminal TUIs', async ({
+  test('Ctrl+Enter writes the kitty modified-enter chord only once the TUI negotiates it', async ({
     orcaPage,
     electronApp
   }) => {
     await installMainProcessPtyWriteSpy(electronApp)
     await waitForActivePanePtyId(orcaPage)
 
+    // Why: a plain shell never negotiates kitty, so CSI-u would print verbatim (#12329).
+    await pressAndExpectWrite(orcaPage, electronApp, 'Control+Enter', '\r')
+
+    await enableKittyKeyboardReporting(orcaPage, 31)
     await pressAndExpectWrite(orcaPage, electronApp, 'Control+Enter', '\x1b[13;5u')
   })
 
