@@ -1,6 +1,12 @@
 import type { AppState } from '../../store/types'
 import type { PaneSkillDiscoveryTarget, SkillDiscoveryTarget } from '../../../../shared/skills'
-import { isRuntimeOwnedSshTargetId, parseExecutionHostId } from '../../../../shared/execution-host'
+import {
+  isRuntimeOwnedSshTargetId,
+  parseExecutionHostId,
+  toSshExecutionHostId,
+  type ExecutionHostId
+} from '../../../../shared/execution-host'
+import { getRepoIdFromWorktreeId } from '../../../../shared/worktree-id'
 import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import {
   getExplicitRuntimeEnvironmentIdForWorktree,
@@ -71,6 +77,46 @@ export function selectNativeChatSkillStateInputs(state: AppState): NativeChatSki
   }
 }
 
+function hasRuntimeSshTransportEvidence(
+  state: NativeChatSkillStateInputs,
+  worktreeId: string,
+  hostId: ExecutionHostId
+): boolean {
+  const scope = parseWorkspaceKey(worktreeId)
+  if (scope?.type === 'folder') {
+    return false
+  }
+  const rawWorktreeId = scope?.type === 'worktree' ? scope.worktreeId : worktreeId
+  const repoIds = new Set([getRepoIdFromWorktreeId(rawWorktreeId)])
+  const catalogs = [
+    ...Object.values(state.worktreesByRepo ?? {}),
+    ...Object.values(state.detectedWorktreesByRepo ?? {}).map((result) => result.worktrees)
+  ]
+  for (const worktrees of catalogs) {
+    for (const worktree of worktrees) {
+      if (worktree.id !== rawWorktreeId || parseExecutionHostId(worktree.hostId)?.id !== hostId) {
+        continue
+      }
+      repoIds.add(worktree.repoId)
+      if (worktree.runtimeOwnerEnvironmentId?.trim()) {
+        return true
+      }
+    }
+  }
+  for (const repo of state.repos) {
+    const connectionId = repo.connectionId?.trim()
+    if (
+      repoIds.has(repo.id) &&
+      parseExecutionHostId(repo.executionHostId)?.kind === 'runtime' &&
+      connectionId &&
+      toSshExecutionHostId(connectionId) === hostId
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 export function resolveNativeChatSkillDiscoveryCwd(
   state: NativeChatSkillWorktreeState,
   terminalTabId: string
@@ -106,9 +152,13 @@ export function resolveNativeChatSkillDiscoveryContext(
   const parsedHost = parseExecutionHostId(hostId)
   if (parsedHost?.kind === 'ssh') {
     const runtimeEnvironmentId = getExplicitRuntimeEnvironmentIdForWorktree(state, worktreeId)
-    // Why: a runtime-owned SSH target without an explicit owner stamp is
-    // ambiguous; failing closed beats resolving it against local providers.
-    if (isRuntimeOwnedSshTargetId(parsedHost.targetId) && !runtimeEnvironmentId) {
+    // Why: unresolved paired-runtime transport can collide with a local target
+    // id; failing closed prevents the identity-only RPC reaching the wrong host.
+    if (
+      !runtimeEnvironmentId &&
+      (isRuntimeOwnedSshTargetId(parsedHost.targetId) ||
+        hasRuntimeSshTransportEvidence(state, worktreeId, parsedHost.id))
+    ) {
       return null
     }
     const connectionState = runtimeEnvironmentId

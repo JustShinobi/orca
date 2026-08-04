@@ -310,6 +310,45 @@ describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
     expect(context.sshDisconnected).toBe(false)
   })
 
+  it('keeps a non-ephemeral paired SSH target on its owning runtime', () => {
+    const context = resolveNativeChatSkillDiscoveryContext(
+      selectedSshInputs({
+        repos: [],
+        sshConnectionStates: new Map([
+          ['private-target', connectionState({ targetId: 'private-target' })]
+        ]),
+        sshStateByEnvironment: new Map([
+          [
+            'hub-a',
+            {
+              connectionStates: new Map([
+                ['private-target', connectionState({ targetId: 'private-target' })]
+              ])
+            }
+          ]
+        ]),
+        worktreesByRepo: {
+          'repo-1': [
+            {
+              id: 'worktree-1',
+              repoId: 'repo-1',
+              path: '/repo/worktree',
+              hostId: 'ssh:private-target',
+              runtimeOwnerEnvironmentId: 'hub-a'
+            }
+          ]
+        }
+      }),
+      'tab-1'
+    )
+
+    expect(context?.executionHostKind).toBe('ssh')
+    if (context?.executionHostKind !== 'ssh') {
+      throw new Error('expected ssh context')
+    }
+    expect(context.runtimeTarget).toEqual({ kind: 'environment', environmentId: 'hub-a' })
+  })
+
   it('treats an unhydrated environment bucket as unknown rather than disconnected', () => {
     const context = resolveNativeChatSkillDiscoveryContext(
       sshInputs({
@@ -401,6 +440,42 @@ describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
 
     expect(context?.executionHostKind).toBe('ssh')
     expect(context?.key).toContain('ssh:target-2')
+  })
+
+  it('fails closed when two runtimes project a local SSH target id', () => {
+    const worktreeId = 'repo-1::/remote/repo'
+    const context = resolveNativeChatSkillDiscoveryContext(
+      selectedSshInputs({
+        activeWorkspaceExecutionHostId: 'ssh:shared-target',
+        activeWorktreeId: worktreeId,
+        repos: [],
+        sshConnectionStates: new Map([
+          ['shared-target', connectionState({ targetId: 'shared-target' })]
+        ]),
+        tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+        worktreesByRepo: {
+          'repo-1': [
+            {
+              id: worktreeId,
+              repoId: 'repo-1',
+              path: '/remote/repo',
+              hostId: 'ssh:shared-target',
+              runtimeOwnerEnvironmentId: 'hub-a'
+            },
+            {
+              id: worktreeId,
+              repoId: 'repo-1',
+              path: '/remote/repo',
+              hostId: 'ssh:shared-target',
+              runtimeOwnerEnvironmentId: 'hub-b'
+            }
+          ]
+        }
+      }),
+      'tab-1'
+    )
+
+    expect(context).toBeNull()
   })
 
   it('keeps the same remote path on two SSH hosts cache-isolated', () => {
