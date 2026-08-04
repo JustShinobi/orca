@@ -97,13 +97,10 @@ export function resolveNativeChatFolderSshRoute(
   if (relevantUnresolvedOwnerHostIds.length > 0) {
     return { kind: 'missing' }
   }
-  const nonSshHostIds = new Set(
-    relevantNonSshOwnerHostIds.map((ownerHostId) => ownerHostId ?? 'unresolved')
-  )
-  if (nonSshHostIds.size === 1) {
+  if (relevantNonSshOwnerHostIds.length === 1) {
     return { kind: 'non-ssh', ownerHostId: relevantNonSshOwnerHostIds[0] ?? null }
   }
-  return nonSshHostIds.size > 1 ? { kind: 'ambiguous' } : { kind: 'missing' }
+  return relevantNonSshOwnerHostIds.length > 1 ? { kind: 'ambiguous' } : { kind: 'missing' }
 }
 
 function routeForFolderOwners(

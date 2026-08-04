@@ -26,13 +26,12 @@ export {
   resolveNativeChatSkillDiscoveryCwd
 } from './native-chat-skill-discovery-context'
 
-// The host scan budget honored by runtime targets that respect timeoutMs.
 const DISCOVERY_TIMEOUT_MS = 10_000
-// Renderer wall-clock backstop for the local branch (which ignores timeoutMs).
-// It must exceed the host's summed worst case — a WSL scan runs a metadata read
-// (5s) then the tree walk (10s) in sequence — so the host's own precise timeout
-// wins and a WSL cold boot does not surface a healthy scan as a spurious timeout.
-const DISCOVERY_BACKSTOP_TIMEOUT_MS = 18_000
+const RUNTIME_DISCOVERY_TIMEOUT_MS = 18_000
+const LOCAL_DISCOVERY_BACKSTOP_MS = 18_000
+const PAIRED_SSH_DISCOVERY_BACKSTOP_MS = 22_000
+// Runtime backstops include the compatibility probe that precedes the host scan.
+const RUNTIME_DISCOVERY_BACKSTOP_MS = 38_000
 
 export type NativeChatSkillDiscovery = {
   status: 'idle' | 'loading' | 'ready' | 'error'
@@ -238,7 +237,7 @@ function getOrStartDiscovery(
   // enforce the design's scan timeout itself or a stalled local scan loads forever.
   const request = withDiscoveryTimeout(
     startDiscoveryRequest(context),
-    DISCOVERY_BACKSTOP_TIMEOUT_MS
+    discoveryBackstopTimeoutMs(context)
   ).finally(() => {
     if (inFlightDiscovery.get(context.key) === request) {
       inFlightDiscovery.delete(context.key)
@@ -251,12 +250,14 @@ function getOrStartDiscovery(
 async function startDiscoveryRequest(
   context: NativeChatSkillDiscoveryContext
 ): Promise<SkillDiscoveryResult> {
+  const timeoutMs =
+    context.executionHostKind === 'runtime' ? RUNTIME_DISCOVERY_TIMEOUT_MS : DISCOVERY_TIMEOUT_MS
   if (context.executionHostKind === 'ssh') {
     const response = await callRuntimeRpc<SkillDiscoveryForPaneResponse>(
       context.runtimeTarget,
       'skills.discoverForPane',
       context.paneTarget,
-      { timeoutMs: DISCOVERY_TIMEOUT_MS }
+      { timeoutMs }
     )
     if (response.status === 'relay-upgrade-required') {
       throw new SshRelaySkillUpgradeRequiredError()
@@ -267,8 +268,17 @@ async function startDiscoveryRequest(
     context.runtimeTarget,
     'skills.discover',
     context.discoveryTarget,
-    { timeoutMs: DISCOVERY_TIMEOUT_MS }
+    { timeoutMs }
   )
+}
+
+function discoveryBackstopTimeoutMs(context: NativeChatSkillDiscoveryContext): number {
+  if (context.executionHostKind === 'runtime') {
+    return RUNTIME_DISCOVERY_BACKSTOP_MS
+  }
+  return context.executionHostKind === 'ssh' && context.runtimeTarget.kind === 'environment'
+    ? PAIRED_SSH_DISCOVERY_BACKSTOP_MS
+    : LOCAL_DISCOVERY_BACKSTOP_MS
 }
 
 function classifyUpgradeRequired(

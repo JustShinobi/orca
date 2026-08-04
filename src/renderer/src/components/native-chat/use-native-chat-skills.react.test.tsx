@@ -46,6 +46,7 @@ function stateForHost(hostId: string) {
       }
     ],
     restoredRuntimeHostIdByWorkspaceSessionKey: {},
+    runtimeEnvironments: [],
     settings: { activeRuntimeEnvironmentId: null },
     sshConnectionStates: new Map(),
     sshStateByEnvironment: new Map(),
@@ -199,8 +200,31 @@ describe('useNativeChatSkills', () => {
       { kind: 'environment', environmentId: 'env-1' },
       'skills.discover',
       { cwd: '/repo/worktree', worktreeId: 'worktree-1' },
-      { timeoutMs: 10_000 }
+      { timeoutMs: 18_000 }
     )
+  })
+
+  it('allows a cold runtime WSL scan to use its full sequential budget', async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.state = stateForHost('runtime:env-1')
+      let resolveRequest!: (value: typeof DISCOVERY_RESULT) => void
+      mocks.callRuntimeRpc.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveRequest = resolve
+          })
+      )
+
+      render(<Probe enabled />)
+      expect(mocks.snapshots.at(-1)?.status).toBe('loading')
+      await act(async () => vi.advanceTimersByTimeAsync(32_000))
+      expect(mocks.snapshots.at(-1)?.status).toBe('loading')
+      await act(async () => resolveRequest(DISCOVERY_RESULT))
+      expect(mocks.snapshots.at(-1)?.status).toBe('ready')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('routes an ordinary paired SSH pane through its owning runtime', async () => {
@@ -299,6 +323,85 @@ describe('useNativeChatSkills', () => {
     render(<Probe enabled />)
     await waitFor(() => expect(mocks.snapshots.at(-1)?.status).toBe('idle'))
     expect(mocks.callRuntimeRpc).not.toHaveBeenCalled()
+  })
+
+  it('issues no RPC before a local folder project group hydrates', async () => {
+    const worktreeId = 'folder:folder-1'
+    mocks.state = {
+      ...stateForHost('local'),
+      activeWorktreeId: worktreeId,
+      folderWorkspaces: [
+        {
+          id: 'folder-1',
+          projectGroupId: 'group-1',
+          folderPath: '/possibly-remote/folder',
+          executionHostId: 'local'
+        }
+      ],
+      projectGroups: [],
+      repos: [],
+      tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+      worktreesByRepo: {}
+    }
+
+    render(<Probe enabled />)
+    await waitFor(() => expect(mocks.snapshots.at(-1)?.status).toBe('idle'))
+    expect(mocks.callRuntimeRpc).not.toHaveBeenCalled()
+  })
+
+  it('issues no RPC for duplicate local folder identities', async () => {
+    const worktreeId = 'folder:folder-1'
+    mocks.state = {
+      ...stateForHost('local'),
+      activeWorktreeId: worktreeId,
+      folderWorkspaces: [
+        {
+          id: 'folder-1',
+          projectGroupId: 'group-1',
+          folderPath: '/first/folder',
+          executionHostId: 'local'
+        },
+        {
+          id: 'folder-1',
+          projectGroupId: 'group-2',
+          folderPath: '/second/folder',
+          executionHostId: 'local'
+        }
+      ],
+      projectGroups: [
+        { id: 'group-1', executionHostId: 'local' },
+        { id: 'group-2', executionHostId: 'local' }
+      ],
+      repos: [],
+      tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+      worktreesByRepo: {}
+    }
+
+    render(<Probe enabled />)
+    await waitFor(() => expect(mocks.snapshots.at(-1)?.status).toBe('idle'))
+    expect(mocks.callRuntimeRpc).not.toHaveBeenCalled()
+  })
+
+  it('keeps a legacy local pane local when several runtimes are saved', async () => {
+    mocks.state = {
+      ...stateForHost('local'),
+      activeWorktreeId: 'other-worktree',
+      repos: [{ id: 'repo-1', path: '/repo', connectionId: null, executionHostId: null }],
+      runtimeEnvironments: [{ id: 'hub-a' }, { id: 'hub-b' }],
+      settings: { activeRuntimeEnvironmentId: 'hub-a' },
+      worktreesByRepo: {
+        'repo-1': [{ id: 'worktree-1', repoId: 'repo-1', path: '/repo/worktree' }]
+      }
+    }
+
+    render(<Probe enabled />)
+    await waitFor(() => expect(mocks.snapshots.at(-1)?.status).toBe('ready'))
+    expect(mocks.callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'local' },
+      'skills.discover',
+      { cwd: '/repo/worktree', worktreeId: 'worktree-1' },
+      { timeoutMs: 10_000 }
+    )
   })
 
   it('issues no RPC for an ambiguous direct and paired SSH pane', async () => {

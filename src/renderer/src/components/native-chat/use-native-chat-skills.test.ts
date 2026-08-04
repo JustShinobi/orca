@@ -188,6 +188,7 @@ function sshInputs(overrides: Record<string, unknown> = {}): NativeChatSkillStat
     projects: [],
     repos: [{ id: 'repo-1', path: '/repo', connectionId: null, executionHostId: 'ssh:target-1' }],
     restoredRuntimeHostIdByWorkspaceSessionKey: {},
+    runtimeEnvironments: [],
     settings: { activeRuntimeEnvironmentId: null },
     sshConnectionStates: new Map([['target-1', connectionState()]]),
     sshStateByEnvironment: new Map(),

@@ -22,6 +22,7 @@ export type NativeChatSkillStateInputs = Pick<
   | 'projects'
   | 'repos'
   | 'restoredRuntimeHostIdByWorkspaceSessionKey'
+  | 'runtimeEnvironments'
   | 'settings'
   | 'sshConnectionStates'
   | 'sshStateByEnvironment'
@@ -65,6 +66,7 @@ export function selectNativeChatSkillStateInputs(state: AppState): NativeChatSki
     projects: state.projects,
     repos: state.repos,
     restoredRuntimeHostIdByWorkspaceSessionKey: state.restoredRuntimeHostIdByWorkspaceSessionKey,
+    runtimeEnvironments: state.runtimeEnvironments,
     settings: state.settings,
     sshConnectionStates: state.sshConnectionStates,
     sshStateByEnvironment: state.sshStateByEnvironment,
@@ -114,11 +116,7 @@ export function resolveNativeChatSkillDiscoveryContext(
   if (folderSshRoute.kind === 'ambiguous') {
     return null
   }
-  if (
-    workspaceScope?.type === 'folder' &&
-    parsedHost?.kind === 'runtime' &&
-    folderSshRoute.kind === 'missing'
-  ) {
+  if (workspaceScope?.type === 'folder' && folderSshRoute.kind === 'missing') {
     return null
   }
   const sshHost =
