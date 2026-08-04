@@ -8,6 +8,7 @@ import {
   RUNTIME_PROTOCOL_VERSION,
   WORKSPACE_RUN_CONTEXT_RUNTIME_CAPABILITY
 } from '../../../../shared/protocol-version'
+import type { RuntimeStatus } from '../../../../shared/runtime-types'
 import type { Project, ProjectHostSetup, Repo } from '../../../../shared/types'
 import { useAppStore } from '../../store'
 import { RepositoryHostSetupsSection } from './RepositoryHostSetupsSection'
@@ -15,40 +16,71 @@ import { RepositoryHostSetupsSection } from './RepositoryHostSetupsSection'
 let container: HTMLDivElement
 let root: Root
 
-function makeRepo(overrides: Partial<Repo> & Pick<Repo, 'id' | 'displayName' | 'path'>): Repo {
+const repo: Repo = {
+  id: 'remote-repo',
+  displayName: 'Orca',
+  path: '/srv/orca',
+  badgeColor: '#737373',
+  addedAt: 100,
+  kind: 'git',
+  executionHostId: 'runtime:hub'
+}
+const project: Project = {
+  id: 'github:stablyai/orca',
+  displayName: 'Orca',
+  badgeColor: '#737373',
+  sourceRepoIds: [repo.id],
+  createdAt: 100,
+  updatedAt: 100
+}
+const setup: ProjectHostSetup = {
+  id: 'hub-setup',
+  projectId: project.id,
+  repoId: repo.id,
+  hostId: 'runtime:hub',
+  runtimeOwnerEnvironmentId: 'hub',
+  path: repo.path,
+  displayName: repo.displayName,
+  kind: 'git',
+  setupState: 'ready',
+  setupMethod: 'legacy-repo',
+  createdAt: 100,
+  updatedAt: 100
+}
+
+function makeStatus(overrides: Partial<RuntimeStatus>): RuntimeStatus {
   return {
-    badgeColor: '#737373',
-    addedAt: 100,
-    kind: 'git',
+    runtimeId: 'runtime-hub',
+    rendererGraphEpoch: 1,
+    graphStatus: 'ready',
+    authoritativeWindowId: 1,
+    desktopWindowStatus: 'available',
+    liveTabCount: 0,
+    liveLeafCount: 0,
+    runtimeProtocolVersion: RUNTIME_PROTOCOL_VERSION,
+    minCompatibleRuntimeClientVersion: 1,
+    capabilities: [PROJECT_HOST_SETUP_RUNTIME_CAPABILITY, WORKSPACE_RUN_CONTEXT_RUNTIME_CAPABILITY],
     ...overrides
   }
 }
 
-function makeProject({ id, ...overrides }: Partial<Project> & Pick<Project, 'id'>): Project {
-  return {
-    id,
-    displayName: 'Orca',
-    badgeColor: '#737373',
-    sourceRepoIds: ['remote-repo'],
-    createdAt: 100,
-    updatedAt: 100,
-    ...overrides
-  }
-}
-
-function makeSetup(
-  overrides: Partial<ProjectHostSetup> &
-    Pick<ProjectHostSetup, 'id' | 'projectId' | 'repoId' | 'hostId' | 'path'>
-): ProjectHostSetup {
-  return {
-    displayName: 'Orca',
-    kind: 'git',
-    setupState: 'ready',
-    setupMethod: 'legacy-repo',
-    createdAt: 100,
-    updatedAt: 100,
-    ...overrides
-  }
+function renderWithOwnerStatus(status: RuntimeStatus | null): void {
+  useAppStore.setState({
+    repos: [repo],
+    projects: [project],
+    projectHostSetups: [setup],
+    runtimeStatusByEnvironmentId: new Map([['hub', { checkedAt: 1, appVersion: '1.8.0', status }]])
+  })
+  act(() => {
+    root.render(
+      React.createElement(RepositoryHostSetupsSection, {
+        repo,
+        forceVisible: true,
+        searchQuery: '',
+        searchEntries: []
+      })
+    )
+  })
 }
 
 beforeEach(() => {
@@ -66,69 +98,17 @@ afterEach(() => {
   useAppStore.setState(useAppStore.getInitialState(), true)
 })
 
-function renderSection(repo: Repo): void {
-  act(() => {
-    root.render(
-      React.createElement(RepositoryHostSetupsSection, {
-        repo,
-        forceVisible: true,
-        searchQuery: '',
-        searchEntries: []
-      })
-    )
-  })
-}
-
 // Why: #12350 — a reachable remote server whose renderer graph is gone still
 // answered status.get, so every setup it owned read "Ready".
 describe('RepositoryHostSetupsSection workspace window availability', () => {
   it('flags a reachable runtime owner whose workspace window is closed instead of Ready', () => {
-    const remoteRepo = makeRepo({
-      id: 'remote-repo',
-      displayName: 'Orca',
-      path: '/srv/orca',
-      executionHostId: 'runtime:hub'
-    })
-    useAppStore.setState({
-      repos: [remoteRepo],
-      projects: [makeProject({ id: 'github:stablyai/orca', sourceRepoIds: ['remote-repo'] })],
-      projectHostSetups: [
-        makeSetup({
-          id: 'hub-setup',
-          projectId: 'github:stablyai/orca',
-          repoId: 'remote-repo',
-          hostId: 'runtime:hub',
-          runtimeOwnerEnvironmentId: 'hub',
-          path: '/srv/orca'
-        })
-      ],
-      runtimeStatusByEnvironmentId: new Map([
-        [
-          'hub',
-          {
-            checkedAt: 1,
-            appVersion: '1.8.0',
-            status: {
-              runtimeId: 'runtime-hub',
-              rendererGraphEpoch: 1,
-              graphStatus: 'unavailable',
-              authoritativeWindowId: null,
-              desktopWindowStatus: 'openable',
-              liveTabCount: 0,
-              liveLeafCount: 0,
-              runtimeProtocolVersion: RUNTIME_PROTOCOL_VERSION,
-              minCompatibleRuntimeClientVersion: 1,
-              capabilities: [
-                PROJECT_HOST_SETUP_RUNTIME_CAPABILITY,
-                WORKSPACE_RUN_CONTEXT_RUNTIME_CAPABILITY
-              ]
-            }
-          }
-        ]
-      ])
-    })
-
-    renderSection(remoteRepo)
+    renderWithOwnerStatus(
+      makeStatus({
+        graphStatus: 'unavailable',
+        authoritativeWindowId: null,
+        desktopWindowStatus: 'openable'
+      })
+    )
 
     const currentSetup = container.querySelector('[data-current="true"]')
     expect(currentSetup?.textContent).toContain('Workspace window closed')
@@ -141,54 +121,36 @@ describe('RepositoryHostSetupsSection workspace window availability', () => {
   it('keeps a graph-ready runtime owner Ready when it reports no desktop window', () => {
     // Why: headless `orca serve` (#6844) owns a ready graph with an openable
     // desktop window — the degraded check must not widen into a renderer requirement.
-    const remoteRepo = makeRepo({
-      id: 'remote-repo',
-      displayName: 'Orca',
-      path: '/srv/orca',
-      executionHostId: 'runtime:hub'
-    })
-    useAppStore.setState({
-      repos: [remoteRepo],
-      projects: [makeProject({ id: 'github:stablyai/orca', sourceRepoIds: ['remote-repo'] })],
-      projectHostSetups: [
-        makeSetup({
-          id: 'hub-setup',
-          projectId: 'github:stablyai/orca',
-          repoId: 'remote-repo',
-          hostId: 'runtime:hub',
-          runtimeOwnerEnvironmentId: 'hub',
-          path: '/srv/orca'
-        })
-      ],
-      runtimeStatusByEnvironmentId: new Map([
-        [
-          'hub',
-          {
-            checkedAt: 1,
-            appVersion: '1.8.0',
-            status: {
-              runtimeId: 'runtime-hub',
-              rendererGraphEpoch: 1,
-              graphStatus: 'ready',
-              authoritativeWindowId: 0,
-              desktopWindowStatus: 'openable',
-              liveTabCount: 0,
-              liveLeafCount: 0,
-              runtimeProtocolVersion: RUNTIME_PROTOCOL_VERSION,
-              minCompatibleRuntimeClientVersion: 1,
-              capabilities: [
-                PROJECT_HOST_SETUP_RUNTIME_CAPABILITY,
-                WORKSPACE_RUN_CONTEXT_RUNTIME_CAPABILITY
-              ]
-            }
-          }
-        ]
-      ])
-    })
-
-    renderSection(remoteRepo)
+    renderWithOwnerStatus(makeStatus({ graphStatus: 'ready', desktopWindowStatus: 'openable' }))
 
     expect(container.textContent).toContain('Ready')
+    expect(container.textContent).not.toContain('Workspace window closed')
+    expect(container.textContent).not.toContain('Disconnected')
+  })
+
+  it('keeps an unreachable runtime owner disconnected', () => {
+    renderWithOwnerStatus(null)
+
+    expect(container.textContent).toContain('Disconnected')
+    expect(container.textContent).not.toContain('Workspace window closed')
+  })
+
+  it('does not call a setup Ready when the owner control channel closed with an error', () => {
+    renderWithOwnerStatus(
+      makeStatus({
+        remoteControl: {
+          state: 'closed',
+          pendingRequestCount: 0,
+          subscriptionCount: 0,
+          reconnectAttempt: 0,
+          lastConnectedAt: null,
+          lastClose: null,
+          lastError: 'Connection closed'
+        }
+      })
+    )
+
+    expect(container.textContent).toContain('Disconnected')
     expect(container.textContent).not.toContain('Workspace window closed')
   })
 })

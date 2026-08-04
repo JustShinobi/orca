@@ -7,7 +7,6 @@ import {
 } from '../../../../shared/execution-host'
 import { buildExecutionHostRegistry } from '../../../../shared/execution-host-registry'
 import { getHostDisplayLabelOverrides } from '../../../../shared/host-setting-overrides'
-import { isRuntimeEnvironmentWorkspaceWindowClosed } from '../../../../shared/runtime-workspace-window-availability'
 import type { ProjectHostSetup, Repo } from '../../../../shared/types'
 import { useAppStore } from '../../store'
 import { getProjectHostSetupProjectionFromState } from '../../store/selectors'
@@ -26,6 +25,10 @@ import {
   selectRuntimeAwareSshStatus,
   selectRuntimeAwareSshTargetLabel
 } from '@/store/slices/runtime-environment-ssh'
+import {
+  isConnectedRuntimeHostState,
+  runtimeHostConnectionState
+} from '@/runtime/runtime-host-connection-state'
 
 type RepositoryHostSetupsSectionProps = {
   repo: Repo
@@ -217,13 +220,20 @@ export function RepositoryHostSetupsSection({
           const runtimeOwnerEnvironmentId =
             setup.runtimeOwnerEnvironmentId?.trim() ||
             (transportHost?.kind === 'runtime' ? transportHost.environmentId : null)
+          // Why: share one host-health derivation with the status bar so a degraded
+          // owner can never read "Ready" here and "Connected"/"Disconnected" there.
+          const runtimeOwnerStatusEntry = runtimeOwnerEnvironmentId
+            ? runtimeStatusByEnvironmentId.get(runtimeOwnerEnvironmentId)
+            : undefined
+          const runtimeOwnerState = runtimeOwnerEnvironmentId
+            ? runtimeHostConnectionState({
+                hasStatusEntry: Boolean(runtimeOwnerStatusEntry),
+                status: runtimeOwnerStatusEntry?.status
+              })
+            : null
           const runtimeOwnerReachable =
-            !runtimeOwnerEnvironmentId ||
-            Boolean(runtimeStatusByEnvironmentId.get(runtimeOwnerEnvironmentId)?.status)
-          const runtimeOwnerWorkspaceWindowClosed = isRuntimeEnvironmentWorkspaceWindowClosed(
-            runtimeStatusByEnvironmentId,
-            runtimeOwnerEnvironmentId
-          )
+            runtimeOwnerState === null || isConnectedRuntimeHostState(runtimeOwnerState)
+          const runtimeOwnerWorkspaceWindowClosed = runtimeOwnerState === 'workspace-window-closed'
           const runtimeOwnerHostId = runtimeOwnerEnvironmentId
             ? toRuntimeExecutionHostId(runtimeOwnerEnvironmentId)
             : null

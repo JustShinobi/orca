@@ -17,19 +17,20 @@ import {
   toRuntimeExecutionHostId
 } from '../../../../shared/execution-host'
 import { isUserManagedRuntimeEnvironment } from '../../../../shared/runtime-environments'
-import { isRuntimeWorkspaceWindowClosed } from '../../../../shared/runtime-workspace-window-availability'
 import { RuntimeHostStatusRow } from './RuntimeHostStatusRow'
 import { SshTargetStatusRow } from './SshTargetStatusRow'
 import { connectRuntimeEnvironmentAndRecordStatus } from './runtime-environment-explicit-connect'
 import {
-  isConnectedRuntimeHostState,
   overallDotColor,
   overallStatus,
   runtimeHostConnectionDetail,
-  runtimeHostConnectionState,
-  runtimeStatusForOverall,
   sshStatusForOverall
 } from './remote-host-connection-status'
+import {
+  isConnectedRuntimeHostState,
+  runtimeHostConnectionState,
+  runtimeStatusForOverall
+} from '@/runtime/runtime-host-connection-state'
 
 function connectedHostCountLabel(count: number): string {
   return `${count} ${count === 1 ? 'host' : 'hosts'}`
@@ -94,9 +95,8 @@ export function SshStatusSegment({
       return {
         id: environment.id,
         label: override || environment.name || environment.id,
-        hasStatus: Boolean(statusEntry),
-        online: Boolean(statusEntry?.status),
-        workspaceWindowClosed: isRuntimeWorkspaceWindowClosed(statusEntry?.status),
+        hasStatusEntry: Boolean(statusEntry),
+        status: statusEntry?.status ?? null,
         active: settings?.activeRuntimeEnvironmentId === environment.id,
         remoteControl: statusEntry?.status?.remoteControl ?? null
       }

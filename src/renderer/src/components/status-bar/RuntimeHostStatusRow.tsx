@@ -2,15 +2,10 @@ import { useCallback, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { translate } from '@/i18n/i18n'
 import { useMountedRef } from '@/hooks/useMountedRef'
-
-// Why: 'workspace-window-closed' is a reachable host that cannot serve graph-backed
-// work — connected for counting purposes, but not interchangeable with 'connected'.
-export type RuntimeHostConnectionState =
-  | 'connected'
-  | 'workspace-window-closed'
-  | 'checking'
-  | 'reconnecting'
-  | 'disconnected'
+import {
+  isConnectedRuntimeHostState,
+  type RuntimeHostConnectionState
+} from '@/runtime/runtime-host-connection-state'
 
 function runtimeStatusLabel(state: RuntimeHostConnectionState): string {
   switch (state) {
@@ -56,11 +51,6 @@ function runtimeStatusTone(state: RuntimeHostConnectionState): string {
   return 'text-muted-foreground'
 }
 
-// Why: a workspace-window-closed host is still attached, so its only action stays Disconnect.
-function isAttachedRuntimeRowState(state: RuntimeHostConnectionState): boolean {
-  return state === 'connected' || state === 'workspace-window-closed'
-}
-
 function runtimeActionLabel(state: RuntimeHostConnectionState): string | null {
   switch (state) {
     case 'connected':
@@ -92,7 +82,7 @@ export function RuntimeHostStatusRow({
   const actionLabel = runtimeActionLabel(state)
 
   const handleAction = useCallback(async () => {
-    const action = isAttachedRuntimeRowState(state) ? onDisconnect : onConnect
+    const action = isConnectedRuntimeHostState(state) ? onDisconnect : onConnect
     if (!action) {
       return
     }
@@ -135,7 +125,7 @@ export function RuntimeHostStatusRow({
       </div>
       {busy ? (
         <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
-      ) : actionLabel && (isAttachedRuntimeRowState(state) ? onDisconnect : onConnect) ? (
+      ) : actionLabel && (isConnectedRuntimeHostState(state) ? onDisconnect : onConnect) ? (
         <button
           type="button"
           onClick={() => void handleAction()}

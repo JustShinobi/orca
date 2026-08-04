@@ -44,6 +44,8 @@ describe('RuntimeHostStatusRow', () => {
     expect(markup).toContain('Workspace window closed')
     expect(markup).toContain('Disconnect')
     expect(markup).not.toContain('>Connect</button>')
+    // The host is still reachable — the row must not read as a lost connection.
+    expect(markup).not.toContain('Disconnected')
     // Why: proves the row routes the action to onDisconnect — with only a connect
     // handler there is nothing to offer, so no button renders.
     expect(

@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RuntimeStatus } from './runtime-types'
-import {
-  isRuntimeEnvironmentWorkspaceWindowClosed,
-  isRuntimeWorkspaceWindowClosed
-} from './runtime-workspace-window-availability'
+import { isRuntimeWorkspaceWindowClosed } from './runtime-workspace-window-availability'
 
 function makeStatus(overrides: Partial<RuntimeStatus>): RuntimeStatus {
   return {
@@ -40,12 +37,22 @@ describe('isRuntimeWorkspaceWindowClosed', () => {
     ).toBe(false)
   })
 
-  it('ignores a transient renderer reload', () => {
+  it('ignores a renderer reload that still owns its window', () => {
+    expect(
+      isRuntimeWorkspaceWindowClosed(
+        makeStatus({ graphStatus: 'reloading', desktopWindowStatus: 'available' })
+      )
+    ).toBe(false)
+  })
+
+  it('flags a reload whose window disappeared before the graph was marked unavailable', () => {
+    // Why: 'openable' already means no live renderer window, so a mid-reload window
+    // teardown is just as unusable as 'unavailable'.
     expect(
       isRuntimeWorkspaceWindowClosed(
         makeStatus({ graphStatus: 'reloading', desktopWindowStatus: 'openable' })
       )
-    ).toBe(false)
+    ).toBe(true)
   })
 
   it('treats a missing desktop window claim as no claim', () => {
@@ -65,29 +72,5 @@ describe('isRuntimeWorkspaceWindowClosed', () => {
   it('is not a substitute for an unreachable host', () => {
     expect(isRuntimeWorkspaceWindowClosed(null)).toBe(false)
     expect(isRuntimeWorkspaceWindowClosed(undefined)).toBe(false)
-  })
-})
-
-describe('isRuntimeEnvironmentWorkspaceWindowClosed', () => {
-  const statuses = new Map([
-    [
-      'hub',
-      {
-        status: makeStatus({
-          graphStatus: 'unavailable',
-          authoritativeWindowId: null,
-          desktopWindowStatus: 'openable'
-        })
-      }
-    ],
-    ['gpu', { status: null }]
-  ])
-
-  it('resolves the owning environment before deciding', () => {
-    expect(isRuntimeEnvironmentWorkspaceWindowClosed(statuses, 'hub')).toBe(true)
-    expect(isRuntimeEnvironmentWorkspaceWindowClosed(statuses, 'gpu')).toBe(false)
-    expect(isRuntimeEnvironmentWorkspaceWindowClosed(statuses, 'unknown')).toBe(false)
-    expect(isRuntimeEnvironmentWorkspaceWindowClosed(statuses, null)).toBe(false)
-    expect(isRuntimeEnvironmentWorkspaceWindowClosed(undefined, 'hub')).toBe(false)
   })
 })
