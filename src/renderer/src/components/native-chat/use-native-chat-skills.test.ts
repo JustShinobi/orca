@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DiscoveredSkill, SkillDiscoveryResult } from '../../../../shared/skills'
+import type { AppState } from '../../store/types'
 import {
   isNativeChatSkillForAgent,
   resolveNativeChatSkillDiscoveryContext,
@@ -7,6 +8,7 @@ import {
 } from './use-native-chat-skills'
 import {
   getNativeChatSkillDiscoverySubscriptionKey,
+  selectNativeChatSkillStateInputs,
   type NativeChatSkillStateInputs
 } from './native-chat-skill-discovery-context'
 
@@ -178,7 +180,9 @@ function connectionState(overrides: Record<string, unknown> = {}): Record<string
 function sshInputs(overrides: Record<string, unknown> = {}): NativeChatSkillStateInputs {
   return {
     activeRepoId: 'repo-1',
+    activeWorkspaceExecutionHostId: null,
     activeWorktreeId: 'worktree-1',
+    detectedWorktreesByRepo: {},
     folderWorkspaces: [],
     projectGroups: [],
     projects: [],
@@ -197,6 +201,10 @@ function sshInputs(overrides: Record<string, unknown> = {}): NativeChatSkillStat
   } as unknown as NativeChatSkillStateInputs
 }
 
+function selectedSshInputs(overrides: Record<string, unknown>): NativeChatSkillStateInputs {
+  return selectNativeChatSkillStateInputs(sshInputs(overrides) as unknown as AppState)
+}
+
 describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
   it('builds a pane-bound SSH context keyed on the connection generation', () => {
     const context = resolveNativeChatSkillDiscoveryContext(sshInputs(), 'tab-1')
@@ -210,7 +218,7 @@ describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
     expect(context.key).toContain('7')
 
     const regenerated = resolveNativeChatSkillDiscoveryContext(
-      sshInputs({
+      selectedSshInputs({
         sshConnectionStates: new Map([['target-1', connectionState({ connectionGeneration: 8 })]])
       }),
       'tab-1'
@@ -225,7 +233,7 @@ describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
       'tab-1'
     )
     const reconnecting = resolveNativeChatSkillDiscoveryContext(
-      sshInputs({
+      selectedSshInputs({
         sshConnectionStates: new Map([['target-1', connectionState({ status: 'reconnecting' })]])
       }),
       'tab-1'
@@ -340,6 +348,59 @@ describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
       throw new Error('expected ssh context')
     }
     expect(context.paneTarget).toEqual({ worktreeId, terminalTabId: 'tab-1' })
+  })
+
+  it('uses the active SSH host while duplicate catalogs are still hydrating', () => {
+    const worktreeId = 'repo-1::/remote/repo'
+    const context = resolveNativeChatSkillDiscoveryContext(
+      selectedSshInputs({
+        activeWorkspaceExecutionHostId: 'ssh:target-2',
+        activeWorktreeId: worktreeId,
+        repos: [
+          { id: 'repo-1', path: '/remote/repo', connectionId: 'target-1' },
+          { id: 'repo-1', path: '/remote/repo', connectionId: 'target-2' }
+        ],
+        sshConnectionStates: new Map([['target-2', connectionState({ targetId: 'target-2' })]]),
+        tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+        worktreesByRepo: {}
+      }),
+      'tab-1'
+    )
+
+    expect(context?.executionHostKind).toBe('ssh')
+    expect(context?.key).toContain('ssh:target-2')
+  })
+
+  it('uses a detected-only SSH owner before the primary worktree catalog hydrates', () => {
+    const worktreeId = 'repo-1::/remote/repo'
+    const context = resolveNativeChatSkillDiscoveryContext(
+      selectedSshInputs({
+        activeWorktreeId: 'other-worktree',
+        detectedWorktreesByRepo: {
+          'repo-1': {
+            worktrees: [
+              {
+                id: worktreeId,
+                repoId: 'repo-1',
+                path: '/remote/repo',
+                hostId: 'ssh:target-2'
+              }
+            ]
+          }
+        },
+        repos: [
+          { id: 'repo-1', path: '/remote/repo', connectionId: 'target-1' },
+          { id: 'repo-1', path: '/remote/repo', connectionId: 'target-2' }
+        ],
+        sshConnectionStates: new Map([['target-2', connectionState({ targetId: 'target-2' })]]),
+        tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+        worktreesByRepo: {}
+      }),
+      'tab-1'
+    )
+
+    expect(context?.executionHostKind).toBe('ssh')
+    expect(context?.key).toContain('ssh:target-2')
   })
 
   it('keeps the same remote path on two SSH hosts cache-isolated', () => {

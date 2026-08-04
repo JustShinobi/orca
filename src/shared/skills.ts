@@ -109,11 +109,23 @@ export type PaneSkillDiscoveryTarget = {
   terminalTabId?: string
 }
 
+export const SKILL_DISCOVERY_LIMITS = {
+  descriptionLength: 8192,
+  nameLength: 512,
+  pathLength: 4096,
+  rootPaths: 64,
+  skills: 5000,
+  sources: 1000
+} as const
+
 /** Pane discovery carries workspace/pane identity only — never a path or SSH
  *  connection id. The owning runtime derives the scan directory from its own
  *  persisted state. */
 export const PaneSkillDiscoveryTargetSchema: z.ZodType<PaneSkillDiscoveryTarget> = z.object({
-  worktreeId: z.string().min(1).max(512),
+  worktreeId: z
+    .string()
+    .min(1)
+    .max(SKILL_DISCOVERY_LIMITS.pathLength + 512),
   terminalTabId: z.string().min(1).max(512).optional()
 })
 
@@ -126,15 +138,6 @@ export type SkillDiscoveryForPaneResponse =
 
 const SKILL_PROVIDER_VALUES = ['codex', 'claude', 'agent-skills'] as const
 const SKILL_SOURCE_KIND_VALUES = ['home', 'repo', 'bundled', 'plugin'] as const
-
-export const SKILL_DISCOVERY_LIMITS = {
-  descriptionLength: 8192,
-  nameLength: 512,
-  pathLength: 4096,
-  rootPaths: 64,
-  skills: 5000,
-  sources: 1000
-} as const
 
 const boundedString = (max: number): z.ZodString => z.string().max(max)
 

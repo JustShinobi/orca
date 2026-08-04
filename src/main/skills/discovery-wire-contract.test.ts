@@ -2,10 +2,21 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { parseSkillDiscoveryResult, SKILL_DISCOVERY_LIMITS } from '../../shared/skills'
+import {
+  PaneSkillDiscoveryTargetSchema,
+  parseSkillDiscoveryResult,
+  SKILL_DISCOVERY_LIMITS
+} from '../../shared/skills'
 import { discoverSkills } from './discovery'
 
 describe('skill discovery wire contract', () => {
+  it('accepts pane identities containing a valid long workspace path', () => {
+    const worktreeId = `repo-1::/${'nested/'.repeat(100)}repo`
+
+    expect(worktreeId.length).toBeGreaterThan(512)
+    expect(() => PaneSkillDiscoveryTargetSchema.parse({ worktreeId })).not.toThrow()
+  })
+
   it('bounds scanner metadata before returning it to an SSH client', async () => {
     const root = await mkdtemp(join(tmpdir(), 'orca-skills-'))
     const home = join(root, 'home')

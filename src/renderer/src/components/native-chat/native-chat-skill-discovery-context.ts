@@ -12,7 +12,9 @@ import { parseWorkspaceKey } from '../../../../shared/workspace-scope'
 export type NativeChatSkillStateInputs = Pick<
   AppState,
   | 'activeRepoId'
+  | 'activeWorkspaceExecutionHostId'
   | 'activeWorktreeId'
+  | 'detectedWorktreesByRepo'
   | 'folderWorkspaces'
   | 'projectGroups'
   | 'projects'
@@ -53,7 +55,9 @@ export type NativeChatSkillDiscoveryContext =
 export function selectNativeChatSkillStateInputs(state: AppState): NativeChatSkillStateInputs {
   return {
     activeRepoId: state.activeRepoId,
+    activeWorkspaceExecutionHostId: state.activeWorkspaceExecutionHostId,
     activeWorktreeId: state.activeWorktreeId,
+    detectedWorktreesByRepo: state.detectedWorktreesByRepo,
     folderWorkspaces: state.folderWorkspaces,
     projectGroups: state.projectGroups,
     projects: state.projects,
