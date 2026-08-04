@@ -658,6 +658,8 @@ import {
 } from '../project-runtime-git-options'
 import { resolveLocalProjectRuntimeForWorktreeId } from '../local-project-runtime-resolution'
 import type { ProjectExecutionRuntimeResolution } from '../../shared/project-execution-runtime'
+import type { SkillDiscoveryForPaneResponse } from '../../shared/skills'
+import { discoverPaneSkills } from '../skills/pane-skill-discovery'
 import { resolveTerminalOrchestrationCliCommand } from './orchestration/cli-command'
 import {
   getLocalWorktreePathAccess,
@@ -11895,6 +11897,37 @@ export class OrcaRuntimeService {
     return this.store && worktreeId
       ? resolveLocalProjectRuntimeForWorktreeId(this.requireStore(), worktreeId)
       : undefined
+  }
+
+  // Why: the pane request carries identity only; this runtime derives the scan
+  // directory and execution host from its own state, so a renderer-claimed path
+  // can never reach a remote scan.
+  async discoverSkillsForPane(
+    args: { worktreeId: string; terminalTabId?: string },
+    signal?: AbortSignal
+  ): Promise<SkillDiscoveryForPaneResponse> {
+    const target = await this.resolveRuntimeFileTarget(args.worktreeId)
+    const session = this.getWorkspaceSessionForWorktree(args.worktreeId)
+    const sessionWorktreeId = session
+      ? resolveTerminalSessionWorktreeId(session, args.worktreeId)
+      : null
+    const tab =
+      args.terminalTabId && session && sessionWorktreeId
+        ? session.tabsByWorktree[sessionWorktreeId]?.find(
+            (candidate) => candidate.id === args.terminalTabId
+          )
+        : undefined
+    return discoverPaneSkills({
+      worktreeId: args.worktreeId,
+      // A missing/unpersisted tab still scans a runtime-owned path: the workspace root.
+      cwd: tab?.startupCwd?.trim() || target.worktree.path,
+      connectionId: target.connectionId,
+      projectRuntime: target.connectionId
+        ? undefined
+        : this.resolveProjectRuntimeForWorktree(args.worktreeId),
+      repos: this.listRepos(),
+      signal
+    })
   }
 
   getTerminalOrchestrationCliCommand(handle: string): 'orca' | 'orca-ide' {

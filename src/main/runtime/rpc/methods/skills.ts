@@ -1,5 +1,8 @@
 import { defineMethod, type RpcMethod } from '../core'
-import { SkillDiscoveryTargetSchema } from '../../../../shared/skills'
+import {
+  PaneSkillDiscoveryTargetSchema,
+  SkillDiscoveryTargetSchema
+} from '../../../../shared/skills'
 import {
   discoverSkillsOnTarget,
   resolveSkillDiscoveryTarget
@@ -21,5 +24,13 @@ export const SKILL_METHODS: RpcMethod[] = [
           }
       return discoverSkillsOnTarget(resolveSkillDiscoveryTarget(target), runtime.listRepos())
     }
+  }),
+  // Why: a separate method, not a field on skills.discover — old runtimes strip
+  // unknown fields and would answer with a wrong-host native scan; method_not_found
+  // lets clients classify the skew instead.
+  defineMethod({
+    name: 'skills.discoverForPane',
+    params: PaneSkillDiscoveryTargetSchema,
+    handler: async (params, { runtime, signal }) => runtime.discoverSkillsForPane(params, signal)
   })
 ]

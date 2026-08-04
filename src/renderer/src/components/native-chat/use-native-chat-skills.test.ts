@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type { DiscoveredSkill, SkillDiscoveryResult } from '../../../../shared/skills'
 import {
   isNativeChatSkillForAgent,
+  resolveNativeChatSkillDiscoveryContext,
   resolveNativeChatSkillDiscoveryCwd
 } from './use-native-chat-skills'
+import type { NativeChatSkillStateInputs } from './native-chat-skill-discovery-context'
 
 function skill(overrides: Partial<DiscoveredSkill>): DiscoveredSkill {
   return {
@@ -156,5 +158,187 @@ describe('resolveNativeChatSkillDiscoveryCwd', () => {
         'tab-1'
       )
     ).toBe('/repo/worktree/packages/app')
+  })
+})
+
+function connectionState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    targetId: 'target-1',
+    status: 'connected',
+    error: null,
+    reconnectAttempt: 0,
+    connectionGeneration: 7,
+    ...overrides
+  }
+}
+
+function sshInputs(overrides: Record<string, unknown> = {}): NativeChatSkillStateInputs {
+  return {
+    activeRepoId: 'repo-1',
+    activeWorktreeId: 'worktree-1',
+    folderWorkspaces: [],
+    projectGroups: [],
+    projects: [],
+    repos: [{ id: 'repo-1', path: '/repo', connectionId: null, executionHostId: 'ssh:target-1' }],
+    restoredRuntimeHostIdByWorkspaceSessionKey: {},
+    settings: { activeRuntimeEnvironmentId: null },
+    sshConnectionStates: new Map([['target-1', connectionState()]]),
+    sshStateByEnvironment: new Map(),
+    tabsByWorktree: { 'worktree-1': [{ id: 'tab-1' }] },
+    worktreesByRepo: {
+      'repo-1': [
+        { id: 'worktree-1', repoId: 'repo-1', path: '/repo/worktree', hostId: 'ssh:target-1' }
+      ]
+    },
+    ...overrides
+  } as unknown as NativeChatSkillStateInputs
+}
+
+describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
+  it('builds a pane-bound SSH context keyed on the connection generation', () => {
+    const context = resolveNativeChatSkillDiscoveryContext(sshInputs(), 'tab-1')
+    expect(context?.executionHostKind).toBe('ssh')
+    if (context?.executionHostKind !== 'ssh') {
+      throw new Error('expected ssh context')
+    }
+    expect(context.runtimeTarget).toEqual({ kind: 'local' })
+    expect(context.paneTarget).toEqual({ worktreeId: 'worktree-1', terminalTabId: 'tab-1' })
+    expect(context.sshDisconnected).toBe(false)
+    expect(context.key).toContain('7')
+
+    const regenerated = resolveNativeChatSkillDiscoveryContext(
+      sshInputs({
+        sshConnectionStates: new Map([['target-1', connectionState({ connectionGeneration: 8 })]])
+      }),
+      'tab-1'
+    )
+    // Reconnect bumps the generation, which must invalidate the pane cache key.
+    expect(regenerated?.key).not.toBe(context.key)
+  })
+
+  it('marks a missing or non-connected local SSH state as disconnected', () => {
+    const missing = resolveNativeChatSkillDiscoveryContext(
+      sshInputs({ sshConnectionStates: new Map() }),
+      'tab-1'
+    )
+    const reconnecting = resolveNativeChatSkillDiscoveryContext(
+      sshInputs({
+        sshConnectionStates: new Map([['target-1', connectionState({ status: 'reconnecting' })]])
+      }),
+      'tab-1'
+    )
+    expect(missing?.executionHostKind === 'ssh' && missing.sshDisconnected).toBe(true)
+    expect(reconnecting?.executionHostKind === 'ssh' && reconnecting.sshDisconnected).toBe(true)
+  })
+
+  it('fails closed for a runtime-owned SSH target without an explicit owner', () => {
+    const context = resolveNativeChatSkillDiscoveryContext(
+      sshInputs({
+        repos: [
+          { id: 'repo-1', path: '/repo', connectionId: null, executionHostId: 'ssh:runtime-ssh-t1' }
+        ],
+        worktreesByRepo: {
+          'repo-1': [
+            {
+              id: 'worktree-1',
+              repoId: 'repo-1',
+              path: '/repo/worktree',
+              hostId: 'ssh:runtime-ssh-t1'
+            }
+          ]
+        }
+      }),
+      'tab-1'
+    )
+    expect(context).toBeNull()
+  })
+
+  it('routes an owner-stamped runtime SSH target through its environment', () => {
+    const context = resolveNativeChatSkillDiscoveryContext(
+      sshInputs({
+        repos: [
+          { id: 'repo-1', path: '/repo', connectionId: null, executionHostId: 'ssh:runtime-ssh-t1' }
+        ],
+        worktreesByRepo: {
+          'repo-1': [
+            {
+              id: 'worktree-1',
+              repoId: 'repo-1',
+              path: '/repo/worktree',
+              hostId: 'ssh:runtime-ssh-t1',
+              runtimeOwnerEnvironmentId: 'env-1'
+            }
+          ]
+        },
+        sshStateByEnvironment: new Map([
+          [
+            'env-1',
+            {
+              connectionStates: new Map([
+                [
+                  'runtime-ssh-t1',
+                  connectionState({ targetId: 'runtime-ssh-t1', connectionGeneration: 4 })
+                ]
+              ]),
+              targetLabels: new Map(),
+              removedTargetLabels: new Map(),
+              targetsHydrated: true
+            }
+          ]
+        ])
+      }),
+      'tab-1'
+    )
+    expect(context?.executionHostKind).toBe('ssh')
+    if (context?.executionHostKind !== 'ssh') {
+      throw new Error('expected ssh context')
+    }
+    expect(context.runtimeTarget).toEqual({ kind: 'environment', environmentId: 'env-1' })
+    expect(context.key).toContain('env-1')
+    expect(context.key).toContain('4')
+    expect(context.sshDisconnected).toBe(false)
+  })
+
+  it('treats an unhydrated environment bucket as unknown rather than disconnected', () => {
+    const context = resolveNativeChatSkillDiscoveryContext(
+      sshInputs({
+        repos: [
+          { id: 'repo-1', path: '/repo', connectionId: null, executionHostId: 'ssh:runtime-ssh-t1' }
+        ],
+        worktreesByRepo: {
+          'repo-1': [
+            {
+              id: 'worktree-1',
+              repoId: 'repo-1',
+              path: '/repo/worktree',
+              hostId: 'ssh:runtime-ssh-t1',
+              runtimeOwnerEnvironmentId: 'env-1'
+            }
+          ]
+        }
+      }),
+      'tab-1'
+    )
+    expect(context?.executionHostKind === 'ssh' && context.sshDisconnected).toBe(false)
+  })
+
+  it('keeps the same remote path on two SSH hosts cache-isolated', () => {
+    const onTargetTwo = resolveNativeChatSkillDiscoveryContext(
+      sshInputs({
+        repos: [
+          { id: 'repo-1', path: '/repo', connectionId: null, executionHostId: 'ssh:target-2' }
+        ],
+        worktreesByRepo: {
+          'repo-1': [
+            { id: 'worktree-1', repoId: 'repo-1', path: '/repo/worktree', hostId: 'ssh:target-2' }
+          ]
+        },
+        sshConnectionStates: new Map([['target-2', connectionState({ targetId: 'target-2' })]])
+      }),
+      'tab-1'
+    )
+    const onTargetOne = resolveNativeChatSkillDiscoveryContext(sshInputs(), 'tab-1')
+    expect(onTargetOne?.cwd).toBe(onTargetTwo?.cwd)
+    expect(onTargetOne?.key).not.toBe(onTargetTwo?.key)
   })
 })

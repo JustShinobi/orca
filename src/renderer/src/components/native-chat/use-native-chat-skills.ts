@@ -2,15 +2,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../store'
 import type { AgentType } from '../../../../shared/agent-status-types'
-import type { DiscoveredSkill, SkillDiscoveryResult } from '../../../../shared/skills'
+import type {
+  DiscoveredSkill,
+  SkillDiscoveryForPaneResponse,
+  SkillDiscoveryResult
+} from '../../../../shared/skills'
 import { getNativeChatAgentProfile } from '../../../../shared/native-chat-agent-profiles'
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
+import { RuntimeRpcCallError } from '@/runtime/runtime-rpc-result'
+import { isRuntimeCompatBlockError } from '@/runtime/runtime-protocol-compat'
 import { emitNativeChatSkillDiscovery } from '@/lib/native-chat-telemetry'
 import {
   resolveNativeChatSkillDiscoveryContext,
   selectNativeChatSkillStateInputs,
   type NativeChatSkillDiscoveryContext
 } from './native-chat-skill-discovery-context'
+import type { NativeChatSkillDiscoveryErrorKind } from './native-chat-picker-items'
 
 export {
   resolveNativeChatSkillDiscoveryContext,
@@ -29,8 +36,16 @@ export type NativeChatSkillDiscovery = {
   status: 'idle' | 'loading' | 'ready' | 'error'
   skills: DiscoveredSkill[]
   error: Error | null
-  errorKind?: 'unavailable' | 'timeout' | 'host' | 'unknown'
+  errorKind?: NativeChatSkillDiscoveryErrorKind
   retry: () => void
+}
+
+/** Old relay behind a current runtime; reconnecting the SSH host deploys it. */
+class SshRelaySkillUpgradeRequiredError extends Error {
+  constructor() {
+    super('This SSH host is running an older Orca relay without skill discovery.')
+    this.name = 'SshRelaySkillUpgradeRequiredError'
+  }
 }
 
 type StoredDiscoveryState = Omit<NativeChatSkillDiscovery, 'retry'> & {
@@ -91,17 +106,17 @@ export function useNativeChatSkills(
       setState(IDLE_STATE)
       return
     }
-    if (context.executionHostKind === 'ssh') {
+    if (context.executionHostKind === 'ssh' && context.sshDisconnected) {
       emitNativeChatSkillDiscovery({
         agent,
-        outcome: 'unavailable',
+        outcome: 'error',
         executionHostKind: 'ssh'
       })
       setState({
         status: 'error',
         skills: [],
-        error: new Error('Skill discovery is unavailable for SSH hosts.'),
-        errorKind: 'unavailable',
+        error: new Error('The SSH host is disconnected.'),
+        errorKind: 'host',
         contextKey: context.key
       })
       return
@@ -138,21 +153,24 @@ export function useNativeChatSkills(
           return
         }
         const error = reason instanceof Error ? reason : new Error(String(reason))
-        const timedOut = /timed?\s*out|timeout/i.test(error.message)
+        const upgradeKind = classifyUpgradeRequired(context, error)
+        const timedOut = !upgradeKind && /timed?\s*out|timeout/i.test(error.message)
         emitNativeChatSkillDiscovery({
           agent,
-          outcome: timedOut ? 'timeout' : 'error',
+          outcome: upgradeKind ? 'upgrade-required' : timedOut ? 'timeout' : 'error',
           executionHostKind: context.executionHostKind
         })
         setState({
           status: 'error',
           skills: [],
           error,
-          errorKind: timedOut
-            ? 'timeout'
-            : context.executionHostKind === 'runtime'
-              ? 'host'
-              : 'unknown',
+          errorKind:
+            upgradeKind ??
+            (timedOut
+              ? 'timeout'
+              : context.executionHostKind === 'runtime' || context.executionHostKind === 'ssh'
+                ? 'host'
+                : 'unknown'),
           contextKey: paneCacheKey
         })
       }
@@ -210,14 +228,7 @@ function getOrStartDiscovery(
   // Why: the local runtime.call branch ignores timeoutMs, so the renderer must
   // enforce the design's scan timeout itself or a stalled local scan loads forever.
   const request = withDiscoveryTimeout(
-    callRuntimeRpc<SkillDiscoveryResult>(
-      context.runtimeTarget,
-      'skills.discover',
-      context.discoveryTarget,
-      {
-        timeoutMs: DISCOVERY_TIMEOUT_MS
-      }
-    ),
+    startDiscoveryRequest(context),
     DISCOVERY_BACKSTOP_TIMEOUT_MS
   ).finally(() => {
     if (inFlightDiscovery.get(context.key) === request) {
@@ -226,6 +237,54 @@ function getOrStartDiscovery(
   })
   inFlightDiscovery.set(context.key, request)
   return request
+}
+
+async function startDiscoveryRequest(
+  context: NativeChatSkillDiscoveryContext
+): Promise<SkillDiscoveryResult> {
+  if (context.executionHostKind === 'ssh') {
+    const response = await callRuntimeRpc<SkillDiscoveryForPaneResponse>(
+      context.runtimeTarget,
+      'skills.discoverForPane',
+      context.paneTarget,
+      { timeoutMs: DISCOVERY_TIMEOUT_MS }
+    )
+    if (response.status === 'relay-upgrade-required') {
+      throw new SshRelaySkillUpgradeRequiredError()
+    }
+    return response.result
+  }
+  return callRuntimeRpc<SkillDiscoveryResult>(
+    context.runtimeTarget,
+    'skills.discover',
+    context.discoveryTarget,
+    { timeoutMs: DISCOVERY_TIMEOUT_MS }
+  )
+}
+
+function classifyUpgradeRequired(
+  context: NativeChatSkillDiscoveryContext,
+  error: Error
+): Extract<
+  NativeChatSkillDiscoveryErrorKind,
+  'relay-upgrade-required' | 'runtime-upgrade-required'
+> | null {
+  if (context.executionHostKind !== 'ssh') {
+    return null
+  }
+  if (error instanceof SshRelaySkillUpgradeRequiredError) {
+    return 'relay-upgrade-required'
+  }
+  // Why: a runtime predating skills.discoverForPane would strip pane identity
+  // from the legacy method and scan its own disk; the missing method is the
+  // detectable version-skew signal (same mapping as native chat history).
+  if (error instanceof RuntimeRpcCallError && error.code === 'method_not_found') {
+    return 'runtime-upgrade-required'
+  }
+  if (isRuntimeCompatBlockError(error)) {
+    return 'runtime-upgrade-required'
+  }
+  return null
 }
 
 function withDiscoveryTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

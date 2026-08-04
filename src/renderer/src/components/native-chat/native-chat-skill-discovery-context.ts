@@ -1,6 +1,6 @@
 import type { AppState } from '../../store/types'
-import type { SkillDiscoveryTarget } from '../../../../shared/skills'
-import { parseExecutionHostId } from '../../../../shared/execution-host'
+import type { PaneSkillDiscoveryTarget, SkillDiscoveryTarget } from '../../../../shared/skills'
+import { isRuntimeOwnedSshTargetId, parseExecutionHostId } from '../../../../shared/execution-host'
 import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import {
   getExplicitRuntimeEnvironmentIdForWorktree,
@@ -19,6 +19,8 @@ export type NativeChatSkillStateInputs = Pick<
   | 'repos'
   | 'restoredRuntimeHostIdByWorkspaceSessionKey'
   | 'settings'
+  | 'sshConnectionStates'
+  | 'sshStateByEnvironment'
   | 'tabsByWorktree'
   | 'worktreesByRepo'
 >
@@ -30,13 +32,24 @@ type NativeChatSkillWorktreeState = {
   worktreesByRepo: Record<string, readonly { id: string; path: string }[]>
 }
 
-export type NativeChatSkillDiscoveryContext = {
-  key: string
-  cwd: string
-  executionHostKind: 'local' | 'runtime' | 'ssh'
-  runtimeTarget: RuntimeClientTarget
-  discoveryTarget: SkillDiscoveryTarget
-}
+export type NativeChatSkillDiscoveryContext =
+  | {
+      key: string
+      cwd: string
+      executionHostKind: 'local' | 'runtime'
+      runtimeTarget: RuntimeClientTarget
+      discoveryTarget: SkillDiscoveryTarget
+    }
+  | {
+      key: string
+      cwd: string
+      executionHostKind: 'ssh'
+      runtimeTarget: RuntimeClientTarget
+      /** Identity only; the owning runtime derives the scanned directory. */
+      paneTarget: PaneSkillDiscoveryTarget
+      /** Known-disconnected host: skip the doomed RPC and show the host error. */
+      sshDisconnected: boolean
+    }
 
 export function selectNativeChatSkillStateInputs(state: AppState): NativeChatSkillStateInputs {
   return {
@@ -48,6 +61,8 @@ export function selectNativeChatSkillStateInputs(state: AppState): NativeChatSki
     repos: state.repos,
     restoredRuntimeHostIdByWorkspaceSessionKey: state.restoredRuntimeHostIdByWorkspaceSessionKey,
     settings: state.settings,
+    sshConnectionStates: state.sshConnectionStates,
+    sshStateByEnvironment: state.sshStateByEnvironment,
     tabsByWorktree: state.tabsByWorktree,
     worktreesByRepo: state.worktreesByRepo
   }
@@ -99,12 +114,35 @@ export function resolveNativeChatSkillDiscoveryContext(
   const hostId = getExecutionHostIdForWorktree(state, worktreeId)
   const parsedHost = parseExecutionHostId(hostId)
   if (parsedHost?.kind === 'ssh') {
+    const runtimeEnvironmentId = getExplicitRuntimeEnvironmentIdForWorktree(state, worktreeId)
+    // Why: a runtime-owned SSH target without an explicit owner stamp is
+    // ambiguous; failing closed beats resolving it against local providers.
+    if (isRuntimeOwnedSshTargetId(parsedHost.targetId) && !runtimeEnvironmentId) {
+      return null
+    }
+    const connectionState = runtimeEnvironmentId
+      ? state.sshStateByEnvironment
+          .get(runtimeEnvironmentId)
+          ?.connectionStates.get(parsedHost.targetId)
+      : state.sshConnectionStates.get(parsedHost.targetId)
+    // Why: an unhydrated environment bucket is unknown, not disconnected — the
+    // owning runtime answers authoritatively. A missing local entry is offline.
+    const status = connectionState?.status ?? (runtimeEnvironmentId ? null : 'disconnected')
     return {
-      key: JSON.stringify(['ssh', hostId, cwd]),
+      key: JSON.stringify([
+        'ssh',
+        runtimeEnvironmentId ?? null,
+        hostId,
+        connectionState?.connectionGeneration ?? 0,
+        cwd
+      ]),
       cwd,
       executionHostKind: 'ssh',
-      runtimeTarget: { kind: 'local' },
-      discoveryTarget: { cwd, worktreeId }
+      runtimeTarget: runtimeEnvironmentId
+        ? { kind: 'environment', environmentId: runtimeEnvironmentId }
+        : { kind: 'local' },
+      paneTarget: { worktreeId, terminalTabId },
+      sshDisconnected: status !== null && status !== 'connected'
     }
   }
 

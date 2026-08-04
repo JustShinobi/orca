@@ -25,6 +25,16 @@ const SKILL_FILE_NAME = 'SKILL.md'
 const MAX_MARKDOWN_BYTES = 256 * 1024
 const MAX_SKILL_FILES = 200
 
+/** Node-version-safe alternative to signal.throwIfAborted(); an aborted scan
+ *  must reject rather than resolve with partial results. */
+function throwIfDiscoveryAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    const error = new Error('Skill discovery aborted')
+    error.name = 'AbortError'
+    throw error
+  }
+}
+
 async function pathExists(pathValue: string): Promise<boolean> {
   try {
     await stat(pathValue)
@@ -46,10 +56,15 @@ function isWithinDepth(rootPath: string, childPath: string, maxDepth: number): b
   return rel.split(sep).length <= maxDepth
 }
 
-async function findSkillFiles(rootPath: string, maxDepth: number): Promise<string[]> {
+async function findSkillFiles(
+  rootPath: string,
+  maxDepth: number,
+  signal?: AbortSignal
+): Promise<string[]> {
   const out: string[] = []
   const visitedDirectoryPaths = new Set<string>()
   async function visit(dirPath: string): Promise<void> {
+    throwIfDiscoveryAborted(signal)
     if (!isWithinDepth(rootPath, dirPath, maxDepth)) {
       return
     }
@@ -71,6 +86,7 @@ async function findSkillFiles(rootPath: string, maxDepth: number): Promise<strin
       return
     }
     for (const entry of entries) {
+      throwIfDiscoveryAborted(signal)
       const entryPath = join(dirPath, entry.name)
       if (entry.name === SKILL_FILE_NAME) {
         if (entry.isFile()) {
@@ -109,10 +125,11 @@ async function findSkillFiles(rootPath: string, maxDepth: number): Promise<strin
   return out
 }
 
-async function countFiles(dirPath: string): Promise<number> {
+async function countFiles(dirPath: string, signal?: AbortSignal): Promise<number> {
   let count = 0
   const visitedDirectoryPaths = new Set<string>()
   async function visit(currentPath: string): Promise<void> {
+    throwIfDiscoveryAborted(signal)
     if (count >= MAX_SKILL_FILES) {
       return
     }
@@ -184,11 +201,12 @@ async function readSkillSummary(skillFilePath: string): Promise<{
 
 type ScannedSkill = DiscoveredSkill & { canonicalSkillFilePath: string }
 
-async function scanRoot(root: SkillScanRoot): Promise<ScannedSkill[]> {
+async function scanRoot(root: SkillScanRoot, signal?: AbortSignal): Promise<ScannedSkill[]> {
   const maxDepth = root.sourceKind === 'plugin' ? 9 : 4
-  const skillFiles = await findSkillFiles(root.path, maxDepth)
+  const skillFiles = await findSkillFiles(root.path, maxDepth, signal)
   const skills = await Promise.all(
     skillFiles.map(async (skillFilePath): Promise<ScannedSkill | null> => {
+      throwIfDiscoveryAborted(signal)
       // Why: path identity belongs to the scanning host; canonicalizing before
       // returning prevents symlinked roots from becoming duplicate picker rows.
       const canonicalSkillFilePath = await realpath(skillFilePath).catch(() => skillFilePath)
@@ -211,7 +229,7 @@ async function scanRoot(root: SkillScanRoot): Promise<ScannedSkill[]> {
         directoryPath,
         skillFilePath,
         installed: true,
-        fileCount: await countFiles(directoryPath),
+        fileCount: await countFiles(directoryPath, signal),
         updatedAt: summary.updatedAt,
         canonicalSkillFilePath
       } satisfies ScannedSkill
@@ -225,7 +243,10 @@ export async function discoverSkills(args: {
   homeDir?: string
   cwd?: string
   includeCwd?: boolean
+  signal?: AbortSignal
 }): Promise<SkillDiscoveryResult> {
+  const signal = args.signal
+  throwIfDiscoveryAborted(signal)
   const homeDir = args.homeDir ?? homedir()
   const roots = [
     ...buildSkillDiscoverySources({ ...args, homeDir }),
@@ -238,6 +259,7 @@ export async function discoverSkills(args: {
   const sources: SkillDiscoverySource[] = []
   const skillGroups = await Promise.all(
     roots.map(async (root) => {
+      throwIfDiscoveryAborted(signal)
       const exists = await pathExists(root.path)
       sources.push({
         ...root,
@@ -248,9 +270,10 @@ export async function discoverSkills(args: {
       if (!exists) {
         return []
       }
-      return scanRoot(root)
+      return scanRoot(root, signal)
     })
   )
+  throwIfDiscoveryAborted(signal)
   const seen = new Map<string, DiscoveredSkill>()
   for (const skill of skillGroups.flat()) {
     // Why: overlapping repo/cwd roots and symlinked provider homes can reach
