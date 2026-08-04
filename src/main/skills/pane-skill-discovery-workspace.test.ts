@@ -83,6 +83,44 @@ describe('resolvePaneSkillDiscoveryWorkspace', () => {
     ).toEqual({ connectionId: 'target-1', cwd: '/work/demo-project' })
   })
 
+  it('accepts normalized Windows variants of a mirrored SSH startup directory', () => {
+    const worktreeId = 'repo-1::C:\\Repo'
+
+    expect(
+      resolvePaneSkillDiscoveryWorkspace({
+        worktreeId,
+        terminalTabId: 'tab-1',
+        repos: [repo({ path: 'C:\\Repo' })],
+        projectGroups: [],
+        folderWorkspaces: [],
+        worktreeMeta: worktreeMeta('ssh:target-1'),
+        sessions: [
+          { hostId: 'local', session: session(worktreeId, 'C:\\Repo\\') },
+          { hostId: 'ssh:target-1', session: session(worktreeId, 'c:/repo') }
+        ]
+      })
+    ).toEqual({ connectionId: 'target-1', cwd: 'c:/repo' })
+  })
+
+  it('keeps literal POSIX backslashes distinct when comparing mirrored sessions', () => {
+    const worktreeId = 'repo-1::/srv/team/repo'
+
+    expect(() =>
+      resolvePaneSkillDiscoveryWorkspace({
+        worktreeId,
+        terminalTabId: 'tab-1',
+        repos: [repo({ path: '/srv/team/repo' })],
+        projectGroups: [],
+        folderWorkspaces: [],
+        worktreeMeta: worktreeMeta('ssh:target-1'),
+        sessions: [
+          { hostId: 'local', session: session(worktreeId, '/srv/team\\repo') },
+          { hostId: 'ssh:target-1', session: session(worktreeId, '/srv/team/repo') }
+        ]
+      })
+    ).toThrow('pane_skill_discovery_owner_ambiguous')
+  })
+
   it('rejects duplicate pane sessions on distinct non-local hosts', () => {
     const worktreeId = 'repo-1::/remote/repo'
 

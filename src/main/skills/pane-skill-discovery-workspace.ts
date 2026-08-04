@@ -214,7 +214,12 @@ function paneSessionsMirror(
   left: { startupCwd?: string },
   right: { startupCwd?: string }
 ): boolean {
-  return (left.startupCwd?.trim() || null) === (right.startupCwd?.trim() || null)
+  const leftCwd = left.startupCwd?.trim() || null
+  const rightCwd = right.startupCwd?.trim() || null
+  if (!leftCwd || !rightCwd) {
+    return leftCwd === rightCwd
+  }
+  return normalizeRuntimePathForComparison(leftCwd) === normalizeRuntimePathForComparison(rightCwd)
 }
 
 function selectPaneRepo(candidates: readonly Repo[], hostId: ExecutionHostId | null): Repo {
