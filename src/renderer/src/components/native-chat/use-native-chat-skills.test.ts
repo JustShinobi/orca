@@ -478,6 +478,41 @@ describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
     expect(context).toBeNull()
   })
 
+  it('fails closed when direct and paired panes share an SSH target id', () => {
+    const worktreeId = 'repo-1::/remote/repo'
+    const context = resolveNativeChatSkillDiscoveryContext(
+      selectedSshInputs({
+        activeWorkspaceExecutionHostId: 'ssh:shared-target',
+        activeWorktreeId: worktreeId,
+        repos: [],
+        sshConnectionStates: new Map([
+          ['shared-target', connectionState({ targetId: 'shared-target' })]
+        ]),
+        tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+        worktreesByRepo: {
+          'repo-1': [
+            {
+              id: worktreeId,
+              repoId: 'repo-1',
+              path: '/remote/repo',
+              hostId: 'ssh:shared-target'
+            },
+            {
+              id: worktreeId,
+              repoId: 'repo-1',
+              path: '/remote/repo',
+              hostId: 'ssh:shared-target',
+              runtimeOwnerEnvironmentId: 'hub-a'
+            }
+          ]
+        }
+      }),
+      'tab-1'
+    )
+
+    expect(context).toBeNull()
+  })
+
   it('keeps the same remote path on two SSH hosts cache-isolated', () => {
     const onTargetTwo = resolveNativeChatSkillDiscoveryContext(
       sshInputs({

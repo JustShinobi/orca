@@ -56,20 +56,21 @@ function stateForHost(hostId: string) {
   }
 }
 
+function sshConnectionState(targetId: string, connectionGeneration = 3) {
+  return {
+    targetId,
+    status: 'connected',
+    error: null,
+    reconnectAttempt: 0,
+    connectionGeneration
+  }
+}
+
 function connectedSshState(connectionGeneration = 3) {
   return {
     ...stateForHost('ssh:target-1'),
     sshConnectionStates: new Map([
-      [
-        'target-1',
-        {
-          targetId: 'target-1',
-          status: 'connected',
-          error: null,
-          reconnectAttempt: 0,
-          connectionGeneration
-        }
-      ]
+      ['target-1', sshConnectionState('target-1', connectionGeneration)]
     ])
   }
 }
@@ -200,6 +201,72 @@ describe('useNativeChatSkills', () => {
       { cwd: '/repo/worktree', worktreeId: 'worktree-1' },
       { timeoutMs: 10_000 }
     )
+  })
+
+  it('routes an ordinary paired SSH pane through its owning runtime', async () => {
+    mocks.state = {
+      ...stateForHost('ssh:private-target'),
+      sshConnectionStates: new Map([['private-target', sshConnectionState('private-target')]]),
+      sshStateByEnvironment: new Map([
+        [
+          'hub-a',
+          {
+            connectionStates: new Map([['private-target', sshConnectionState('private-target')]])
+          }
+        ]
+      ]),
+      worktreesByRepo: {
+        'repo-1': [
+          {
+            id: 'worktree-1',
+            repoId: 'repo-1',
+            path: '/repo/worktree',
+            hostId: 'ssh:private-target',
+            runtimeOwnerEnvironmentId: 'hub-a'
+          }
+        ]
+      }
+    }
+    mocks.callRuntimeRpc.mockResolvedValue({ status: 'ok', result: DISCOVERY_RESULT })
+
+    render(<Probe enabled />)
+    await waitFor(() => expect(mocks.snapshots.at(-1)?.status).toBe('ready'))
+
+    expect(mocks.callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'hub-a' },
+      'skills.discoverForPane',
+      { worktreeId: 'worktree-1', terminalTabId: 'tab-1' },
+      { timeoutMs: 10_000 }
+    )
+  })
+
+  it('issues no RPC for an ambiguous direct and paired SSH pane', async () => {
+    mocks.state = {
+      ...stateForHost('ssh:shared-target'),
+      activeWorkspaceExecutionHostId: 'ssh:shared-target',
+      sshConnectionStates: new Map([['shared-target', sshConnectionState('shared-target')]]),
+      worktreesByRepo: {
+        'repo-1': [
+          {
+            id: 'worktree-1',
+            repoId: 'repo-1',
+            path: '/repo/worktree',
+            hostId: 'ssh:shared-target'
+          },
+          {
+            id: 'worktree-1',
+            repoId: 'repo-1',
+            path: '/repo/worktree',
+            hostId: 'ssh:shared-target',
+            runtimeOwnerEnvironmentId: 'hub-a'
+          }
+        ]
+      }
+    }
+
+    render(<Probe enabled />)
+    await waitFor(() => expect(mocks.snapshots.at(-1)?.status).toBe('idle'))
+    expect(mocks.callRuntimeRpc).not.toHaveBeenCalled()
   })
 
   it('bounds cached SSH reconnect generations per composer', async () => {

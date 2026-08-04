@@ -8,6 +8,7 @@ import {
 } from '../../../../shared/execution-host'
 import { getRepoIdFromWorktreeId } from '../../../../shared/worktree-id'
 import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
+import { resolveExactWorktreeRoute } from '@/lib/worktree-owner-route'
 import {
   getExplicitRuntimeEnvironmentIdForWorktree,
   getExecutionHostIdForWorktree
@@ -77,17 +78,23 @@ export function selectNativeChatSkillStateInputs(state: AppState): NativeChatSki
   }
 }
 
-function hasRuntimeSshTransportEvidence(
+type SshTransportResolution =
+  | { kind: 'resolved'; environmentId: string | null }
+  | { kind: 'ambiguous' }
+  | { kind: 'missing' }
+
+function resolveCatalogSshTransport(
   state: NativeChatSkillStateInputs,
   worktreeId: string,
   hostId: ExecutionHostId
-): boolean {
+): SshTransportResolution {
   const scope = parseWorkspaceKey(worktreeId)
   if (scope?.type === 'folder') {
-    return false
+    return { kind: 'missing' }
   }
   const rawWorktreeId = scope?.type === 'worktree' ? scope.worktreeId : worktreeId
   const repoIds = new Set([getRepoIdFromWorktreeId(rawWorktreeId)])
+  const environmentIds = new Set<string | null>()
   const catalogs = [
     ...Object.values(state.worktreesByRepo ?? {}),
     ...Object.values(state.detectedWorktreesByRepo ?? {}).map((result) => result.worktrees)
@@ -98,23 +105,36 @@ function hasRuntimeSshTransportEvidence(
         continue
       }
       repoIds.add(worktree.repoId)
-      if (worktree.runtimeOwnerEnvironmentId?.trim()) {
-        return true
+      const resolution = resolveExactWorktreeRoute(state, worktree)
+      if (resolution.kind === 'ambiguous') {
+        return resolution
+      }
+      if (resolution.kind === 'resolved' && resolution.route.executionHostId === hostId) {
+        environmentIds.add(resolution.route.runtimeEnvironmentId)
       }
     }
   }
-  for (const repo of state.repos) {
-    const connectionId = repo.connectionId?.trim()
-    if (
-      repoIds.has(repo.id) &&
-      parseExecutionHostId(repo.executionHostId)?.kind === 'runtime' &&
-      connectionId &&
-      toSshExecutionHostId(connectionId) === hostId
-    ) {
-      return true
+  if (environmentIds.size === 0) {
+    for (const repo of state.repos) {
+      if (!repoIds.has(repo.id)) {
+        continue
+      }
+      const executionHost = parseExecutionHostId(repo.executionHostId)
+      const connectionId = repo.connectionId?.trim()
+      const connectionHostId = connectionId ? toSshExecutionHostId(connectionId) : null
+      if (connectionHostId !== hostId && executionHost?.id !== hostId) {
+        continue
+      }
+      environmentIds.add(executionHost?.kind === 'runtime' ? executionHost.environmentId : null)
     }
   }
-  return false
+  if (environmentIds.size > 1) {
+    return { kind: 'ambiguous' }
+  }
+  const environmentId = environmentIds.values().next().value
+  return environmentIds.size === 1
+    ? { kind: 'resolved', environmentId: environmentId ?? null }
+    : { kind: 'missing' }
 }
 
 export function resolveNativeChatSkillDiscoveryCwd(
@@ -151,14 +171,25 @@ export function resolveNativeChatSkillDiscoveryContext(
   const hostId = getExecutionHostIdForWorktree(state, worktreeId)
   const parsedHost = parseExecutionHostId(hostId)
   if (parsedHost?.kind === 'ssh') {
-    const runtimeEnvironmentId = getExplicitRuntimeEnvironmentIdForWorktree(state, worktreeId)
+    const explicitRuntimeEnvironmentId = getExplicitRuntimeEnvironmentIdForWorktree(
+      state,
+      worktreeId
+    )
+    const catalogTransport = resolveCatalogSshTransport(state, worktreeId, parsedHost.id)
+    if (
+      catalogTransport.kind === 'ambiguous' ||
+      (explicitRuntimeEnvironmentId &&
+        catalogTransport.kind === 'resolved' &&
+        catalogTransport.environmentId !== explicitRuntimeEnvironmentId)
+    ) {
+      return null
+    }
+    const runtimeEnvironmentId =
+      explicitRuntimeEnvironmentId ??
+      (catalogTransport.kind === 'resolved' ? catalogTransport.environmentId : null)
     // Why: unresolved paired-runtime transport can collide with a local target
     // id; failing closed prevents the identity-only RPC reaching the wrong host.
-    if (
-      !runtimeEnvironmentId &&
-      (isRuntimeOwnedSshTargetId(parsedHost.targetId) ||
-        hasRuntimeSshTransportEvidence(state, worktreeId, parsedHost.id))
-    ) {
+    if (!runtimeEnvironmentId && isRuntimeOwnedSshTargetId(parsedHost.targetId)) {
       return null
     }
     const connectionState = runtimeEnvironmentId
