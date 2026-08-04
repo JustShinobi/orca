@@ -14,7 +14,10 @@ import { resolveExactWorktreeRoute } from '@/lib/worktree-owner-route'
 
 type WorktreeSshTransportState = Pick<
   AppState,
-  'detectedWorktreesByRepo' | 'repos' | 'worktreesByRepo'
+  | 'detectedWorktreesByRepo'
+  | 'repos'
+  | 'restoredRuntimeHostIdByWorkspaceSessionKey'
+  | 'worktreesByRepo'
 >
 
 export type NativeChatWorktreeSshTransportResolution =
@@ -76,6 +79,16 @@ export function resolveNativeChatWorktreeSshTransport(
       }
       environmentIds.add(executionHost?.kind === 'runtime' ? executionHost.environmentId : null)
     }
+  }
+  const restoredHostId =
+    state.restoredRuntimeHostIdByWorkspaceSessionKey[rawWorktreeId] ??
+    state.restoredRuntimeHostIdByWorkspaceSessionKey[worktreeId]
+  if (restoredHostId) {
+    const restoredHost = parseExecutionHostId(restoredHostId)
+    if (restoredHost?.kind !== 'runtime') {
+      return { kind: 'ambiguous' }
+    }
+    environmentIds.add(restoredHost.environmentId)
   }
   if (environmentIds.size > 1) {
     return { kind: 'ambiguous' }

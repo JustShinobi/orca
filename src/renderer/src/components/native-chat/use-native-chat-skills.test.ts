@@ -389,6 +389,27 @@ describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
     expect(context.paneTarget).toEqual({ worktreeId, terminalTabId: 'tab-1' })
   })
 
+  it('uses a restored paired runtime owner before the worktree catalog hydrates', () => {
+    const worktreeId = 'repo-1::/remote/repo'
+    const context = resolveNativeChatSkillDiscoveryContext(
+      selectedSshInputs({
+        activeWorkspaceExecutionHostId: 'ssh:private-target',
+        activeWorktreeId: worktreeId,
+        repos: [],
+        restoredRuntimeHostIdByWorkspaceSessionKey: { [worktreeId]: 'runtime:hub-a' },
+        sshConnectionStates: new Map([
+          ['private-target', connectionState({ targetId: 'private-target' })]
+        ]),
+        tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+        worktreesByRepo: {}
+      }),
+      'tab-1'
+    )
+
+    expect(context?.executionHostKind).toBe('ssh')
+    expect(context?.runtimeTarget).toEqual({ kind: 'environment', environmentId: 'hub-a' })
+  })
+
   it('uses the active SSH host while duplicate catalogs are still hydrating', () => {
     const worktreeId = 'repo-1::/remote/repo'
     const context = resolveNativeChatSkillDiscoveryContext(
@@ -667,6 +688,78 @@ describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
     )
 
     expect(context?.executionHostKind).toBe('ssh')
+    expect(context?.runtimeTarget).toEqual({ kind: 'environment', environmentId: 'hub-a' })
+  })
+
+  it('fails closed while a restored runtime folder catalog is missing', () => {
+    const worktreeId = 'folder:folder-1'
+    const context = resolveNativeChatSkillDiscoveryContext(
+      selectedSshInputs({
+        activeWorkspaceExecutionHostId: 'runtime:hub-a',
+        activeWorktreeId: worktreeId,
+        folderWorkspaces: [],
+        projectGroups: [],
+        repos: [],
+        restoredRuntimeHostIdByWorkspaceSessionKey: { [worktreeId]: 'runtime:hub-a' },
+        tabsByWorktree: {
+          [worktreeId]: [{ id: 'tab-1', startupCwd: '/possibly-remote/folder' }]
+        },
+        worktreesByRepo: {}
+      }),
+      'tab-1'
+    )
+
+    expect(context).toBeNull()
+  })
+
+  it('fails closed before a runtime folder project group hydrates', () => {
+    const worktreeId = 'folder:folder-1'
+    const context = resolveNativeChatSkillDiscoveryContext(
+      selectedSshInputs({
+        activeWorkspaceExecutionHostId: 'runtime:hub-a',
+        activeWorktreeId: worktreeId,
+        folderWorkspaces: [
+          {
+            id: 'folder-1',
+            projectGroupId: 'group-1',
+            folderPath: '/possibly-remote/folder',
+            executionHostId: 'runtime:hub-a'
+          }
+        ],
+        projectGroups: [],
+        repos: [],
+        tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+        worktreesByRepo: {}
+      }),
+      'tab-1'
+    )
+
+    expect(context).toBeNull()
+  })
+
+  it('keeps a fully hydrated runtime-local folder on normal discovery', () => {
+    const worktreeId = 'folder:folder-1'
+    const context = resolveNativeChatSkillDiscoveryContext(
+      selectedSshInputs({
+        activeWorkspaceExecutionHostId: 'runtime:hub-a',
+        activeWorktreeId: worktreeId,
+        folderWorkspaces: [
+          {
+            id: 'folder-1',
+            projectGroupId: 'group-1',
+            folderPath: '/runtime/folder',
+            executionHostId: 'runtime:hub-a'
+          }
+        ],
+        projectGroups: [{ id: 'group-1', executionHostId: 'runtime:hub-a' }],
+        repos: [],
+        tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+        worktreesByRepo: {}
+      }),
+      'tab-1'
+    )
+
+    expect(context?.executionHostKind).toBe('runtime')
     expect(context?.runtimeTarget).toEqual({ kind: 'environment', environmentId: 'hub-a' })
   })
 

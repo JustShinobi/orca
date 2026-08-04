@@ -114,6 +114,13 @@ export function resolveNativeChatSkillDiscoveryContext(
   if (folderSshRoute.kind === 'ambiguous') {
     return null
   }
+  if (
+    workspaceScope?.type === 'folder' &&
+    parsedHost?.kind === 'runtime' &&
+    folderSshRoute.kind === 'missing'
+  ) {
+    return null
+  }
   const sshHost =
     folderSshRoute.kind === 'resolved'
       ? parseExecutionHostId(folderSshRoute.hostId)

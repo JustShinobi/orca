@@ -19,6 +19,7 @@ export type NativeChatFolderSshRouteResolution =
       environmentId: string | null
     }
   | { kind: 'ambiguous' }
+  | { kind: 'non-ssh'; ownerHostId: ExecutionHostId | null }
   | { kind: 'missing'; ownerHostId?: ExecutionHostId | null }
 
 type FolderSshRoute = Extract<NativeChatFolderSshRouteResolution, { kind: 'resolved' }>
@@ -29,6 +30,7 @@ export function resolveNativeChatFolderSshRoute(
 ): NativeChatFolderSshRouteResolution {
   const routes = new Map<string, FolderSshRoute>()
   const nonSshOwnerHostIds: (ExecutionHostId | null)[] = []
+  const unresolvedOwnerHostIds: (ExecutionHostId | null)[] = []
   const activeHost =
     state.activeWorktreeId === folderWorkspaceKey(folderWorkspaceId)
       ? parseExecutionHostId(state.activeWorkspaceExecutionHostId)
@@ -45,23 +47,21 @@ export function resolveNativeChatFolderSshRoute(
       const groupHost = parseExecutionHostId(group.executionHostId)
       return !workspaceHost || !groupHost || workspaceHost.id === groupHost.id
     })
-    const owners = groups.length > 0 ? groups : [null]
-    for (const group of owners) {
+    for (const group of groups.length > 0 ? groups : [null]) {
       const route = routeForFolderOwners(workspace, group)
       if (route.kind === 'ambiguous') {
         return route
       }
       if (route.kind === 'resolved') {
         routes.set(JSON.stringify([route.hostId, route.environmentId]), route)
+      } else if (!group) {
+        unresolvedOwnerHostIds.push(route.ownerHostId ?? null)
+      } else if (route.kind === 'non-ssh') {
+        nonSshOwnerHostIds.push(route.ownerHostId)
       } else {
-        nonSshOwnerHostIds.push(route.ownerHostId ?? null)
+        unresolvedOwnerHostIds.push(route.ownerHostId ?? null)
       }
     }
-  }
-  if (routes.size === 0) {
-    return activeHost?.kind === 'ssh' && nonSshOwnerHostIds.length > 0
-      ? { kind: 'ambiguous' }
-      : { kind: 'missing' }
   }
   const candidates = [...routes.values()].filter((route) => {
     if (!activeHost) {
@@ -73,10 +73,37 @@ export function resolveNativeChatFolderSshRoute(
         ? activeHost.environmentId === route.environmentId
         : false
   })
-  const hasRelevantNonSshOwner = nonSshOwnerHostIds.some(
-    (ownerHostId) => !activeHost || !ownerHostId || ownerHostId === activeHost.id
+  const ownerMatchesActiveHost = (ownerHostId: ExecutionHostId | null): boolean =>
+    !activeHost || !ownerHostId || ownerHostId === activeHost.id
+  const relevantNonSshOwnerHostIds = nonSshOwnerHostIds.filter(ownerMatchesActiveHost)
+  const relevantUnresolvedOwnerHostIds = unresolvedOwnerHostIds.filter(ownerMatchesActiveHost)
+  const evidenceCount = routes.size + nonSshOwnerHostIds.length + unresolvedOwnerHostIds.length
+  if (
+    activeHost &&
+    candidates.length === 0 &&
+    relevantNonSshOwnerHostIds.length === 0 &&
+    relevantUnresolvedOwnerHostIds.length === 0 &&
+    evidenceCount > 0
+  ) {
+    return { kind: 'ambiguous' }
+  }
+  if (candidates.length > 0) {
+    return candidates.length === 1 &&
+      relevantNonSshOwnerHostIds.length === 0 &&
+      relevantUnresolvedOwnerHostIds.length === 0
+      ? candidates[0]
+      : { kind: 'ambiguous' }
+  }
+  if (relevantUnresolvedOwnerHostIds.length > 0) {
+    return { kind: 'missing' }
+  }
+  const nonSshHostIds = new Set(
+    relevantNonSshOwnerHostIds.map((ownerHostId) => ownerHostId ?? 'unresolved')
   )
-  return candidates.length === 1 && !hasRelevantNonSshOwner ? candidates[0] : { kind: 'ambiguous' }
+  if (nonSshHostIds.size === 1) {
+    return { kind: 'non-ssh', ownerHostId: relevantNonSshOwnerHostIds[0] ?? null }
+  }
+  return nonSshHostIds.size > 1 ? { kind: 'ambiguous' } : { kind: 'missing' }
 }
 
 function routeForFolderOwners(
@@ -120,7 +147,7 @@ function routeForFolderOwners(
     hostId = logicalHost.id
   }
   if (!hostId) {
-    return { kind: 'missing', ownerHostId: logicalHost?.id ?? null }
+    return { kind: 'non-ssh', ownerHostId: logicalHost?.id ?? null }
   }
   const host = parseExecutionHostId(hostId)
   if (host?.kind !== 'ssh') {

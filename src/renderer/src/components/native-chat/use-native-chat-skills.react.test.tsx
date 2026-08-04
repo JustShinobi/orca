@@ -282,6 +282,25 @@ describe('useNativeChatSkills', () => {
     )
   })
 
+  it('issues no RPC while a restored runtime folder catalog is missing', async () => {
+    const worktreeId = 'folder:folder-1'
+    mocks.state = {
+      ...stateForHost('runtime:hub-a'),
+      activeWorktreeId: worktreeId,
+      folderWorkspaces: [],
+      projectGroups: [],
+      restoredRuntimeHostIdByWorkspaceSessionKey: { [worktreeId]: 'runtime:hub-a' },
+      tabsByWorktree: {
+        [worktreeId]: [{ id: 'tab-1', startupCwd: '/possibly-remote/folder' }]
+      },
+      worktreesByRepo: {}
+    }
+
+    render(<Probe enabled />)
+    await waitFor(() => expect(mocks.snapshots.at(-1)?.status).toBe('idle'))
+    expect(mocks.callRuntimeRpc).not.toHaveBeenCalled()
+  })
+
   it('issues no RPC for an ambiguous direct and paired SSH pane', async () => {
     mocks.state = {
       ...stateForHost('ssh:shared-target'),
