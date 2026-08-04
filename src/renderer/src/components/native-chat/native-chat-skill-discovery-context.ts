@@ -1,20 +1,15 @@
 import type { AppState } from '../../store/types'
 import type { PaneSkillDiscoveryTarget, SkillDiscoveryTarget } from '../../../../shared/skills'
-import {
-  isRuntimeOwnedSshTargetId,
-  parseExecutionHostId,
-  toSshExecutionHostId,
-  type ExecutionHostId
-} from '../../../../shared/execution-host'
-import { getRepoIdFromWorktreeId } from '../../../../shared/worktree-id'
+import { isRuntimeOwnedSshTargetId, parseExecutionHostId } from '../../../../shared/execution-host'
 import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
-import { resolveExactWorktreeRoute } from '@/lib/worktree-owner-route'
 import {
   getExplicitRuntimeEnvironmentIdForWorktree,
   getExecutionHostIdForWorktree
 } from '@/lib/worktree-runtime-owner'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import { parseWorkspaceKey } from '../../../../shared/workspace-scope'
+import { resolveNativeChatFolderSshRoute } from './native-chat-folder-ssh-route'
+import { resolveNativeChatWorktreeSshTransport } from './native-chat-worktree-ssh-transport'
 
 export type NativeChatSkillStateInputs = Pick<
   AppState,
@@ -78,65 +73,6 @@ export function selectNativeChatSkillStateInputs(state: AppState): NativeChatSki
   }
 }
 
-type SshTransportResolution =
-  | { kind: 'resolved'; environmentId: string | null }
-  | { kind: 'ambiguous' }
-  | { kind: 'missing' }
-
-function resolveCatalogSshTransport(
-  state: NativeChatSkillStateInputs,
-  worktreeId: string,
-  hostId: ExecutionHostId
-): SshTransportResolution {
-  const scope = parseWorkspaceKey(worktreeId)
-  if (scope?.type === 'folder') {
-    return { kind: 'missing' }
-  }
-  const rawWorktreeId = scope?.type === 'worktree' ? scope.worktreeId : worktreeId
-  const repoIds = new Set([getRepoIdFromWorktreeId(rawWorktreeId)])
-  const environmentIds = new Set<string | null>()
-  const catalogs = [
-    ...Object.values(state.worktreesByRepo ?? {}),
-    ...Object.values(state.detectedWorktreesByRepo ?? {}).map((result) => result.worktrees)
-  ]
-  for (const worktrees of catalogs) {
-    for (const worktree of worktrees) {
-      if (worktree.id !== rawWorktreeId || parseExecutionHostId(worktree.hostId)?.id !== hostId) {
-        continue
-      }
-      repoIds.add(worktree.repoId)
-      const resolution = resolveExactWorktreeRoute(state, worktree)
-      if (resolution.kind === 'ambiguous') {
-        return resolution
-      }
-      if (resolution.kind === 'resolved' && resolution.route.executionHostId === hostId) {
-        environmentIds.add(resolution.route.runtimeEnvironmentId)
-      }
-    }
-  }
-  if (environmentIds.size === 0) {
-    for (const repo of state.repos) {
-      if (!repoIds.has(repo.id)) {
-        continue
-      }
-      const executionHost = parseExecutionHostId(repo.executionHostId)
-      const connectionId = repo.connectionId?.trim()
-      const connectionHostId = connectionId ? toSshExecutionHostId(connectionId) : null
-      if (connectionHostId !== hostId && executionHost?.id !== hostId) {
-        continue
-      }
-      environmentIds.add(executionHost?.kind === 'runtime' ? executionHost.environmentId : null)
-    }
-  }
-  if (environmentIds.size > 1) {
-    return { kind: 'ambiguous' }
-  }
-  const environmentId = environmentIds.values().next().value
-  return environmentIds.size === 1
-    ? { kind: 'resolved', environmentId: environmentId ?? null }
-    : { kind: 'missing' }
-}
-
 export function resolveNativeChatSkillDiscoveryCwd(
   state: NativeChatSkillWorktreeState,
   terminalTabId: string
@@ -170,12 +106,29 @@ export function resolveNativeChatSkillDiscoveryContext(
   }
   const hostId = getExecutionHostIdForWorktree(state, worktreeId)
   const parsedHost = parseExecutionHostId(hostId)
-  if (parsedHost?.kind === 'ssh') {
+  const workspaceScope = parseWorkspaceKey(worktreeId)
+  const folderSshRoute =
+    workspaceScope?.type === 'folder'
+      ? resolveNativeChatFolderSshRoute(state, workspaceScope.folderWorkspaceId)
+      : { kind: 'missing' as const }
+  if (folderSshRoute.kind === 'ambiguous') {
+    return null
+  }
+  const sshHost =
+    folderSshRoute.kind === 'resolved'
+      ? parseExecutionHostId(folderSshRoute.hostId)
+      : parsedHost?.kind === 'ssh'
+        ? parsedHost
+        : null
+  if (sshHost?.kind === 'ssh') {
     const explicitRuntimeEnvironmentId = getExplicitRuntimeEnvironmentIdForWorktree(
       state,
       worktreeId
     )
-    const catalogTransport = resolveCatalogSshTransport(state, worktreeId, parsedHost.id)
+    const catalogTransport =
+      folderSshRoute.kind === 'resolved'
+        ? { kind: 'resolved' as const, environmentId: folderSshRoute.environmentId }
+        : resolveNativeChatWorktreeSshTransport(state, worktreeId, sshHost.id)
     if (
       catalogTransport.kind === 'ambiguous' ||
       (explicitRuntimeEnvironmentId &&
@@ -189,14 +142,14 @@ export function resolveNativeChatSkillDiscoveryContext(
       (catalogTransport.kind === 'resolved' ? catalogTransport.environmentId : null)
     // Why: unresolved paired-runtime transport can collide with a local target
     // id; failing closed prevents the identity-only RPC reaching the wrong host.
-    if (!runtimeEnvironmentId && isRuntimeOwnedSshTargetId(parsedHost.targetId)) {
+    if (!runtimeEnvironmentId && isRuntimeOwnedSshTargetId(sshHost.targetId)) {
       return null
     }
     const connectionState = runtimeEnvironmentId
       ? state.sshStateByEnvironment
           .get(runtimeEnvironmentId)
-          ?.connectionStates.get(parsedHost.targetId)
-      : state.sshConnectionStates.get(parsedHost.targetId)
+          ?.connectionStates.get(sshHost.targetId)
+      : state.sshConnectionStates.get(sshHost.targetId)
     // Why: an unhydrated environment bucket is unknown, not disconnected — the
     // owning runtime answers authoritatively. A missing local entry is offline.
     const status = connectionState?.status ?? (runtimeEnvironmentId ? null : 'disconnected')
@@ -204,7 +157,7 @@ export function resolveNativeChatSkillDiscoveryContext(
       key: JSON.stringify([
         'ssh',
         runtimeEnvironmentId ?? null,
-        hostId,
+        sshHost.id,
         connectionState?.connectionGeneration ?? 0,
         worktreeId,
         terminalTabId
@@ -218,7 +171,6 @@ export function resolveNativeChatSkillDiscoveryContext(
     }
   }
 
-  const workspaceScope = parseWorkspaceKey(worktreeId)
   const cwd =
     resolveNativeChatSkillDiscoveryCwd(state, terminalTabId) ??
     (workspaceScope?.type === 'folder'

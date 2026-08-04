@@ -240,10 +240,60 @@ describe('useNativeChatSkills', () => {
     )
   })
 
+  it('routes a projected paired SSH folder through pane discovery', async () => {
+    const worktreeId = 'folder:folder-1'
+    mocks.state = {
+      ...stateForHost('runtime:hub-a'),
+      activeWorktreeId: worktreeId,
+      folderWorkspaces: [
+        {
+          id: 'folder-1',
+          projectGroupId: 'group-1',
+          folderPath: '/remote/folder',
+          executionHostId: 'runtime:hub-a'
+        }
+      ],
+      projectGroups: [
+        {
+          id: 'group-1',
+          connectionId: 'private-target',
+          executionHostId: 'runtime:hub-a'
+        }
+      ],
+      sshStateByEnvironment: new Map([
+        [
+          'hub-a',
+          { connectionStates: new Map([['private-target', sshConnectionState('private-target')]]) }
+        ]
+      ]),
+      tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+      worktreesByRepo: {}
+    }
+    mocks.callRuntimeRpc.mockResolvedValue({ status: 'ok', result: DISCOVERY_RESULT })
+
+    render(<Probe enabled />)
+    await waitFor(() => expect(mocks.snapshots.at(-1)?.status).toBe('ready'))
+
+    expect(mocks.callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'hub-a' },
+      'skills.discoverForPane',
+      { worktreeId, terminalTabId: 'tab-1' },
+      { timeoutMs: 10_000 }
+    )
+  })
+
   it('issues no RPC for an ambiguous direct and paired SSH pane', async () => {
     mocks.state = {
       ...stateForHost('ssh:shared-target'),
       activeWorkspaceExecutionHostId: 'ssh:shared-target',
+      repos: [
+        {
+          id: 'repo-1',
+          path: '/repo',
+          connectionId: 'shared-target',
+          executionHostId: 'runtime:hub-a'
+        }
+      ],
       sshConnectionStates: new Map([['shared-target', sshConnectionState('shared-target')]]),
       worktreesByRepo: {
         'repo-1': [

@@ -513,6 +513,163 @@ describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
     expect(context).toBeNull()
   })
 
+  it('fails closed before a direct repo row hydrates beside a paired repo fallback', () => {
+    const worktreeId = 'repo-1::/remote/repo'
+    const context = resolveNativeChatSkillDiscoveryContext(
+      selectedSshInputs({
+        activeWorkspaceExecutionHostId: 'ssh:shared-target',
+        activeWorktreeId: worktreeId,
+        repos: [
+          {
+            id: 'repo-1',
+            path: '/remote/repo',
+            connectionId: 'shared-target',
+            executionHostId: 'runtime:hub-a'
+          }
+        ],
+        tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+        worktreesByRepo: {
+          'repo-1': [
+            {
+              id: worktreeId,
+              repoId: 'repo-1',
+              path: '/remote/repo',
+              hostId: 'ssh:shared-target'
+            },
+            {
+              id: worktreeId,
+              repoId: 'repo-1',
+              path: '/remote/repo',
+              hostId: 'ssh:shared-target',
+              runtimeOwnerEnvironmentId: 'hub-a'
+            }
+          ]
+        }
+      }),
+      'tab-1'
+    )
+
+    expect(context).toBeNull()
+  })
+
+  it('resolves paired transport across equivalent Windows worktree ids', () => {
+    const paneWorktreeId = 'repo-1::C:\\remote\\repo'
+    const context = resolveNativeChatSkillDiscoveryContext(
+      selectedSshInputs({
+        activeWorkspaceExecutionHostId: 'ssh:private-target',
+        activeWorktreeId: paneWorktreeId,
+        repos: [],
+        sshConnectionStates: new Map([
+          ['private-target', connectionState({ targetId: 'private-target' })]
+        ]),
+        tabsByWorktree: { [paneWorktreeId]: [{ id: 'tab-1' }] },
+        worktreesByRepo: {
+          'repo-1': [
+            {
+              id: 'repo-1::c:/remote/repo',
+              repoId: 'repo-1',
+              path: 'c:/remote/repo',
+              hostId: 'ssh:private-target',
+              runtimeOwnerEnvironmentId: 'hub-a'
+            }
+          ]
+        }
+      }),
+      'tab-1'
+    )
+
+    expect(context?.executionHostKind).toBe('ssh')
+    if (context?.executionHostKind !== 'ssh') {
+      throw new Error('expected ssh context')
+    }
+    expect(context.runtimeTarget).toEqual({ kind: 'environment', environmentId: 'hub-a' })
+  })
+
+  it('uses pane discovery for an SSH folder projected through a runtime', () => {
+    const worktreeId = 'folder:folder-1'
+    const context = resolveNativeChatSkillDiscoveryContext(
+      selectedSshInputs({
+        activeWorkspaceExecutionHostId: 'runtime:hub-a',
+        activeWorktreeId: worktreeId,
+        folderWorkspaces: [
+          {
+            id: 'folder-1',
+            projectGroupId: 'group-1',
+            folderPath: '/remote/folder',
+            executionHostId: 'runtime:hub-a'
+          }
+        ],
+        projectGroups: [
+          {
+            id: 'group-1',
+            connectionId: 'private-target',
+            executionHostId: 'runtime:hub-a'
+          }
+        ],
+        repos: [],
+        sshStateByEnvironment: new Map([
+          [
+            'hub-a',
+            {
+              connectionStates: new Map([
+                ['private-target', connectionState({ targetId: 'private-target' })]
+              ])
+            }
+          ]
+        ]),
+        tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+        worktreesByRepo: {}
+      }),
+      'tab-1'
+    )
+
+    expect(context?.executionHostKind).toBe('ssh')
+    if (context?.executionHostKind !== 'ssh') {
+      throw new Error('expected ssh context')
+    }
+    expect(context.runtimeTarget).toEqual({ kind: 'environment', environmentId: 'hub-a' })
+    expect(context.paneTarget).toEqual({ worktreeId, terminalTabId: 'tab-1' })
+  })
+
+  it('isolates a paired SSH folder from a duplicate local folder id', () => {
+    const worktreeId = 'folder:folder-1'
+    const context = resolveNativeChatSkillDiscoveryContext(
+      selectedSshInputs({
+        activeWorkspaceExecutionHostId: 'runtime:hub-a',
+        activeWorktreeId: worktreeId,
+        folderWorkspaces: [
+          {
+            id: 'folder-1',
+            projectGroupId: 'local-group',
+            folderPath: '/local/folder',
+            executionHostId: 'local'
+          },
+          {
+            id: 'folder-1',
+            projectGroupId: 'remote-group',
+            folderPath: '/remote/folder',
+            executionHostId: 'runtime:hub-a'
+          }
+        ],
+        projectGroups: [
+          { id: 'local-group', executionHostId: 'local' },
+          {
+            id: 'remote-group',
+            connectionId: 'private-target',
+            executionHostId: 'runtime:hub-a'
+          }
+        ],
+        repos: [],
+        tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+        worktreesByRepo: {}
+      }),
+      'tab-1'
+    )
+
+    expect(context?.executionHostKind).toBe('ssh')
+    expect(context?.runtimeTarget).toEqual({ kind: 'environment', environmentId: 'hub-a' })
+  })
+
   it('keeps the same remote path on two SSH hosts cache-isolated', () => {
     const onTargetTwo = resolveNativeChatSkillDiscoveryContext(
       sshInputs({
