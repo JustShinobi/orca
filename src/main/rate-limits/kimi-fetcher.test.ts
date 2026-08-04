@@ -1,28 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const netFetchMock = vi.hoisted(() => vi.fn())
-const fsState = vi.hoisted<{ credentials: string | null; readError: Error | null }>(() => ({
+const fsState = vi.hoisted<{
+  credentials: string | null
+  readError: Error | null
+  readPaths: string[]
+}>(() => ({
   credentials: null,
-  readError: null
+  readError: null,
+  readPaths: []
 }))
 
 vi.mock('electron', () => ({
   net: { fetch: netFetchMock }
 }))
 
-vi.mock('node:fs', () => ({
-  existsSync: () => fsState.credentials !== null,
-  readFileSync: () => {
+vi.mock('node:fs/promises', () => ({
+  readFile: async (path: string) => {
+    fsState.readPaths.push(String(path))
     if (fsState.readError) {
       throw fsState.readError
     }
     if (fsState.credentials === null) {
-      throw new Error('ENOENT')
+      const error = new Error('ENOENT: no such file or directory') as NodeJS.ErrnoException
+      error.code = 'ENOENT'
+      throw error
     }
     return fsState.credentials
-  },
-  writeFileSync: () => {},
-  renameSync: () => {}
+  }
 }))
 
 vi.mock('node:os', () => ({ homedir: () => '/home/test' }))
@@ -60,6 +65,7 @@ describe('fetchKimiRateLimits', () => {
     netFetchMock.mockReset()
     fsState.credentials = null
     fsState.readError = null
+    fsState.readPaths = []
   })
 
   afterEach(() => {
@@ -146,5 +152,36 @@ describe('fetchKimiRateLimits', () => {
       source: 'oauth'
     })
     expect(netFetchMock).not.toHaveBeenCalled()
+  })
+
+  it('reads the host ~/.kimi-code credentials by default', async () => {
+    fsState.credentials = freshCredentials()
+    netFetchMock.mockResolvedValueOnce(jsonResponse(USAGE_RESPONSE))
+
+    const result = await fetchKimiRateLimits()
+
+    expect(result.status).toBe('ok')
+    expect(fsState.readPaths).toEqual(['/home/test/.kimi-code/credentials/kimi-code.json'])
+  })
+
+  it('honors KIMI_CODE_HOME for the host home', async () => {
+    vi.stubEnv('KIMI_CODE_HOME', '/custom/kimi-home')
+    fsState.credentials = freshCredentials()
+    netFetchMock.mockResolvedValueOnce(jsonResponse(USAGE_RESPONSE))
+
+    const result = await fetchKimiRateLimits()
+
+    expect(result.status).toBe('ok')
+    expect(fsState.readPaths).toEqual(['/custom/kimi-home/credentials/kimi-code.json'])
+  })
+
+  it('ignores a blank KIMI_CODE_HOME instead of reading from the process cwd', async () => {
+    vi.stubEnv('KIMI_CODE_HOME', '   ')
+    fsState.credentials = freshCredentials()
+    netFetchMock.mockResolvedValueOnce(jsonResponse(USAGE_RESPONSE))
+
+    await fetchKimiRateLimits()
+
+    expect(fsState.readPaths).toEqual(['/home/test/.kimi-code/credentials/kimi-code.json'])
   })
 })

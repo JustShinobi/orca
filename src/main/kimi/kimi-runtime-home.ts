@@ -6,7 +6,7 @@ import {
   type LocalAccountRuntimeTarget
 } from '../../shared/local-account-runtime'
 import type { GlobalSettings } from '../../shared/types'
-import { getDefaultWslDistro, getWslHome } from '../wsl'
+import { getWslHomeAsync, listWslDistrosAsync } from '../wsl'
 
 export type KimiHomeResolution = LocalAccountRuntimeTarget & {
   /** null when the WSL distro's home could not be probed (distro missing/stopped). */
@@ -34,21 +34,30 @@ export function getKimiRuntimeTarget(
   return resolveLocalAccountRuntimeTarget(settings, platform)
 }
 
-/** Resolve a runtime target to the Kimi home Orca should read (UNC path for WSL). */
-export function resolveKimiHome(
+/**
+ * Resolve a runtime target to the Kimi home Orca should read (UNC path for WSL).
+ * Async because it runs on every quota poll: the sync `wsl.exe` probes park
+ * Electron's main process for up to 5s each cycle while a distro is stopped.
+ */
+export async function resolveKimiHome(
   target: LocalAccountRuntimeTarget,
   platform: NodeJS.Platform = process.platform
-): KimiHomeResolution {
+): Promise<KimiHomeResolution> {
   if (target.runtime !== 'wsl' || platform !== 'win32') {
     return { runtime: 'host', wslDistro: null, path: getHostKimiHome() }
   }
-  const distro = target.wslDistro?.trim() || getDefaultWslDistro()
+  const distro = target.wslDistro?.trim() || (await defaultWslDistro())
   if (!distro) {
     return { runtime: 'wsl', wslDistro: null, path: null }
   }
-  const home = getWslHome(distro)
+  const home = await getWslHomeAsync(distro)
   // KIMI_CODE_HOME describes the Windows host process, never the distro's home.
   return { runtime: 'wsl', wslDistro: distro, path: home ? joinKimiHome(home) : null }
+}
+
+/** Async twin of `getDefaultWslDistro`, which shells out to wsl.exe synchronously. */
+async function defaultWslDistro(): Promise<string | null> {
+  return (await listWslDistrosAsync())[0] ?? null
 }
 
 function joinKimiHome(home: string): string {

@@ -2,14 +2,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const netFetchMock = vi.hoisted(() => vi.fn())
 const files = vi.hoisted(() => new Map<string, string>())
+const STALLED = vi.hoisted(() => '__stalled_unc_read__')
 
 vi.mock('electron', () => ({ net: { fetch: netFetchMock } }))
-vi.mock('node:fs', () => ({
-  existsSync: (path: string) => files.has(path),
-  readFileSync: (path: string) => {
+vi.mock('node:fs/promises', () => ({
+  readFile: async (path: string) => {
     const contents = files.get(path)
     if (contents === undefined) {
-      throw new Error(`ENOENT: ${path}`)
+      const error = new Error(`ENOENT: ${path}`) as NodeJS.ErrnoException
+      error.code = 'ENOENT'
+      throw error
+    }
+    if (contents === STALLED) {
+      // A distro that is down parks the UNC read instead of failing.
+      return await new Promise<string>(() => {})
     }
     return contents
   }
@@ -107,5 +113,28 @@ describe('fetchKimiRateLimits with a WSL credentials home', () => {
     })
 
     expect(result.status).toBe('unavailable')
+  })
+
+  // Last: an unsettled UNC read stays shared for its path by design, so the stalled
+  // distro gets its own home to avoid poisoning the other cases.
+  it('bounds a stalled UNC read instead of parking the poll cycle', async () => {
+    const stalledHome = '\\\\wsl.localhost\\Stopped\\home\\neil\\.kimi-code'
+    files.set(`${stalledHome}\\credentials\\kimi-code.json`, STALLED)
+    const timeoutController = new AbortController()
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal)
+
+    const pending = fetchKimiRateLimits({
+      home: { runtime: 'wsl', wslDistro: 'Stopped', path: stalledHome }
+    })
+    expect(timeout).toHaveBeenCalledWith(5_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    timeoutController.abort()
+
+    const result = await pending
+    expect(result.status).toBe('error')
+    expect(result.error).toContain('(WSL Stopped)')
+    expect(netFetchMock).not.toHaveBeenCalled()
+    timeout.mockRestore()
   })
 })

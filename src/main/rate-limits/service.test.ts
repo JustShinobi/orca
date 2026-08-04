@@ -1439,7 +1439,7 @@ describe('RateLimitService', () => {
       wslDistro: 'Ubuntu',
       path: '\\\\wsl.localhost\\Ubuntu\\home\\neil\\.kimi-code'
     }
-    const resolver = vi.fn(() => home)
+    const resolver = vi.fn(async () => home)
     service.setKimiHomeResolver(resolver)
     mockFreshBackgroundProviderFetches()
     vi.mocked(fetchClaudeRateLimits).mockResolvedValue(okProvider('claude', 10))

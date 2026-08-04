@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { join, win32 as pathWin32 } from 'node:path'
 import { net } from 'electron'
 import type {
@@ -8,6 +8,10 @@ import type {
 } from '../../shared/rate-limit-types'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import { getHostKimiHome, type KimiHomeResolution } from '../kimi/kimi-runtime-home'
+import {
+  createAuthFilesystemOperation,
+  type SharedAuthFilesystemOperation
+} from './auth-filesystem-operation'
 
 // Why: Kimi Code's managed coding plan exposes subscription usage at
 // `${base}/usages` (see packages/oauth/src/managed-usage.ts in the CLI bundle).
@@ -15,6 +19,7 @@ import { getHostKimiHome, type KimiHomeResolution } from '../kimi/kimi-runtime-h
 // stays aligned with a user's self-hosted/staging config.
 const KIMI_BASE_URL = process.env.KIMI_CODE_BASE_URL ?? 'https://api.kimi.com/coding/v1'
 const API_TIMEOUT_MS = 10_000
+const CREDENTIALS_READ_TIMEOUT_MS = 5_000
 
 const SESSION_WINDOW_MINUTES = 300 // 5h
 const WEEKLY_WINDOW_MINUTES = 10080 // 7d
@@ -50,22 +55,65 @@ function parseCredentials(value: unknown): KimiCredentials | null {
   return credentials
 }
 
-function readCredentials(kimiHome: string): CredentialsReadResult {
-  const path = getCredentialsPath(kimiHome)
-  if (!existsSync(path)) {
-    return { status: 'missing' }
+const credentialsReadByPath = new Map<
+  string,
+  SharedAuthFilesystemOperation<CredentialsReadResult>
+>()
+
+function isMissingPathError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
+function readErrorMessage(err: unknown): string {
+  // Why: AbortSignal timeouts reject with a DOMException, not an Error.
+  const message = (err as { message?: unknown } | null)?.message
+  return typeof message === 'string' ? message : 'Unable to read Kimi credentials'
+}
+
+function getCredentialsRead(path: string): SharedAuthFilesystemOperation<CredentialsReadResult> {
+  const existing = credentialsReadByPath.get(path)
+  if (existing) {
+    return existing
   }
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'))
-    const credentials = parseCredentials(parsed)
-    return credentials
-      ? { status: 'ok', credentials }
-      : { status: 'error', error: 'Kimi credentials file is invalid' }
-  } catch (err) {
-    return {
-      status: 'error',
-      error: err instanceof Error ? err.message : 'Unable to read Kimi credentials'
+  // Why: aborting an fs promise does not cancel an already issued UNC request, so
+  // share one raw read per path until it settles (mirrors codex-fetcher's auth read).
+  const read = createAuthFilesystemOperation(path, async (): Promise<CredentialsReadResult> => {
+    let raw: string
+    try {
+      raw = await readFile(path, 'utf-8')
+    } catch (err) {
+      return isMissingPathError(err)
+        ? { status: 'missing' }
+        : { status: 'error', error: readErrorMessage(err) }
     }
+    try {
+      const credentials = parseCredentials(JSON.parse(raw))
+      return credentials
+        ? { status: 'ok', credentials }
+        : { status: 'error', error: 'Kimi credentials file is invalid' }
+    } catch (err) {
+      return { status: 'error', error: readErrorMessage(err) }
+    }
+  })
+  credentialsReadByPath.set(path, read)
+  const clearRead = (): void => {
+    if (credentialsReadByPath.get(path) === read) {
+      credentialsReadByPath.delete(path)
+    }
+  }
+  void read.result.then(clearRead, clearRead)
+  return read
+}
+
+async function readCredentials(kimiHome: string): Promise<CredentialsReadResult> {
+  const path = getCredentialsPath(kimiHome)
+  try {
+    // Why: a stopped distro parks a UNC read for minutes; bound it so a WSL home
+    // degrades to an error instead of stalling the poll cycle.
+    return await getCredentialsRead(path).wait(AbortSignal.timeout(CREDENTIALS_READ_TIMEOUT_MS))
+  } catch (err) {
+    return { status: 'error', error: readErrorMessage(err) }
   }
 }
 
@@ -210,6 +258,11 @@ function mapUsageResponse(data: KimiUsageResponse): ProviderRateLimits {
   }
 }
 
+// A bare "operation was aborted due to timeout" hides which machine stalled.
+function readErrorContext(home: KimiHomeResolution, error: string): string {
+  return home.runtime === 'wsl' ? `${error} (WSL ${home.wslDistro ?? 'default distro'})` : error
+}
+
 function expiredSessionMessage(home: KimiHomeResolution): string {
   const where =
     home.runtime === 'wsl'
@@ -260,12 +313,12 @@ export async function fetchKimiRateLimits(options?: {
   if (home.path === null) {
     return result('error', `WSL Kimi home unavailable for ${home.wslDistro ?? 'default distro'}`)
   }
-  const readResult = readCredentials(home.path)
+  const readResult = await readCredentials(home.path)
   if (readResult.status === 'missing') {
     return result('unavailable', 'Not signed in to Kimi Code')
   }
   if (readResult.status === 'error') {
-    return result('error', readResult.error)
+    return result('error', readErrorContext(home, readResult.error))
   }
   const creds = readResult.credentials
   if (typeof creds.access_token !== 'string' || creds.access_token.length === 0) {
