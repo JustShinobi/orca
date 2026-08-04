@@ -5,6 +5,7 @@ import {
   toSshExecutionHostId,
   type ExecutionHostId
 } from '../../shared/execution-host'
+import { parseAppSshPtyId } from '../../shared/ssh-pty-id'
 import type {
   FolderWorkspace,
   ProjectGroup,
@@ -174,7 +175,7 @@ function findPaneSession(
   worktreeId: string,
   terminalTabId: string | undefined,
   authoritativeHostId?: ExecutionHostId | null
-): { hostId: ExecutionHostId; tab: { startupCwd?: string } } | null {
+): { hostId: ExecutionHostId; tab: { ptyId: string | null; startupCwd?: string } } | null {
   if (!terminalTabId) {
     return null
   }
@@ -183,7 +184,7 @@ function findPaneSession(
       worktreeIdsEqual(candidateWorktreeId, worktreeId)
         ? tabs
             .filter((tab) => tab.id === terminalTabId)
-            .map((tab) => ({ hostId, tab: { startupCwd: tab.startupCwd } }))
+            .map((tab) => ({ hostId, tab: { ptyId: tab.ptyId, startupCwd: tab.startupCwd } }))
         : []
     )
   )
@@ -200,7 +201,7 @@ function findPaneSession(
         (match) =>
           match === authoritativeMatch ||
           (match.hostId === LOCAL_EXECUTION_HOST_ID &&
-            paneSessionsMirror(match.tab, authoritativeMatch.tab))
+            paneSessionsMirror(match.tab, authoritativeMatch.tab, authoritativeMatch.hostId))
       )
     ) {
       return authoritativeMatch
@@ -211,13 +212,19 @@ function findPaneSession(
 }
 
 function paneSessionsMirror(
-  left: { startupCwd?: string },
-  right: { startupCwd?: string }
+  left: { ptyId: string | null; startupCwd?: string },
+  right: { ptyId: string | null; startupCwd?: string },
+  authoritativeHostId: ExecutionHostId
 ): boolean {
   const leftCwd = left.startupCwd?.trim() || null
   const rightCwd = right.startupCwd?.trim() || null
   if (!leftCwd || !rightCwd) {
-    return leftCwd === rightCwd
+    if (leftCwd === rightCwd) {
+      return true
+    }
+    const host = parseExecutionHostId(authoritativeHostId)
+    const pty = left.ptyId && left.ptyId === right.ptyId ? parseAppSshPtyId(left.ptyId) : null
+    return host?.kind === 'ssh' && pty?.connectionId === host.targetId
   }
   return normalizeRuntimePathForComparison(leftCwd) === normalizeRuntimePathForComparison(rightCwd)
 }

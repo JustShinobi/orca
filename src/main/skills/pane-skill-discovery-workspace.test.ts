@@ -38,10 +38,14 @@ function worktreeMeta(hostId: WorktreeMeta['hostId']): WorktreeMeta {
   }
 }
 
-function session(worktreeId: string, startupCwd?: string): WorkspaceSessionState {
+function session(
+  worktreeId: string,
+  startupCwd?: string,
+  ptyId: string | null = null
+): WorkspaceSessionState {
   return {
     tabsByWorktree: {
-      [worktreeId]: [{ id: 'tab-1', startupCwd }]
+      [worktreeId]: [{ id: 'tab-1', ptyId, startupCwd }]
     }
   } as WorkspaceSessionState
 }
@@ -81,6 +85,74 @@ describe('resolvePaneSkillDiscoveryWorkspace', () => {
         ]
       })
     ).toEqual({ connectionId: 'target-1', cwd: '/work/demo-project' })
+  })
+
+  it('accepts a legacy local SSH PTY mirror that omits its startup directory', () => {
+    const worktreeId = 'repo-1::/work/demo-project'
+    const ptyId = 'ssh:target-1@@pty-1'
+
+    expect(
+      resolvePaneSkillDiscoveryWorkspace({
+        worktreeId,
+        terminalTabId: 'tab-1',
+        repos: [repo({ path: '/work/demo-project' })],
+        projectGroups: [],
+        folderWorkspaces: [],
+        worktreeMeta: worktreeMeta('ssh:target-1'),
+        sessions: [
+          { hostId: 'local', session: session(worktreeId, undefined, ptyId) },
+          {
+            hostId: 'ssh:target-1',
+            session: session(worktreeId, '/work/demo-project', ptyId)
+          }
+        ]
+      })
+    ).toEqual({ connectionId: 'target-1', cwd: '/work/demo-project' })
+  })
+
+  it('rejects missing startup-directory mirrors with different PTY identities', () => {
+    const worktreeId = 'repo-1::/work/demo-project'
+
+    expect(() =>
+      resolvePaneSkillDiscoveryWorkspace({
+        worktreeId,
+        terminalTabId: 'tab-1',
+        repos: [repo({ path: '/work/demo-project' })],
+        projectGroups: [],
+        folderWorkspaces: [],
+        worktreeMeta: worktreeMeta('ssh:target-1'),
+        sessions: [
+          { hostId: 'local', session: session(worktreeId, undefined, 'ssh:target-1@@pty-1') },
+          {
+            hostId: 'ssh:target-1',
+            session: session(worktreeId, '/work/demo-project', 'ssh:target-1@@pty-2')
+          }
+        ]
+      })
+    ).toThrow('pane_skill_discovery_owner_ambiguous')
+  })
+
+  it('rejects a matching PTY identity from a different SSH target', () => {
+    const worktreeId = 'repo-1::/work/demo-project'
+    const ptyId = 'ssh:target-2@@pty-1'
+
+    expect(() =>
+      resolvePaneSkillDiscoveryWorkspace({
+        worktreeId,
+        terminalTabId: 'tab-1',
+        repos: [repo({ path: '/work/demo-project' })],
+        projectGroups: [],
+        folderWorkspaces: [],
+        worktreeMeta: worktreeMeta('ssh:target-1'),
+        sessions: [
+          { hostId: 'local', session: session(worktreeId, undefined, ptyId) },
+          {
+            hostId: 'ssh:target-1',
+            session: session(worktreeId, '/work/demo-project', ptyId)
+          }
+        ]
+      })
+    ).toThrow('pane_skill_discovery_owner_ambiguous')
   })
 
   it('accepts normalized Windows variants of a mirrored SSH startup directory', () => {
