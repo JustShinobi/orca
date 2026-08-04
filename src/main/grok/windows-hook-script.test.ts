@@ -28,6 +28,16 @@ describe('grok managed hook script (win32)', () => {
     expect(lines).toContain(':orca_grok_home_ready')
   })
 
+  // Why (#12326): `setlocal EnableDelayedExpansion` also silences the 255, but a
+  // `!` in any percent-expanded value on the curl line is then eaten as a
+  // delayed reference — it corrupts grokHome, paneKey and worktreeId alike.
+  it('does not enable delayed expansion', () => {
+    const lines = buildGrokWindowsHookScript().split('\r\n')
+
+    expect(lines).toContain('setlocal')
+    expect(lines.filter((line) => line.includes('!'))).toEqual([])
+  })
+
   it('posts an empty grokHome field rather than a literal token when unset', () => {
     const script = buildGrokWindowsHookScript()
     expect(script).toContain('set "ORCA_GROK_HOME=%GROK_HOME%"')
@@ -119,6 +129,12 @@ describe.skipIf(process.platform !== 'win32')('grok managed hook script (win32 b
     const result = await runHook(writeScript(), 'C:\\Users\\test\\.grok\\')
     expect(result.status).toBe(0)
     expect(result.grokHome).toBe('C:\\Users\\test\\.grok\\.')
+  })
+
+  it('preserves an exclamation mark in GROK_HOME', async () => {
+    const result = await runHook(writeScript(), 'C:\\Users\\test\\a!b!c')
+    expect(result.status).toBe(0)
+    expect(result.grokHome).toBe('C:\\Users\\test\\a!b!c')
   })
 
   it('drops a GROK_HOME past the envelope limit', async () => {
