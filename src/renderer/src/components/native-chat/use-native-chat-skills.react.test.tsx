@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NativeChatSkillDiscovery } from './use-native-chat-skills'
 
@@ -223,5 +223,29 @@ describe('useNativeChatSkills', () => {
       expect(mocks.callRuntimeRpc).toHaveBeenCalledTimes(10)
       expect(mocks.snapshots.at(-1)?.status).toBe('ready')
     })
+  })
+
+  it('does not cache a canceled reconnect generation', async () => {
+    const pending: ((value: { status: 'ok'; result: typeof DISCOVERY_RESULT }) => void)[] = []
+    mocks.state = connectedSshState(1)
+    mocks.callRuntimeRpc.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          pending.push(resolve)
+        })
+    )
+    const view = render(<Probe enabled />)
+    await waitFor(() => expect(mocks.callRuntimeRpc).toHaveBeenCalledTimes(1))
+
+    mocks.state = connectedSshState(2)
+    view.rerender(<Probe enabled />)
+    await waitFor(() => expect(mocks.callRuntimeRpc).toHaveBeenCalledTimes(2))
+    await act(async () => pending[1]({ status: 'ok', result: DISCOVERY_RESULT }))
+    await waitFor(() => expect(mocks.snapshots.at(-1)?.status).toBe('ready'))
+    await act(async () => pending[0]({ status: 'ok', result: DISCOVERY_RESULT }))
+
+    mocks.state = connectedSshState(1)
+    view.rerender(<Probe enabled />)
+    await waitFor(() => expect(mocks.callRuntimeRpc).toHaveBeenCalledTimes(3))
   })
 })

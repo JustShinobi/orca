@@ -48,14 +48,16 @@ export function resolvePaneSkillDiscoveryWorkspace(
     if (!workspace) {
       throw new Error('pane_skill_discovery_workspace_not_found')
     }
-    const group = args.projectGroups.find((candidate) => candidate.id === workspace.projectGroupId)
-    const executionHostId = parseOptionalHostId(workspace.executionHostId ?? group?.executionHostId)
-    const connectionId = parseOptionalConnectionId(workspace.connectionId ?? group?.connectionId)
-    const connectionHostId = connectionId ? toSshExecutionHostId(connectionId) : null
-    assertMatchingHost(executionHostId, connectionHostId)
+    const workspaceHostId = declaredHostId(workspace)
+    const group = selectFolderProjectGroup(
+      args.projectGroups.filter((candidate) => candidate.id === workspace.projectGroupId),
+      sessionOwner?.hostId ?? workspaceHostId
+    )
+    const groupHostId = group ? declaredHostId(group) : null
+    assertMatchingHost(workspaceHostId, groupHostId)
     const hostId =
-      executionHostId ??
-      connectionHostId ??
+      workspaceHostId ??
+      groupHostId ??
       inferLegacyFolderHostId(workspace, args.projectGroups, args.repos)
     assertMatchingHost(sessionOwner?.hostId, hostId)
     return sshWorkspace(hostId, sessionOwner?.tab.startupCwd?.trim() || workspace.folderPath)
@@ -133,6 +135,37 @@ function selectFolderWorkspace(
     throw new Error('pane_skill_discovery_owner_ambiguous')
   }
   return exact[0]
+}
+
+function selectFolderProjectGroup(
+  candidates: readonly ProjectGroup[],
+  hostId: ExecutionHostId | null | undefined
+): ProjectGroup | null {
+  if (candidates.length === 0) {
+    return null
+  }
+  if (candidates.length === 1) {
+    return candidates[0]
+  }
+  if (!hostId) {
+    throw new Error('pane_skill_discovery_owner_ambiguous')
+  }
+  const exact = candidates.filter((group) => declaredHostId(group) === hostId)
+  if (exact.length !== 1) {
+    throw new Error('pane_skill_discovery_owner_ambiguous')
+  }
+  return exact[0]
+}
+
+function declaredHostId(owner: {
+  executionHostId?: string | null
+  connectionId?: string | null
+}): ExecutionHostId | null {
+  const executionHostId = parseOptionalHostId(owner.executionHostId)
+  const connectionId = parseOptionalConnectionId(owner.connectionId)
+  const connectionHostId = connectionId ? toSshExecutionHostId(connectionId) : null
+  assertMatchingHost(executionHostId, connectionHostId)
+  return executionHostId ?? connectionHostId
 }
 
 function findPaneSession(

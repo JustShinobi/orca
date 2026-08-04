@@ -325,6 +325,23 @@ describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
     expect(context?.executionHostKind === 'ssh' && context.sshDisconnected).toBe(false)
   })
 
+  it('uses pane identity when the SSH worktree catalog has not hydrated a cwd', () => {
+    const worktreeId = 'repo-1::/repo/worktree'
+    const context = resolveNativeChatSkillDiscoveryContext(
+      sshInputs({
+        tabsByWorktree: { [worktreeId]: [{ id: 'tab-1' }] },
+        worktreesByRepo: {}
+      }),
+      'tab-1'
+    )
+
+    expect(context?.executionHostKind).toBe('ssh')
+    if (context?.executionHostKind !== 'ssh') {
+      throw new Error('expected ssh context')
+    }
+    expect(context.paneTarget).toEqual({ worktreeId, terminalTabId: 'tab-1' })
+  })
+
   it('keeps the same remote path on two SSH hosts cache-isolated', () => {
     const onTargetTwo = resolveNativeChatSkillDiscoveryContext(
       sshInputs({
@@ -341,7 +358,6 @@ describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
       'tab-1'
     )
     const onTargetOne = resolveNativeChatSkillDiscoveryContext(sshInputs(), 'tab-1')
-    expect(onTargetOne?.cwd).toBe(onTargetTwo?.cwd)
     expect(onTargetOne?.key).not.toBe(onTargetTwo?.key)
   })
 
@@ -358,7 +374,6 @@ describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
       }),
       'tab-2'
     )
-    expect(firstPane?.cwd).toBe(secondPane?.cwd)
     expect(firstPane?.key).not.toBe(secondPane?.key)
   })
 

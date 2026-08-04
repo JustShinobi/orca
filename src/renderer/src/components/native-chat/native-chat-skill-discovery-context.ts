@@ -42,7 +42,6 @@ export type NativeChatSkillDiscoveryContext =
     }
   | {
       key: string
-      cwd: string
       executionHostKind: 'ssh'
       runtimeTarget: RuntimeClientTarget
       /** Identity only; the owning runtime derives the scanned directory. */
@@ -99,18 +98,6 @@ export function resolveNativeChatSkillDiscoveryContext(
   if (!worktreeId) {
     return null
   }
-  const workspaceScope = parseWorkspaceKey(worktreeId)
-  const cwd =
-    resolveNativeChatSkillDiscoveryCwd(state, terminalTabId) ??
-    (workspaceScope?.type === 'folder'
-      ? state.folderWorkspaces.find(
-          (workspace) => workspace.id === workspaceScope.folderWorkspaceId
-        )?.folderPath
-      : null)
-  if (!cwd) {
-    return null
-  }
-
   const hostId = getExecutionHostIdForWorktree(state, worktreeId)
   const parsedHost = parseExecutionHostId(hostId)
   if (parsedHost?.kind === 'ssh') {
@@ -134,11 +121,9 @@ export function resolveNativeChatSkillDiscoveryContext(
         runtimeEnvironmentId ?? null,
         hostId,
         connectionState?.connectionGeneration ?? 0,
-        cwd,
         worktreeId,
         terminalTabId
       ]),
-      cwd,
       executionHostKind: 'ssh',
       runtimeTarget: runtimeEnvironmentId
         ? { kind: 'environment', environmentId: runtimeEnvironmentId }
@@ -146,6 +131,18 @@ export function resolveNativeChatSkillDiscoveryContext(
       paneTarget: { worktreeId, terminalTabId },
       sshDisconnected: status !== null && status !== 'connected'
     }
+  }
+
+  const workspaceScope = parseWorkspaceKey(worktreeId)
+  const cwd =
+    resolveNativeChatSkillDiscoveryCwd(state, terminalTabId) ??
+    (workspaceScope?.type === 'folder'
+      ? state.folderWorkspaces.find(
+          (workspace) => workspace.id === workspaceScope.folderWorkspaceId
+        )?.folderPath
+      : null)
+  if (!cwd) {
+    return null
   }
 
   const runtimeEnvironmentId = getExplicitRuntimeEnvironmentIdForWorktree(state, worktreeId)

@@ -146,10 +146,10 @@ export function useNativeChatSkills(
     const request = getOrStartDiscovery(context)
     void request.then(
       (result) => {
-        writePaneDiscoveryCache(paneDiscoveryCache.current, paneCacheKey, result)
         if (cancelled) {
           return
         }
+        writePaneDiscoveryCache(paneDiscoveryCache.current, paneCacheKey, result)
         emitNativeChatSkillDiscovery({
           agent,
           outcome: 'ready',

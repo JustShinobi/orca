@@ -147,4 +147,30 @@ describe('resolvePaneSkillDiscoveryWorkspace', () => {
       })
     ).toEqual({ connectionId: 'target-1', cwd: '/remote/folder' })
   })
+
+  it('isolates duplicate folder project groups using persisted workspace ownership', () => {
+    const workspace = {
+      id: 'folder-1',
+      projectGroupId: 'group-1',
+      folderPath: '/remote/folder',
+      connectionId: 'target-2'
+    } as FolderWorkspace
+    const group = (connectionId: string): ProjectGroup =>
+      ({
+        id: 'group-1',
+        connectionId,
+        executionHostId: `ssh:${connectionId}`,
+        parentPath: '/remote/folder'
+      }) as ProjectGroup
+
+    expect(
+      resolvePaneSkillDiscoveryWorkspace({
+        worktreeId: 'folder:folder-1',
+        repos: [],
+        projectGroups: [group('target-1'), group('target-2')],
+        folderWorkspaces: [workspace],
+        sessions: []
+      })
+    ).toEqual({ connectionId: 'target-2', cwd: '/remote/folder' })
+  })
 })
