@@ -531,13 +531,26 @@ test.describe('Terminal Shortcuts', () => {
     electronApp
   }) => {
     await installMainProcessPtyWriteSpy(electronApp)
-    await waitForActivePanePtyId(orcaPage)
+    const ptyId = await waitForActivePanePtyId(orcaPage)
 
     // Why: a plain shell never negotiates kitty, so CSI-u would print verbatim (#12329).
     await pressAndExpectWrite(orcaPage, electronApp, 'Control+Enter', '\r')
+    if (process.platform === 'win32') {
+      return
+    }
 
-    await enableKittyKeyboardReporting(orcaPage, 31)
+    // Why: the gate reads the PTY-output tracker, not xterm's renderer-local flags,
+    // so negotiation has to come from the application side like a real TUI's.
+    await execInTerminal(orcaPage, ptyId, "printf '\\033[>1u'")
+    await expect.poll(() => getKittyKeyboardFlags(orcaPage)).toBe(1)
     await pressAndExpectWrite(orcaPage, electronApp, 'Control+Enter', '\x1b[13;5u')
+
+    // Clear the shell's unconsumed CSI-u line before resetting flags in a settled
+    // command; otherwise its line editor can swallow the reset bytes.
+    await sendToTerminal(orcaPage, ptyId, '\x15\x03')
+    await execInTerminal(orcaPage, ptyId, "printf '\\033[=0u'")
+    await expect.poll(() => getKittyKeyboardFlags(orcaPage)).toBe(0)
+    await pressAndExpectWrite(orcaPage, electronApp, 'Control+Enter', '\r')
   })
 
   test('plain Ctrl+C sends ETX under kitty keyboard reporting', async ({
