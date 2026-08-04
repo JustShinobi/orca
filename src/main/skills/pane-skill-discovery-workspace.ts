@@ -38,9 +38,9 @@ export function resolvePaneSkillDiscoveryWorkspace(
 ): PaneSkillDiscoveryWorkspace {
   const scope = parseWorkspaceKey(args.worktreeId)
   const worktreeId = scope?.type === 'worktree' ? scope.worktreeId : args.worktreeId
-  const sessionOwner = findPaneSession(args.sessions, worktreeId, args.terminalTabId)
 
   if (scope?.type === 'folder') {
+    const sessionOwner = findPaneSession(args.sessions, worktreeId, args.terminalTabId)
     const workspace = selectFolderWorkspace(
       args.folderWorkspaces.filter((candidate) => candidate.id === scope.folderWorkspaceId),
       sessionOwner?.hostId
@@ -72,6 +72,7 @@ export function resolvePaneSkillDiscoveryWorkspace(
     throw new Error('pane_skill_discovery_workspace_not_found')
   }
   const metaHostId = parseOptionalHostId(args.worktreeMeta?.hostId)
+  const sessionOwner = findPaneSession(args.sessions, worktreeId, args.terminalTabId, metaHostId)
   assertMatchingHost(sessionOwner?.hostId, metaHostId)
   const knownHostId = sessionOwner?.hostId ?? metaHostId
   const repo = selectPaneRepo(candidates, knownHostId)
@@ -171,7 +172,8 @@ function declaredHostId(owner: {
 function findPaneSession(
   sessions: readonly HostSession[],
   worktreeId: string,
-  terminalTabId: string | undefined
+  terminalTabId: string | undefined,
+  authoritativeHostId?: ExecutionHostId | null
 ): { hostId: ExecutionHostId; tab: { startupCwd?: string } } | null {
   if (!terminalTabId) {
     return null
@@ -186,9 +188,33 @@ function findPaneSession(
     )
   )
   if (matches.length > 1) {
+    const authoritativeMatches = authoritativeHostId
+      ? matches.filter((match) => match.hostId === authoritativeHostId)
+      : []
+    const authoritativeMatch = authoritativeMatches.length === 1 ? authoritativeMatches[0] : null
+    // Why: save compatibility mirrors remote tabs locally; only matching local rows yield to persisted ownership.
+    if (
+      authoritativeHostId !== LOCAL_EXECUTION_HOST_ID &&
+      authoritativeMatch &&
+      matches.every(
+        (match) =>
+          match === authoritativeMatch ||
+          (match.hostId === LOCAL_EXECUTION_HOST_ID &&
+            paneSessionsMirror(match.tab, authoritativeMatch.tab))
+      )
+    ) {
+      return authoritativeMatch
+    }
     throw new Error('pane_skill_discovery_owner_ambiguous')
   }
   return matches[0] ?? null
+}
+
+function paneSessionsMirror(
+  left: { startupCwd?: string },
+  right: { startupCwd?: string }
+): boolean {
+  return (left.startupCwd?.trim() || null) === (right.startupCwd?.trim() || null)
 }
 
 function selectPaneRepo(candidates: readonly Repo[], hostId: ExecutionHostId | null): Repo {

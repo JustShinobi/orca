@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { FolderWorkspace, ProjectGroup, Repo, WorkspaceSessionState } from '../../shared/types'
+import type {
+  FolderWorkspace,
+  ProjectGroup,
+  Repo,
+  WorktreeMeta,
+  WorkspaceSessionState
+} from '../../shared/types'
 import { resolvePaneSkillDiscoveryWorkspace } from './pane-skill-discovery-workspace'
 
 const EMPTY_SESSION = { tabsByWorktree: {} } as WorkspaceSessionState
@@ -13,6 +19,22 @@ function repo(overrides: Partial<Repo> = {}): Repo {
     addedAt: 1,
     connectionId: 'target-1',
     ...overrides
+  }
+}
+
+function worktreeMeta(hostId: WorktreeMeta['hostId']): WorktreeMeta {
+  return {
+    hostId,
+    displayName: 'repo',
+    comment: '',
+    linkedIssue: null,
+    linkedPR: null,
+    linkedLinearIssue: null,
+    isArchived: false,
+    isUnread: false,
+    isPinned: false,
+    sortOrder: 0,
+    lastActivityAt: 1
   }
 }
 
@@ -40,6 +62,63 @@ describe('resolvePaneSkillDiscoveryWorkspace', () => {
         ]
       })
     ).toEqual({ connectionId: 'target-1', cwd: '/remote/repo/packages/app' })
+  })
+
+  it('accepts the legacy local mirror of an authoritative SSH pane session', () => {
+    const worktreeId = 'repo-1::/work/demo-project'
+
+    expect(
+      resolvePaneSkillDiscoveryWorkspace({
+        worktreeId,
+        terminalTabId: 'tab-1',
+        repos: [repo({ path: '/work/demo-project' })],
+        projectGroups: [],
+        folderWorkspaces: [],
+        worktreeMeta: worktreeMeta('ssh:target-1'),
+        sessions: [
+          { hostId: 'local', session: session(worktreeId, '/work/demo-project') },
+          { hostId: 'ssh:target-1', session: session(worktreeId, '/work/demo-project') }
+        ]
+      })
+    ).toEqual({ connectionId: 'target-1', cwd: '/work/demo-project' })
+  })
+
+  it('rejects duplicate pane sessions on distinct non-local hosts', () => {
+    const worktreeId = 'repo-1::/remote/repo'
+
+    expect(() =>
+      resolvePaneSkillDiscoveryWorkspace({
+        worktreeId,
+        terminalTabId: 'tab-1',
+        repos: [repo()],
+        projectGroups: [],
+        folderWorkspaces: [],
+        worktreeMeta: worktreeMeta('ssh:target-1'),
+        sessions: [
+          { hostId: 'ssh:target-1', session: session(worktreeId) },
+          { hostId: 'ssh:target-2', session: session(worktreeId) }
+        ]
+      })
+    ).toThrow('pane_skill_discovery_owner_ambiguous')
+  })
+
+  it('rejects a legacy local pane that does not mirror the SSH startup directory', () => {
+    const worktreeId = 'repo-1::/remote/repo'
+
+    expect(() =>
+      resolvePaneSkillDiscoveryWorkspace({
+        worktreeId,
+        terminalTabId: 'tab-1',
+        repos: [repo()],
+        projectGroups: [],
+        folderWorkspaces: [],
+        worktreeMeta: worktreeMeta('ssh:target-1'),
+        sessions: [
+          { hostId: 'local', session: session(worktreeId, '/local/repo') },
+          { hostId: 'ssh:target-1', session: session(worktreeId, '/remote/repo') }
+        ]
+      })
+    ).toThrow('pane_skill_discovery_owner_ambiguous')
   })
 
   it('routes an executionHostId-only SSH repo instead of falling back locally', () => {
