@@ -1,3 +1,5 @@
+import { ORCHESTRATION_WORKER_START_DEFAULT_TIMEOUT_MS } from '../../shared/orchestration-worker-start-timeout'
+
 export function isWaitingCheck(params: unknown): boolean {
   return (
     typeof params === 'object' &&
@@ -14,17 +16,11 @@ export function getTimeoutMsParam(params: unknown): unknown {
   return (params as { timeoutMs?: unknown }).timeoutMs
 }
 
-// Why: handlers that block on an external event past the 30 s socket idle cap.
-// When the caller omits timeoutMs, some still need a widened deadline — keyed by
-// their server-side default wait. orchestration.workerStart waits up to 60 s for
-// the spawned agent to reach tui-idle before responding.
 const LONG_POLL_DEFAULT_TIMEOUT_MS: Record<string, number> = {
-  'orchestration.workerStart': 60_000
+  'orchestration.workerStart': ORCHESTRATION_WORKER_START_DEFAULT_TIMEOUT_MS
 }
 
-// Why: returns the inner waiter budget the client socket deadline must outlive, or
-// 0 when the method is not a long-poll. terminal.wait / check --wait require an
-// explicit timeoutMs to widen (no implicit default); workerStart defaults to 60 s.
+// Why: the client socket must outlive the authoritative server-side waiter budget.
 export function resolveLongPollInnerBudgetMs(method: string, params: unknown): number {
   const isLongPoll =
     method === 'terminal.wait' ||

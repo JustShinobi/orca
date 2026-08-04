@@ -1,4 +1,5 @@
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
+import { ORCHESTRATION_WORKER_START_DEFAULT_TIMEOUT_MS } from '../../../../shared/orchestration-worker-start-timeout'
 import type { TuiAgent } from '../../../../shared/types'
 import { buildDispatchPreamble } from '../../orchestration/preamble'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
@@ -25,7 +26,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'orchestration.workerStart',
     params: WorkerStartParams,
-    handler: async (params, { runtime, orchestrationMutation }) => {
+    handler: async (params, { runtime, orchestrationMutation, signal }) => {
       const db = runtime.getOrchestrationDb()
       const coordinatorPane = runtime.getTerminalPaneKey(params.from)
       const run = coordinatorPane ? db.getCurrentRunForPane(coordinatorPane) : undefined
@@ -130,7 +131,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         baseBranch: params.baseBranch ?? null,
         terminal: params.terminal ?? null,
         agent: agent ?? null,
-        timeoutMs: params.timeoutMs ?? 60_000,
+        timeoutMs: params.timeoutMs ?? ORCHESTRATION_WORKER_START_DEFAULT_TIMEOUT_MS,
         setup: createsWorktree ? (params.setup ?? 'run') : 'not_applicable',
         setupSource: createsWorktree
           ? params.setup
@@ -223,7 +224,8 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         failedStage = 'agent_readiness'
         const wait = await runtime.waitForTerminal(terminalHandle, {
           condition: 'tui-idle',
-          timeoutMs: params.timeoutMs ?? 60_000
+          timeoutMs: params.timeoutMs ?? ORCHESTRATION_WORKER_START_DEFAULT_TIMEOUT_MS,
+          signal
         })
         persistWorkerSetupWaitOutcome({ ...setupStage, wait })
         if (!wait.satisfied) {
@@ -281,7 +283,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
           state: worker.state,
           stage: worker.stage,
           setup: setupReceipt,
-          timeoutMs: params.timeoutMs ?? 60_000,
+          timeoutMs: params.timeoutMs ?? ORCHESTRATION_WORKER_START_DEFAULT_TIMEOUT_MS,
           effects,
           residualResources: [],
           ...(terminalRevealWarning ? { warning: terminalRevealWarning } : {})

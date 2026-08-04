@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ORCHESTRATION_WORKER_START_DEFAULT_TIMEOUT_MS } from '../../shared/orchestration-worker-start-timeout'
 import { resolveLongPollInnerBudgetMs } from './runtime-request-timeout'
 
 describe('resolveLongPollInnerBudgetMs', () => {
@@ -24,10 +25,12 @@ describe('resolveLongPollInnerBudgetMs', () => {
     )
   })
 
-  // Why: workerStart blocks server-side for up to the server default (60 s) even
-  // when the caller omits --timeout-ms, so the client deadline must still widen.
   it('falls back to the workerStart 60 s default when timeoutMs is omitted', () => {
-    expect(resolveLongPollInnerBudgetMs('orchestration.workerStart', {})).toBe(60_000)
-    expect(resolveLongPollInnerBudgetMs('orchestration.workerStart', undefined)).toBe(60_000)
+    expect(resolveLongPollInnerBudgetMs('orchestration.workerStart', {})).toBe(
+      ORCHESTRATION_WORKER_START_DEFAULT_TIMEOUT_MS
+    )
+    expect(resolveLongPollInnerBudgetMs('orchestration.workerStart', undefined)).toBe(
+      ORCHESTRATION_WORKER_START_DEFAULT_TIMEOUT_MS
+    )
   })
 })

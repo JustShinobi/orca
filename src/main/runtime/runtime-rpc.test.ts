@@ -4978,7 +4978,9 @@ describe('OrcaRuntimeRpcServer', () => {
       // hold it 300ms so the 50ms keepalive emits several frames before it
       // resolves. Without workerStart classified as a long-poll, the 30s socket
       // idle timer tears the connection down before any frame fires.
-      vi.spyOn(runtime, 'waitForTerminal').mockImplementation(async () => {
+      let waitSignal: AbortSignal | undefined
+      vi.spyOn(runtime, 'waitForTerminal').mockImplementation(async (_handle, options) => {
+        waitSignal = options?.signal
         await sleep(300)
         return {
           handle: 'term_worker',
@@ -5027,6 +5029,7 @@ describe('OrcaRuntimeRpcServer', () => {
         expect(terminals).toHaveLength(1)
         expect(terminals[0]).toMatchObject({ id: 'req_worker_start', ok: true })
         expect(keepalives.length).toBeGreaterThanOrEqual(3)
+        expect(waitSignal).toBeInstanceOf(AbortSignal)
       } finally {
         db.close()
         await server.stop()
