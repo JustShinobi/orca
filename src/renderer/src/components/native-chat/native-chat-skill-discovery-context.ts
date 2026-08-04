@@ -134,7 +134,9 @@ export function resolveNativeChatSkillDiscoveryContext(
         runtimeEnvironmentId ?? null,
         hostId,
         connectionState?.connectionGeneration ?? 0,
-        cwd
+        cwd,
+        worktreeId,
+        terminalTabId
       ]),
       cwd,
       executionHostKind: 'ssh',
@@ -178,6 +180,28 @@ export function resolveNativeChatSkillDiscoveryContext(
     // owned panes resolve host semantics on the runtime, never here).
     discoveryTarget: { cwd, worktreeId, ...(projectRuntime ? { projectRuntime } : {}) }
   }
+}
+
+export function resolveNativeChatSkillDiscoverySubscriptionKey(
+  state: AppState,
+  terminalTabId: string
+): string | null {
+  const context = resolveNativeChatSkillDiscoveryContext(
+    selectNativeChatSkillStateInputs(state),
+    terminalTabId
+  )
+  return getNativeChatSkillDiscoverySubscriptionKey(context)
+}
+
+export function getNativeChatSkillDiscoverySubscriptionKey(
+  context: NativeChatSkillDiscoveryContext | null
+): string | null {
+  if (!context) {
+    return null
+  }
+  return context.executionHostKind === 'ssh'
+    ? JSON.stringify([context.key, context.sshDisconnected])
+    : context.key
 }
 
 function findTerminalTab(

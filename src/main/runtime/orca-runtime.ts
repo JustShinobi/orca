@@ -660,6 +660,7 @@ import { resolveLocalProjectRuntimeForWorktreeId } from '../local-project-runtim
 import type { ProjectExecutionRuntimeResolution } from '../../shared/project-execution-runtime'
 import type { SkillDiscoveryForPaneResponse } from '../../shared/skills'
 import { discoverPaneSkills } from '../skills/pane-skill-discovery'
+import { resolvePaneSkillDiscoveryWorkspace } from '../skills/pane-skill-discovery-workspace'
 import { resolveTerminalOrchestrationCliCommand } from './orchestration/cli-command'
 import {
   getLocalWorktreePathAccess,
@@ -11906,26 +11907,26 @@ export class OrcaRuntimeService {
     args: { worktreeId: string; terminalTabId?: string },
     signal?: AbortSignal
   ): Promise<SkillDiscoveryForPaneResponse> {
-    const target = await this.resolveRuntimeFileTarget(args.worktreeId)
-    const session = this.getWorkspaceSessionForWorktree(args.worktreeId)
-    const sessionWorktreeId = session
-      ? resolveTerminalSessionWorktreeId(session, args.worktreeId)
-      : null
-    const tab =
-      args.terminalTabId && session && sessionWorktreeId
-        ? session.tabsByWorktree[sessionWorktreeId]?.find(
-            (candidate) => candidate.id === args.terminalTabId
-          )
-        : undefined
+    const store = this.requireStore()
+    const scope = parseWorkspaceKey(args.worktreeId)
+    const metadataWorktreeId = scope?.type === 'worktree' ? scope.worktreeId : args.worktreeId
+    const workspace = resolvePaneSkillDiscoveryWorkspace({
+      worktreeId: args.worktreeId,
+      terminalTabId: args.terminalTabId,
+      repos: store.getRepos(),
+      projectGroups: store.getProjectGroups?.() ?? [],
+      folderWorkspaces: store.getFolderWorkspaces?.() ?? [],
+      worktreeMeta:
+        scope?.type === 'folder' ? undefined : store.getWorktreeMeta(metadataWorktreeId),
+      sessions: (store.getWorkspaceSessionHostIds?.() ?? [LOCAL_EXECUTION_HOST_ID]).map(
+        (hostId) => ({ hostId, session: store.getWorkspaceSession(hostId) })
+      )
+    })
     return discoverPaneSkills({
       worktreeId: args.worktreeId,
-      // A missing/unpersisted tab still scans a runtime-owned path: the workspace root.
-      cwd: tab?.startupCwd?.trim() || target.worktree.path,
-      connectionId: target.connectionId,
-      projectRuntime: target.connectionId
-        ? undefined
-        : this.resolveProjectRuntimeForWorktree(args.worktreeId),
-      repos: this.listRepos(),
+      cwd: workspace.cwd,
+      connectionId: workspace.connectionId,
+      repos: [],
       signal
     })
   }

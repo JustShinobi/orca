@@ -4,10 +4,11 @@ import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { summarizeSkillMarkdown } from '../../shared/skill-metadata'
 import type { Repo } from '../../shared/types'
-import type {
-  DiscoveredSkill,
-  SkillDiscoveryResult,
-  SkillDiscoverySource
+import {
+  SKILL_DISCOVERY_LIMITS,
+  type DiscoveredSkill,
+  type SkillDiscoveryResult,
+  type SkillDiscoverySource
 } from '../../shared/skills'
 import {
   buildSkillDiscoverySources,
@@ -18,6 +19,7 @@ import {
   type SkillScanRoot
 } from './skill-discovery-sources'
 import { discoverClaudePluginSkillSources } from './claude-plugin-skill-sources'
+import { runSkillCandidateTasks } from './skill-candidate-concurrency'
 
 export { buildSkillDiscoverySources } from './skill-discovery-sources'
 
@@ -65,6 +67,9 @@ async function findSkillFiles(
   const visitedDirectoryPaths = new Set<string>()
   async function visit(dirPath: string): Promise<void> {
     throwIfDiscoveryAborted(signal)
+    if (out.length >= SKILL_DISCOVERY_LIMITS.skills) {
+      return
+    }
     if (!isWithinDepth(rootPath, dirPath, maxDepth)) {
       return
     }
@@ -87,6 +92,9 @@ async function findSkillFiles(
     }
     for (const entry of entries) {
       throwIfDiscoveryAborted(signal)
+      if (out.length >= SKILL_DISCOVERY_LIMITS.skills) {
+        return
+      }
       const entryPath = join(dirPath, entry.name)
       if (entry.name === SKILL_FILE_NAME) {
         if (entry.isFile()) {
@@ -204,8 +212,8 @@ type ScannedSkill = DiscoveredSkill & { canonicalSkillFilePath: string }
 async function scanRoot(root: SkillScanRoot, signal?: AbortSignal): Promise<ScannedSkill[]> {
   const maxDepth = root.sourceKind === 'plugin' ? 9 : 4
   const skillFiles = await findSkillFiles(root.path, maxDepth, signal)
-  const skills = await Promise.all(
-    skillFiles.map(async (skillFilePath): Promise<ScannedSkill | null> => {
+  const skills = await runSkillCandidateTasks(
+    skillFiles.map((skillFilePath) => async (): Promise<ScannedSkill | null> => {
       throwIfDiscoveryAborted(signal)
       // Why: path identity belongs to the scanning host; canonicalizing before
       // returning prevents symlinked roots from becoming duplicate picker rows.
@@ -218,8 +226,9 @@ async function scanRoot(root: SkillScanRoot, signal?: AbortSignal): Promise<Scan
       const sourceKind = sourceKindForSkill(root, skillFilePath, { relative, sep })
       return {
         id: stablePathId(canonicalSkillFilePath),
-        name: summary.name ?? basename(directoryPath),
-        description: summary.description,
+        name: (summary.name ?? basename(directoryPath)).slice(0, SKILL_DISCOVERY_LIMITS.nameLength),
+        description:
+          summary.description?.slice(0, SKILL_DISCOVERY_LIMITS.descriptionLength) ?? null,
         // Copy: `root.providers` is shared across every skill/source from this
         // root, so the dedup merge below must not mutate the aliased array.
         providers: [...root.providers],
@@ -256,9 +265,11 @@ export async function discoverSkills(args: {
       ? await discoverClaudePluginSkillSources({ homeDir, cwd: args.cwd })
       : [])
   ]
+    .filter((root) => root.path.length <= SKILL_DISCOVERY_LIMITS.pathLength)
+    .slice(0, SKILL_DISCOVERY_LIMITS.sources)
   const sources: SkillDiscoverySource[] = []
-  const skillGroups = await Promise.all(
-    roots.map(async (root) => {
+  const skillGroups = await runSkillCandidateTasks(
+    roots.map((root) => async () => {
       throwIfDiscoveryAborted(signal)
       const exists = await pathExists(root.path)
       sources.push({
@@ -281,7 +292,11 @@ export async function discoverSkills(args: {
     // record every contributing root so per-agent visibility survives dedup.
     const existing = seen.get(skill.canonicalSkillFilePath)
     if (existing) {
-      if (existing.rootPaths && !existing.rootPaths.includes(skill.rootPath)) {
+      if (
+        existing.rootPaths &&
+        existing.rootPaths.length < SKILL_DISCOVERY_LIMITS.rootPaths &&
+        !existing.rootPaths.includes(skill.rootPath)
+      ) {
         existing.rootPaths.push(skill.rootPath)
       }
       // Why: providers is per-agent visibility just like rootPaths; keeping only
@@ -302,7 +317,7 @@ export async function discoverSkills(args: {
     seen.set(canonicalSkillFilePath, { ...publicSkill, rootPaths: [skill.rootPath] })
   }
   return {
-    skills: Array.from(seen.values()).sort(compareSkills),
+    skills: Array.from(seen.values()).sort(compareSkills).slice(0, SKILL_DISCOVERY_LIMITS.skills),
     sources: sources.sort((a, b) =>
       a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })
     ),

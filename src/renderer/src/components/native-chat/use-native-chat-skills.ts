@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../store'
 import type { AgentType } from '../../../../shared/agent-status-types'
 import type {
@@ -13,11 +12,14 @@ import { RuntimeRpcCallError } from '@/runtime/runtime-rpc-result'
 import { isRuntimeCompatBlockError } from '@/runtime/runtime-protocol-compat'
 import { emitNativeChatSkillDiscovery } from '@/lib/native-chat-telemetry'
 import {
+  getNativeChatSkillDiscoverySubscriptionKey,
   resolveNativeChatSkillDiscoveryContext,
+  resolveNativeChatSkillDiscoverySubscriptionKey,
   selectNativeChatSkillStateInputs,
   type NativeChatSkillDiscoveryContext
 } from './native-chat-skill-discovery-context'
 import type { NativeChatSkillDiscoveryErrorKind } from './native-chat-picker-items'
+import { readPaneDiscoveryCache, writePaneDiscoveryCache } from './native-chat-pane-discovery-cache'
 
 export {
   resolveNativeChatSkillDiscoveryContext,
@@ -90,11 +92,18 @@ export function useNativeChatSkills(
   terminalTabId: string,
   enabled = false
 ): NativeChatSkillDiscovery {
-  const inputs = useAppStore(useShallow(selectNativeChatSkillStateInputs))
-  const context = useMemo(
-    () => resolveNativeChatSkillDiscoveryContext(inputs, terminalTabId),
-    [inputs, terminalTabId]
+  const contextSubscriptionKey = useAppStore((state) =>
+    resolveNativeChatSkillDiscoverySubscriptionKey(state, terminalTabId)
   )
+  const context = useMemo(() => {
+    const currentContext = resolveNativeChatSkillDiscoveryContext(
+      selectNativeChatSkillStateInputs(useAppStore.getState()),
+      terminalTabId
+    )
+    return getNativeChatSkillDiscoverySubscriptionKey(currentContext) === contextSubscriptionKey
+      ? currentContext
+      : null
+  }, [contextSubscriptionKey, terminalTabId])
   const [state, setState] = useState<StoredDiscoveryState>(IDLE_STATE)
   const [retryGeneration, setRetryGeneration] = useState(0)
   const paneDiscoveryCache = useRef(new Map<string, SkillDiscoveryResult>())
@@ -123,7 +132,7 @@ export function useNativeChatSkills(
     }
 
     const paneCacheKey = context.key
-    const cached = paneDiscoveryCache.current.get(paneCacheKey)
+    const cached = readPaneDiscoveryCache(paneDiscoveryCache.current, paneCacheKey)
     if (cached) {
       emitNativeChatSkillDiscovery({
         agent,
@@ -137,7 +146,7 @@ export function useNativeChatSkills(
     const request = getOrStartDiscovery(context)
     void request.then(
       (result) => {
-        paneDiscoveryCache.current.set(paneCacheKey, result)
+        writePaneDiscoveryCache(paneDiscoveryCache.current, paneCacheKey, result)
         if (cancelled) {
           return
         }

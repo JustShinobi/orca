@@ -5,7 +5,10 @@ import {
   resolveNativeChatSkillDiscoveryContext,
   resolveNativeChatSkillDiscoveryCwd
 } from './use-native-chat-skills'
-import type { NativeChatSkillStateInputs } from './native-chat-skill-discovery-context'
+import {
+  getNativeChatSkillDiscoverySubscriptionKey,
+  type NativeChatSkillStateInputs
+} from './native-chat-skill-discovery-context'
 
 function skill(overrides: Partial<DiscoveredSkill>): DiscoveredSkill {
   return {
@@ -340,5 +343,41 @@ describe('resolveNativeChatSkillDiscoveryContext for SSH panes', () => {
     const onTargetOne = resolveNativeChatSkillDiscoveryContext(sshInputs(), 'tab-1')
     expect(onTargetOne?.cwd).toBe(onTargetTwo?.cwd)
     expect(onTargetOne?.key).not.toBe(onTargetTwo?.key)
+  })
+
+  it('keeps pane identity in the key when renderer paths are stale or equal', () => {
+    const firstPane = resolveNativeChatSkillDiscoveryContext(sshInputs(), 'tab-1')
+    const secondPane = resolveNativeChatSkillDiscoveryContext(
+      sshInputs({
+        tabsByWorktree: { 'worktree-2': [{ id: 'tab-2' }] },
+        worktreesByRepo: {
+          'repo-1': [
+            { id: 'worktree-2', repoId: 'repo-1', path: '/repo/worktree', hostId: 'ssh:target-1' }
+          ]
+        }
+      }),
+      'tab-2'
+    )
+    expect(firstPane?.cwd).toBe(secondPane?.cwd)
+    expect(firstPane?.key).not.toBe(secondPane?.key)
+  })
+
+  it('ignores unrelated SSH state updates in the hook subscription key', () => {
+    const initial = sshInputs()
+    const unrelatedUpdate = sshInputs({
+      sshConnectionStates: new Map([
+        ['target-1', connectionState()],
+        ['target-2', connectionState({ targetId: 'target-2', connectionGeneration: 99 })]
+      ])
+    })
+    expect(
+      getNativeChatSkillDiscoverySubscriptionKey(
+        resolveNativeChatSkillDiscoveryContext(unrelatedUpdate, 'tab-1')
+      )
+    ).toBe(
+      getNativeChatSkillDiscoverySubscriptionKey(
+        resolveNativeChatSkillDiscoveryContext(initial, 'tab-1')
+      )
+    )
   })
 })

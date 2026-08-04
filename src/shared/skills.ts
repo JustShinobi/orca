@@ -127,6 +127,15 @@ export type SkillDiscoveryForPaneResponse =
 const SKILL_PROVIDER_VALUES = ['codex', 'claude', 'agent-skills'] as const
 const SKILL_SOURCE_KIND_VALUES = ['home', 'repo', 'bundled', 'plugin'] as const
 
+export const SKILL_DISCOVERY_LIMITS = {
+  descriptionLength: 8192,
+  nameLength: 512,
+  pathLength: 4096,
+  rootPaths: 64,
+  skills: 5000,
+  sources: 1000
+} as const
+
 const boundedString = (max: number): z.ZodString => z.string().max(max)
 
 /** Validates untrusted skill metadata at the SSH relay boundary before it can
@@ -136,27 +145,30 @@ export const SkillDiscoveryResultSchema = z.object({
     .array(
       z.object({
         id: boundedString(512),
-        name: boundedString(512),
-        description: boundedString(8192).nullable(),
+        name: boundedString(SKILL_DISCOVERY_LIMITS.nameLength),
+        description: boundedString(SKILL_DISCOVERY_LIMITS.descriptionLength).nullable(),
         providers: z.array(z.enum(SKILL_PROVIDER_VALUES)).max(8),
         sourceKind: z.enum(SKILL_SOURCE_KIND_VALUES),
         sourceLabel: boundedString(1024),
-        rootPath: boundedString(4096),
-        rootPaths: z.array(boundedString(4096)).max(64).optional(),
-        directoryPath: boundedString(4096),
-        skillFilePath: boundedString(4096),
+        rootPath: boundedString(SKILL_DISCOVERY_LIMITS.pathLength),
+        rootPaths: z
+          .array(boundedString(SKILL_DISCOVERY_LIMITS.pathLength))
+          .max(SKILL_DISCOVERY_LIMITS.rootPaths)
+          .optional(),
+        directoryPath: boundedString(SKILL_DISCOVERY_LIMITS.pathLength),
+        skillFilePath: boundedString(SKILL_DISCOVERY_LIMITS.pathLength),
         installed: z.boolean(),
         fileCount: z.number().int().min(0).max(1_000_000),
         updatedAt: z.number().finite().nullable()
       })
     )
-    .max(5000),
+    .max(SKILL_DISCOVERY_LIMITS.skills),
   sources: z
     .array(
       z.object({
         id: boundedString(512),
         label: boundedString(1024),
-        path: boundedString(4096),
+        path: boundedString(SKILL_DISCOVERY_LIMITS.pathLength),
         sourceKind: z.enum(SKILL_SOURCE_KIND_VALUES),
         providers: z.array(z.enum(SKILL_PROVIDER_VALUES)).max(8),
         owner: boundedString(64).nullable(),
@@ -164,7 +176,7 @@ export const SkillDiscoveryResultSchema = z.object({
         skippedReason: z.enum(['missing', 'remote-repo']).optional()
       })
     )
-    .max(1000),
+    .max(SKILL_DISCOVERY_LIMITS.sources),
   scannedAt: z.number().finite()
 })
 

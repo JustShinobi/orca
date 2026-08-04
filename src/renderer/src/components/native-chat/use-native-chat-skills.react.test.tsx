@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../../store', () => ({
-  useAppStore: (selector: (state: Record<string, unknown>) => unknown) => selector(mocks.state)
+  useAppStore: Object.assign(
+    (selector: (state: Record<string, unknown>) => unknown) => selector(mocks.state),
+    { getState: () => mocks.state }
+  )
 }))
 vi.mock('@/runtime/runtime-rpc-client', () => ({
   callRuntimeRpc: (...args: unknown[]) => mocks.callRuntimeRpc(...args)
@@ -53,7 +56,7 @@ function stateForHost(hostId: string) {
   }
 }
 
-function connectedSshState() {
+function connectedSshState(connectionGeneration = 3) {
   return {
     ...stateForHost('ssh:target-1'),
     sshConnectionStates: new Map([
@@ -64,7 +67,7 @@ function connectedSshState() {
           status: 'connected',
           error: null,
           reconnectAttempt: 0,
-          connectionGeneration: 3
+          connectionGeneration
         }
       ]
     ])
@@ -197,5 +200,28 @@ describe('useNativeChatSkills', () => {
       { cwd: '/repo/worktree', worktreeId: 'worktree-1' },
       { timeoutMs: 10_000 }
     )
+  })
+
+  it('bounds cached SSH reconnect generations per composer', async () => {
+    mocks.state = connectedSshState(1)
+    mocks.callRuntimeRpc.mockResolvedValue({ status: 'ok', result: DISCOVERY_RESULT })
+    const view = render(<Probe enabled />)
+    await waitFor(() => expect(mocks.snapshots.at(-1)?.status).toBe('ready'))
+
+    for (let generation = 2; generation <= 9; generation += 1) {
+      mocks.state = connectedSshState(generation)
+      view.rerender(<Probe enabled />)
+      await waitFor(() => {
+        expect(mocks.callRuntimeRpc).toHaveBeenCalledTimes(generation)
+        expect(mocks.snapshots.at(-1)?.status).toBe('ready')
+      })
+    }
+
+    mocks.state = connectedSshState(1)
+    view.rerender(<Probe enabled />)
+    await waitFor(() => {
+      expect(mocks.callRuntimeRpc).toHaveBeenCalledTimes(10)
+      expect(mocks.snapshots.at(-1)?.status).toBe('ready')
+    })
   })
 })
