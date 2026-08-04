@@ -4,7 +4,9 @@ import {
   clearWorkingIndicators,
   createAgentStatusTracker,
   normalizeTerminalTitle,
-  extractAllOscTitles
+  extractAllOscTitles,
+  isCursorAgentTitle,
+  shouldSuppressCursorNativeTitle
 } from '../../../../shared/agent-detection'
 import {
   isTerminalInputTooLargeWithDeferredMeasurement,
@@ -112,14 +114,23 @@ function isIgnoredCursorNativeTitle(title: string): boolean {
   return title.trim().toLowerCase() === 'cursor agent'
 }
 
-function removeIgnoredCursorNativeTitles(titles: string[]): boolean {
+// Why: mirrors main's applyObservedTitle — the first native literal survives as pane
+// identity while no Cursor-owned title owns the pane (#10258); the redraw repeats are
+// dropped here so they cost neither an allocation nor a drain slot.
+function removeIgnoredCursorNativeTitles(titles: string[], keepFirstNative: boolean): boolean {
   let writeIndex = 0
   let removed = false
+  let keepNative = keepFirstNative
   for (let readIndex = 0; readIndex < titles.length; readIndex += 1) {
     const title = titles[readIndex]
     if (isIgnoredCursorNativeTitle(title)) {
-      removed = true
-      continue
+      if (!keepNative) {
+        removed = true
+        continue
+      }
+      keepNative = false
+    } else if (isCursorAgentTitle(title)) {
+      keepNative = false
     }
     if (writeIndex !== readIndex) {
       titles[writeIndex] = title
@@ -277,7 +288,10 @@ export function createPtyOutputProcessor({
     const scannedForTitles = Boolean(onTitleChange && data.includes('\x1b]'))
     const titles = scannedForTitles ? extractAllOscTitles(data) : []
     // Why: Cursor emits this ignored title every redraw; keep one queue fact instead of an allocation and drain slot per frame.
-    const ignoredCursorNativeTitle = removeIgnoredCursorNativeTitles(titles)
+    const ignoredCursorNativeTitle = removeIgnoredCursorNativeTitles(
+      titles,
+      !shouldSuppressCursorNativeTitle(lastEmittedTitle)
+    )
     const deliveredPayloads =
       onAgentStatus && !suppressAttentionEvents && payloads.length > 0 ? payloads : []
     const containsBell = Boolean(
@@ -425,6 +439,14 @@ export function createPtyOutputProcessor({
     if (titles.length > 0) {
       clearStaleTitleTimer()
       for (const title of titles) {
+        if (isIgnoredCursorNativeTitle(title)) {
+          // Why: identity for a hookless Cursor pane (#10258), never activity — the literal's
+          // null status would read as an agent exit, and a repeat must not stomp hook state.
+          if (!shouldSuppressCursorNativeTitle(lastEmittedTitle)) {
+            applyObservedTerminalTitle(title, true)
+          }
+          continue
+        }
         applyObservedTerminalTitle(title, suppressAgentTracker)
       }
     } else if (titleScanEffect === 'ignored-cursor-native') {

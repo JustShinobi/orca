@@ -5,6 +5,7 @@ import {
   titleHasAgentName
 } from './agent-name-token-match'
 import { isCursorAgentTitle } from './agent-title-core'
+import { stripLeadingAgentTitleDecorationOrEmpty } from './agent-title-decoration'
 import { isOpenCodeNativeTitle } from './opencode-terminal-title'
 import {
   getPiCompatibleSyntheticAgentLabel,
@@ -239,6 +240,21 @@ function hasGenericClaudeStatusPrefix(title: string): boolean {
     title.startsWith('. ') ||
     title.startsWith('* ')
   )
+}
+
+// Claude's own name plus, at most, one of its status words — never free-form task text.
+const CLAUDE_IDENTITY_FRAME_RE =
+  /^claude(?: code)?(?:\s+(?:ready|idle|done|working|thinking|running))?(?:\s*-\s*action required)?$/
+
+/**
+ * Whether a title PRESENTS Claude rather than merely mentioning it, once its leading
+ * status decoration is stripped. A "claude" token inside free-form task text is a mention,
+ * so it must not take a pane away from its known owner (#8940) — owner-blind consumers
+ * keep using `resolveExplicitTerminalTitleAgentType`, whose token match is looser.
+ */
+export function isClaudeIdentityFrameTitle(title: string): boolean {
+  const bare = stripLeadingAgentTitleDecorationOrEmpty(title).trim().toLowerCase()
+  return CLAUDE_IDENTITY_FRAME_RE.test(bare)
 }
 
 function isGenericClaudeStatusClaim(title: string, titleAgent: TuiAgent | null): boolean {

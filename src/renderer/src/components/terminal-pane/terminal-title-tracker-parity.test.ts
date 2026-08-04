@@ -115,6 +115,45 @@ describe('main title tracker parity with the renderer transport processor', () =
     expect(paths.main.events).toContainEqual({ kind: 'became-idle', title: 'Codex done' })
   })
 
+  // Why: #10258 — a hookless Cursor pane's only identity is the bare literal, so both
+  // paths must emit it once (never as an agent state) before the repeats are dropped.
+  it('emits the bare cursor-agent native title once in both paths', () => {
+    feedBoth(paths, `${ESC}]0;Cursor Agent${BEL}`)
+    feedBoth(paths, `${ESC}]0;Cursor Agent${BEL}`)
+
+    expect(paths.main.events).toEqual(paths.renderer.events)
+    expect(paths.main.events).toEqual([
+      { kind: 'title', normalized: 'Cursor Agent', raw: 'Cursor Agent' }
+    ])
+  })
+
+  it('lets a synthesized Cursor title follow the native literal in both paths', () => {
+    feedBoth(paths, `${ESC}]0;Cursor Agent${BEL}`)
+    feedBoth(paths, `${ESC}]0;⠋ Cursor Agent${BEL}`)
+    feedBoth(paths, `${ESC}]0;Cursor Agent${BEL}`)
+
+    expect(paths.main.events).toEqual(paths.renderer.events)
+    expect(paths.main.events.map((event) => event.kind)).toEqual([
+      'title',
+      'title',
+      'became-working'
+    ])
+  })
+
+  it('keeps native/synthesized Cursor title order inside one coalesced chunk', () => {
+    feedBoth(
+      paths,
+      `${ESC}]0;Cursor Agent${BEL}${ESC}]0;⠋ Cursor Agent${BEL}${ESC}]0;Cursor Agent${BEL}`
+    )
+
+    expect(paths.main.events).toEqual(paths.renderer.events)
+    expect(paths.main.events).toEqual([
+      { kind: 'title', normalized: 'Cursor Agent', raw: 'Cursor Agent' },
+      { kind: 'title', normalized: '⠋ Cursor Agent', raw: '⠋ Cursor Agent' },
+      { kind: 'became-working' }
+    ])
+  })
+
   it('drops the bare cursor-agent native title in both paths', () => {
     feedBoth(paths, `${ESC}]0;⠋ Cursor Agent${BEL}`)
     feedBoth(paths, `${ESC}]0;Cursor Agent${BEL}`)
