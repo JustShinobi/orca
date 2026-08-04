@@ -21,6 +21,7 @@ import {
 } from '../claude-accounts/runtime-selection'
 import { fetchGeminiRateLimits } from './gemini-usage-fetcher'
 import { fetchKimiRateLimits } from './kimi-fetcher'
+import type { KimiHomeResolution } from '../kimi/kimi-runtime-home'
 import { fetchGrokRateLimits } from './grok-fetcher'
 import { readGrokAuthSession } from './grok-auth'
 import { hasMiniMaxSessionCookie } from '../minimax/minimax-cookie-store'
@@ -222,6 +223,8 @@ export class RateLimitService {
     runtime: 'host',
     wslDistro: null
   }
+  // Why: resolved per cycle — the local-account runtime policy can flip between fetches.
+  private kimiHomeResolver: (() => KimiHomeResolution) | null = null
   private claudeAuthPreparationResolver: ClaudeAuthPreparationResolver | null = null
   private claudeFetchTarget: NormalizedClaudeAccountSelectionTarget = {
     runtime: 'host',
@@ -258,6 +261,10 @@ export class RateLimitService {
 
   setCodexFetchTarget(target?: CodexAccountSelectionTarget): void {
     this.codexFetchTarget = normalizeCodexAccountSelectionTarget(target)
+  }
+
+  setKimiHomeResolver(resolver: () => KimiHomeResolution): void {
+    this.kimiHomeResolver = resolver
   }
 
   setClaudeAuthPreparationResolver(resolver: ClaudeAuthPreparationResolver): void {
@@ -1661,7 +1668,7 @@ export class RateLimitService {
           workspaceIdOverride || undefined,
           this.networkProxySettingsResolver?.()
         ),
-        fetchKimiRateLimits(),
+        fetchKimiRateLimits({ home: this.kimiHomeResolver?.() }),
         miniMaxConfigResult.error
           ? Promise.resolve(this.getMiniMaxCredentialError(miniMaxConfigResult.error))
           : fetchMiniMaxRateLimits({

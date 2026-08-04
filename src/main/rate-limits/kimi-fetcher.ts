@@ -1,12 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, win32 as pathWin32 } from 'node:path'
 import { net } from 'electron'
 import type {
   ProviderRateLimits,
   RateLimitWindow,
   UsageRateLimitMetadata
 } from '../../shared/rate-limit-types'
+import { parseWslUncPath } from '../../shared/wsl-paths'
+import { getHostKimiHome, type KimiHomeResolution } from '../kimi/kimi-runtime-home'
 
 // Why: Kimi Code's managed coding plan exposes subscription usage at
 // `${base}/usages` (see packages/oauth/src/managed-usage.ts in the CLI bundle).
@@ -18,14 +19,11 @@ const API_TIMEOUT_MS = 10_000
 const SESSION_WINDOW_MINUTES = 300 // 5h
 const WEEKLY_WINDOW_MINUTES = 10080 // 7d
 
-function getKimiHome(): string {
-  // Why: match the CLI's `KIMI_CODE_HOME ?? ~/.kimi-code` resolution so we read
-  // the same OAuth credentials the running Kimi CLI writes.
-  return process.env.KIMI_CODE_HOME ?? join(homedir(), '.kimi-code')
-}
-
-function getCredentialsPath(): string {
-  return join(getKimiHome(), 'credentials', 'kimi-code.json')
+function getCredentialsPath(kimiHome: string): string {
+  // WSL homes arrive as `\\wsl.localhost\<distro>\...`, which only win32 join keeps intact.
+  return parseWslUncPath(kimiHome)
+    ? pathWin32.join(kimiHome, 'credentials', 'kimi-code.json')
+    : join(kimiHome, 'credentials', 'kimi-code.json')
 }
 
 type KimiCredentials = {
@@ -52,8 +50,8 @@ function parseCredentials(value: unknown): KimiCredentials | null {
   return credentials
 }
 
-function readCredentials(): CredentialsReadResult {
-  const path = getCredentialsPath()
+function readCredentials(kimiHome: string): CredentialsReadResult {
+  const path = getCredentialsPath(kimiHome)
   if (!existsSync(path)) {
     return { status: 'missing' }
   }
@@ -212,6 +210,14 @@ function mapUsageResponse(data: KimiUsageResponse): ProviderRateLimits {
   }
 }
 
+function expiredSessionMessage(home: KimiHomeResolution): string {
+  const where =
+    home.runtime === 'wsl'
+      ? `inside WSL (${home.wslDistro ?? 'default distro'})`
+      : 'on the computer running Orca'
+  return `Kimi session expired — run kimi ${where}, then retry usage.`
+}
+
 function result(
   status: ProviderRateLimits['status'],
   error: string | null,
@@ -231,7 +237,11 @@ function result(
 /**
  * Read-only subscription usage for Kimi Code.
  *
- * Why read-only: the access token lives in `~/.kimi-code/credentials/kimi-code.json`
+ * `home` selects which machine's credentials to read: on Windows the Kimi CLI
+ * often runs inside WSL, and only that copy is refreshed (#12370). Defaults to
+ * the host home.
+ *
+ * Why read-only: the access token lives in `<kimi home>/credentials/kimi-code.json`
  * and is refreshed by the Kimi CLI itself (15-min TTL, refresh-token rotation).
  * Orca must NEVER refresh or rewrite that file — a rotated refresh token would
  * log out a live `kimi` session. We only read the current token and call the
@@ -239,8 +249,18 @@ function result(
  * `/usage` command uses. The completion endpoint (the one Moonshot gates to
  * approved coding agents) is never touched here.
  */
-export async function fetchKimiRateLimits(): Promise<ProviderRateLimits> {
-  const readResult = readCredentials()
+export async function fetchKimiRateLimits(options?: {
+  home?: KimiHomeResolution
+}): Promise<ProviderRateLimits> {
+  const home: KimiHomeResolution = options?.home ?? {
+    runtime: 'host',
+    wslDistro: null,
+    path: getHostKimiHome()
+  }
+  if (home.path === null) {
+    return result('error', `WSL Kimi home unavailable for ${home.wslDistro ?? 'default distro'}`)
+  }
+  const readResult = readCredentials(home.path)
   if (readResult.status === 'missing') {
     return result('unavailable', 'Not signed in to Kimi Code')
   }
@@ -255,11 +275,10 @@ export async function fetchKimiRateLimits(): Promise<ProviderRateLimits> {
     // Why: don't refresh — the CLI owns the token lifecycle. Report a transient
     // error so the rate-limit service keeps the last good snapshot (stale
     // policy) until the user next runs Kimi and the CLI refreshes the file.
-    return result(
-      'error',
-      'Kimi session expired — run kimi on the computer running Orca, then retry usage.',
-      { failureKind: 'delegated-refresh-required', source: 'oauth' }
-    )
+    return result('error', expiredSessionMessage(home), {
+      failureKind: 'delegated-refresh-required',
+      source: 'oauth'
+    })
   }
 
   try {
