@@ -1,11 +1,13 @@
 import { join } from 'node:path'
 import type { SFTPWrapper } from 'ssh2'
 import type { AgentHookInstallState, AgentHookInstallStatus } from '../../shared/agent-hook-types'
-import { resolveGrokHomeDir } from '../../shared/grok-session-paths'
+import {
+  GROK_HOME_ENVELOPE_MAX_LENGTH,
+  resolveGrokHomeDir
+} from '../../shared/grok-session-paths'
 import {
   buildManagedCommandHook,
   createManagedCommandMatcher,
-  buildWindowsAgentHookPostCommand,
   getSharedManagedScriptPath,
   readHooksJson,
   removeManagedCommands,
@@ -20,19 +22,14 @@ import {
   writeHooksJsonRemote,
   writeManagedScriptRemote
 } from '../agent-hooks/installer-utils-remote'
-import {
-  buildPosixHookPayloadCapture,
-  buildWindowsHookEnvironmentGuardLines,
-  buildWindowsHookStdinDrainEpilogue
-} from '../agent-hooks/hook-stdin-contract'
+import { buildPosixHookPayloadCapture } from '../agent-hooks/hook-stdin-contract'
+import { buildGrokWindowsHookScript } from './windows-hook-script'
 
 // Why: Grok's tool-event matcher is a real regex (see Grok hooks docs). Bare
 // `*` is not a valid "match all" pattern and can fail to load/match, so tool
 // lifecycle hooks never fire. `.*` matches every tool name (same as Command
 // Code's managed hooks).
 const GROK_TOOL_EVENT_MATCHER = '.*'
-const GROK_HOME_ENVELOPE_MAX_LENGTH = 4096
-const WINDOWS_HOOK_PAYLOAD_FORM_LINE = '  --data-urlencode "payload@-" >nul 2>nul'
 
 const GROK_EVENTS = [
   { eventName: 'SessionStart', definition: { hooks: [{ type: 'command', command: '' }] } },
@@ -95,11 +92,6 @@ function hasControlCharacter(value: string): boolean {
   })
 }
 
-const WINDOWS_GROK_HOOK_POST_COMMAND = buildWindowsAgentHookPostCommand('grok').replace(
-  WINDOWS_HOOK_PAYLOAD_FORM_LINE,
-  `  --data-urlencode "grokHome=%ORCA_GROK_HOME%" ^\r\n${WINDOWS_HOOK_PAYLOAD_FORM_LINE}`
-)
-
 function getManagedScriptFileName(): string {
   return process.platform === 'win32' ? 'grok-hook.cmd' : 'grok-hook.sh'
 }
@@ -116,21 +108,7 @@ function getManagedCommand(scriptPath: string): string {
 
 function getManagedScript(target: 'local' | 'posix' = 'local'): string {
   if (target === 'local' && process.platform === 'win32') {
-    return [
-      '@echo off',
-      'setlocal',
-      'if defined ORCA_AGENT_HOOK_ENDPOINT if exist "%ORCA_AGENT_HOOK_ENDPOINT%" call "%ORCA_AGENT_HOOK_ENDPOINT%" 2>nul',
-      ...buildWindowsHookEnvironmentGuardLines(),
-      'set "ORCA_GROK_HOME=%GROK_HOME%"',
-      `if not "%GROK_HOME:~${GROK_HOME_ENVELOPE_MAX_LENGTH},1%"=="" set "ORCA_GROK_HOME="`,
-      // Why: a trailing backslash escapes curl's closing argv quote on Windows,
-      // merging the payload option into grokHome and dropping the hook body.
-      'if "%ORCA_GROK_HOME:~-1%"=="\\" set "ORCA_GROK_HOME=%ORCA_GROK_HOME%."',
-      WINDOWS_GROK_HOOK_POST_COMMAND,
-      'exit /b 0',
-      ...buildWindowsHookStdinDrainEpilogue(),
-      ''
-    ].join('\r\n')
+    return buildGrokWindowsHookScript()
   }
 
   return [

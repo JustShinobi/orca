@@ -19,6 +19,9 @@ export const GROK_CHAT_HISTORY_FILE = 'chat_history.jsonl'
 // encoded name exceeds 255 bytes it switches to a slug+hash layout.
 export const GROK_ENCODED_CWD_DIR_MAX_BYTES = 255
 export const GROK_SESSION_ID_MAX_LENGTH = 128
+// Why: hooks carry GROK_HOME on the wire, so both the emitting script and the
+// listener drop anything past this envelope instead of forwarding junk.
+export const GROK_HOME_ENVELOPE_MAX_LENGTH = 4096
 // Why: session discovery runs in hook/main hot paths; one corrupt or enormous
 // sessions root must not cause unbounded candidate probes.
 export const GROK_SESSION_GROUP_SCAN_MAX_ENTRIES = 2_048
