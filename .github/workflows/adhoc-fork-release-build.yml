@@ -1,0 +1,137 @@
+name: Ad-hoc Fork Release Build
+
+# Why: this fork carries stablyai/orca#8884 (headless accounts CLI: list/add/select/rm)
+# and stablyai/orca#11977 (remote-server usage sync fix) merged on top of main, ahead of
+# upstream review/merge. release-cut.yml is gated to `github.repository == 'stablyai/orca'`
+# and no-ops on forks; pr.yml's package/package_windows jobs only run
+# `electron-builder --dir` for smoke-testing, never the real installer targets. This
+# workflow runs the same build steps but packages the actual AppImage / NSIS installer
+# and uploads them as run artifacts. Unsigned — no SignPath secrets exist on this fork.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to build from
+        required: false
+        type: string
+        default: headless-account-switch
+
+jobs:
+  build-linux:
+    name: Build Linux AppImage
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Cache electron-builder downloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-builder-linux-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            electron-builder-linux-
+
+      - uses: ./.github/actions/install-node-dependencies
+        with:
+          native-runtime: electron
+
+      - name: Build package inputs
+        run: |
+          status=0
+          pnpm run build:cli || status=1
+
+          scripts=(build:relay build:electron-vite:parallel)
+          pids=()
+          for script in "${scripts[@]}"; do
+            pnpm run "$script" &
+            pids+=("$!")
+          done
+
+          for pid in "${pids[@]}"; do
+            wait "$pid" || status=1
+          done
+          exit "$status"
+
+      - name: Project web client from renderer build
+        run: pnpm run build:web-from-renderer
+
+      - name: Build native components
+        run: pnpm run build:native
+
+      - name: Package AppImage
+        env:
+          ORCA_REUSE_PREPARED_NATIVE_RUNTIME: '1'
+        run: pnpm exec electron-builder --config config/electron-builder.config.cjs --linux AppImage
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: orca-linux-appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+  build-windows:
+    name: Build Windows installer
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+          cache: pnpm
+
+      - name: Cache electron-builder downloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-builder-windows-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            electron-builder-windows-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build package inputs
+        run: pnpm run build:release
+
+      - name: Prepare Electron native runtime
+        run: node config/scripts/ensure-native-runtime.mjs --runtime=electron
+
+      - name: Package NSIS installer (unsigned)
+        env:
+          ORCA_REUSE_PREPARED_NATIVE_RUNTIME: '1'
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm exec electron-builder --config config/electron-builder.config.cjs --win nsis
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: orca-windows-setup
+          path: dist/*.exe
+          if-no-files-found: error
+          retention-days: 14
