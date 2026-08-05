@@ -66,6 +66,19 @@ function domainSuffixes(domain: string): string[] {
   return labels.map((_, index) => labels.slice(index).join('.'))
 }
 
+function importDomainAncestors(domain: string): string[] {
+  const parsed = parseDomain(domain)
+  const boundary = 'error' in parsed ? domain : (parsed.domain ?? domain)
+  const ancestors: string[] = []
+  for (const suffix of domainSuffixes(domain)) {
+    ancestors.push(suffix)
+    if (suffix === boundary) {
+      break
+    }
+  }
+  return ancestors
+}
+
 function importedDomainScopes(domains: readonly string[]): {
   exact: Set<string>
   ancestors: Set<string>
@@ -89,7 +102,7 @@ function importedDomainScopes(domains: readonly string[]): {
     if (normalized.includes('.')) {
       descendantRoots.add(normalized)
     }
-    for (const suffix of domainSuffixes(normalized)) {
+    for (const suffix of importDomainAncestors(normalized)) {
       ancestors.add(suffix)
     }
   }
@@ -97,10 +110,14 @@ function importedDomainScopes(domains: readonly string[]): {
 }
 
 function overlapsImportedDomain(
+  cookie: Cookie,
   domain: string,
   scopes: ReturnType<typeof importedDomainScopes>
 ): boolean {
-  if (scopes.ancestors.has(domain)) {
+  if (scopes.exact.has(domain)) {
+    return true
+  }
+  if (cookie.hostOnly !== true && scopes.ancestors.has(domain)) {
     return true
   }
   return domainSuffixes(domain).some((suffix) => scopes.descendantRoots.has(suffix))
@@ -161,7 +178,7 @@ export async function replaceCookiesForImportedDomains(
   const removedCookies: Cookie[] = []
   for (const cookie of existingCookies) {
     const domain = cookie.domain ? normalizeCookieDomain(cookie.domain) : null
-    if (!domain || !overlapsImportedDomain(domain, scopes)) {
+    if (!domain || !overlapsImportedDomain(cookie, domain, scopes)) {
       continue
     }
     const url = cookieRemovalUrl(cookie, domain)

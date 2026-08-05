@@ -46,6 +46,7 @@ describe('replaceCookiesForImportedDomains', () => {
   it('removes parent, exact, and child-domain cookies while preserving unrelated sites', async () => {
     const existing = [
       cookie('.google.com', 'parent'),
+      { ...cookie('google.com', 'host-only-parent'), hostOnly: true },
       cookie('.accounts.google.com', 'exact', '/signin'),
       cookie('.child.accounts.google.com', 'child', '/nested', false),
       cookie('.google.com.evil.example', 'suffix-confusion'),
@@ -67,6 +68,22 @@ describe('replaceCookiesForImportedDomains', () => {
       ['http://child.accounts.google.com/nested', 'child']
     ])
     expect(set).not.toHaveBeenCalled()
+  })
+
+  it('does not replace a private-suffix host cookie for a tenant import', async () => {
+    const get = vi
+      .fn()
+      .mockResolvedValue([
+        { ...cookie('github.io', 'host-only-suffix'), hostOnly: true },
+        cookie('.user.github.io', 'tenant')
+      ])
+    const remove = vi.fn().mockResolvedValue(undefined)
+    const set = vi.fn().mockResolvedValue(undefined)
+
+    const removed = await replaceCookiesForImportedDomains({ get, remove, set }, ['user.github.io'])
+
+    expect(removed.map(({ name }) => name)).toEqual(['tenant'])
+    expect(remove).toHaveBeenCalledWith('https://user.github.io/', 'tenant')
   })
 
   it('does not read or mutate the store when no valid domain scope exists', async () => {
