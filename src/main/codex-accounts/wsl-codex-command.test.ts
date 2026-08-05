@@ -23,6 +23,16 @@ describe('WSL Codex commands', () => {
     expect(command).toContain('export CODEX_HOME=')
     expect(command).toContain('/home/alice/managed-home')
     expect(command).toContain('exec "\\$resolved" login')
+    expect(command).not.toContain('--device-auth')
+  })
+
+  it('adds --device-auth when requesting device-code login for headless callers', () => {
+    const args = buildWslCodexLoginArgs('Ubuntu', '/home/alice/managed-home', true)
+    const command = args.at(-1)
+
+    expect(command).toContain('export CODEX_HOME=')
+    expect(command).toContain('/home/alice/managed-home')
+    expect(command).toContain('exec "\\$resolved" login --device-auth')
   })
 
   it('reports the login-shell binary path and version for identity checks', () => {

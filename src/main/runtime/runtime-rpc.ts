@@ -442,7 +442,9 @@ type LongPollClass = 'ask' | 'wait'
 
 // Why: single classifier for long-poll requests (handlers that block on an external event), shared by counter/abort/keepalive. See §3.1.
 function longPollClassOf(request: RpcRequest): LongPollClass | null {
-  if (request.method === 'terminal.wait') {
+  // Why: accounts.pollAdd blocks on the device-auth login completing, the same
+  // wait-style long-poll as terminal.wait / check --wait.
+  if (request.method === 'terminal.wait' || request.method === 'accounts.pollAdd') {
     return 'wait'
   }
   // Why: orchestration.ask blocks unconditionally (default 600 s) holding the

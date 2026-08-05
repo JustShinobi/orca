@@ -222,4 +222,69 @@ describe('account RPC methods', () => {
     cleanup?.()
     await running
   })
+
+  it('kicks off a headless Codex login and returns its loginId', async () => {
+    const runtime = {
+      addCodexAccount: vi.fn(() => ({ loginId: 'login-1' }))
+    } as unknown as OrcaRuntimeService
+    const addCodex = method('accounts.addCodex')
+    if (isStreamingMethod(addCodex)) {
+      throw new Error('accounts.addCodex must be a request method')
+    }
+
+    await expect(
+      addCodex.handler({ target: { runtime: 'wsl', wslDistro: 'Ubuntu' } }, { runtime })
+    ).resolves.toEqual({ loginId: 'login-1' })
+    expect(runtime.addCodexAccount).toHaveBeenCalledWith({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+  })
+
+  it('kicks off a headless Claude login and returns its loginId', async () => {
+    const runtime = {
+      addClaudeAccount: vi.fn(() => ({ loginId: 'login-2' }))
+    } as unknown as OrcaRuntimeService
+    const addClaude = method('accounts.addClaude')
+    if (isStreamingMethod(addClaude)) {
+      throw new Error('accounts.addClaude must be a request method')
+    }
+
+    await expect(addClaude.handler({}, { runtime })).resolves.toEqual({ loginId: 'login-2' })
+    expect(runtime.addClaudeAccount).toHaveBeenCalledWith(undefined)
+  })
+
+  it('long-polls a pending login and forwards timeoutMs/signal', async () => {
+    const snapshot = {
+      loginId: 'login-1',
+      provider: 'codex',
+      status: 'completed',
+      outputTail: 'done'
+    }
+    const runtime = {
+      pollAddAccount: vi.fn().mockResolvedValue(snapshot)
+    } as unknown as OrcaRuntimeService
+    const pollAdd = method('accounts.pollAdd')
+    if (isStreamingMethod(pollAdd)) {
+      throw new Error('accounts.pollAdd must be a request method')
+    }
+    const signal = new AbortController().signal
+
+    await expect(
+      pollAdd.handler({ loginId: 'login-1', timeoutMs: 5000 }, { runtime, signal })
+    ).resolves.toBe(snapshot)
+    expect(runtime.pollAddAccount).toHaveBeenCalledWith('login-1', { timeoutMs: 5000, signal })
+  })
+
+  it('submits pasted login input and returns an ack', async () => {
+    const runtime = {
+      submitAccountLoginInput: vi.fn()
+    } as unknown as OrcaRuntimeService
+    const submitLoginInput = method('accounts.submitLoginInput')
+    if (isStreamingMethod(submitLoginInput)) {
+      throw new Error('accounts.submitLoginInput must be a request method')
+    }
+
+    await expect(
+      submitLoginInput.handler({ loginId: 'login-1', input: 'pasted-code' }, { runtime })
+    ).resolves.toEqual({ submitted: true })
+    expect(runtime.submitAccountLoginInput).toHaveBeenCalledWith('login-1', 'pasted-code')
+  })
 })

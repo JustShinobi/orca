@@ -12,6 +12,8 @@ import type {
   BrowserLoadError,
   BrowserSessionProfile,
   BrowserSessionProfileSource,
+  ClaudeRateLimitAccountsState,
+  CodexRateLimitAccountsState,
   CreateWorktreeResult,
   GitWorktreeInfo,
   RemoveWorktreeResult,
@@ -26,6 +28,7 @@ import type {
   WorktreeLineageWarning,
   TerminalPaneLayoutNode
 } from './types'
+import type { RateLimitState } from './rate-limit-types'
 import type {
   RuntimeMarkdownReadTabResult,
   RuntimeMarkdownSaveTabResult
@@ -1230,4 +1233,30 @@ export type BrowserErrorCode =
 
 // Keep the broad runtime-types import surface stable while letting computer-use
 // CI watch a narrow contract file instead of every runtime type change.
+export type RuntimeAccountsSnapshot = {
+  claude: ClaudeRateLimitAccountsState
+  codex: CodexRateLimitAccountsState
+  rateLimits: RateLimitState
+}
+
+export type RuntimeAccountAddStarted = {
+  loginId: string
+}
+
+export type RuntimeAccountProvider = 'codex' | 'claude'
+
+export type RuntimeAccountAddStatus = 'in_progress' | 'completed' | 'failed'
+
+export type RuntimeAccountPollAddResult = {
+  loginId: string
+  provider: RuntimeAccountProvider
+  status: RuntimeAccountAddStatus
+  outputTail: string
+  state?: CodexRateLimitAccountsState | ClaudeRateLimitAccountsState
+  error?: string
+  // Why: the server buffers raw login output only; the CLI extracts the OAuth
+  // URL client-side (see accounts-format.ts) and stamps it in before printing.
+  loginUrl?: string
+}
+
 export * from './computer-use-runtime-types'

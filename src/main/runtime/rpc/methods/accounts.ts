@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { defineMethod, defineStreamingMethod, type RpcAnyMethod } from '../core'
+import { OptionalFiniteNumber } from '../schemas'
 
 // Why: monotonically increasing per-process counter avoids the Date.now()
 // collision that fired when two near-simultaneous accounts.subscribe calls
@@ -87,14 +88,36 @@ const AccountsUnsubscribeParams = z.object({
     .pipe(z.string().min(1, 'Missing subscriptionId'))
 })
 
+const AddAccountParams = z.object({
+  target: z
+    .object({
+      runtime: z.enum(['host', 'wsl']).optional(),
+      wslDistro: z.union([z.string(), z.null()]).optional()
+    })
+    .optional()
+})
+
+const PollAddAccountParams = z.object({
+  loginId: z.string().min(1, 'Missing loginId'),
+  timeoutMs: OptionalFiniteNumber
+})
+
+const SubmitLoginInputParams = z.object({
+  loginId: z.string().min(1, 'Missing loginId'),
+  input: z.string().min(1, 'Missing input')
+})
+
 // Why: bridges the desktop ClaudeAccountService / CodexAccountService /
-// RateLimitService into the WebSocket / local-socket RPC. Read + switch +
-// remove for all clients; interactive add/re-auth flows spawn `claude login`
-// / `codex login` PTYs that need a desktop browser, so they intentionally
-// remain desktop-only. `accounts.addClaudeFromConfigDir` is the exception: it
-// captures an already-authenticated CLAUDE_CONFIG_DIR (no PTY) so the local
-// `orca account add` CLI can register accounts on a headless host; it is gated
-// to the local runtime connection, never a mobile device token. See #1438.
+// RateLimitService into the WebSocket / local-socket RPC and the headless CLI.
+// Read + switch + remove work for all clients. `accounts.addClaudeFromConfigDir`
+// / `accounts.addCodexFromHome` capture an already-authenticated CLAUDE_CONFIG_DIR
+// / CODEX_HOME (no PTY), gated to the local runtime connection, never a mobile
+// device token. `accounts.addCodex` / `accounts.addClaude` instead drive a real
+// `codex login` / `claude login` OAuth round-trip and return a loginId
+// immediately; `accounts.pollAdd` long-polls the result and
+// `accounts.submitLoginInput` relays a pasted OAuth code back into the login
+// process's stdin — the one-shot CLI transport can't hold a streaming method
+// open. See #1438.
 export const ACCOUNT_METHODS: readonly RpcAnyMethod[] = [
   defineMethod({
     name: 'accounts.list',
@@ -171,6 +194,32 @@ export const ACCOUNT_METHODS: readonly RpcAnyMethod[] = [
         runtime: params.runtime,
         wslDistro: params.wslDistro ?? null
       })
+    }
+  }),
+  defineMethod({
+    name: 'accounts.addCodex',
+    params: AddAccountParams,
+    handler: async (params, { runtime }) => runtime.addCodexAccount(params.target)
+  }),
+  defineMethod({
+    name: 'accounts.addClaude',
+    params: AddAccountParams,
+    handler: async (params, { runtime }) => runtime.addClaudeAccount(params.target)
+  }),
+  defineMethod({
+    name: 'accounts.pollAdd',
+    params: PollAddAccountParams,
+    handler: async (params, { runtime, signal }) =>
+      runtime.pollAddAccount(params.loginId, { timeoutMs: params.timeoutMs, signal })
+  }),
+  // Why: relays a pasted OAuth code from the CLI's terminal into the Claude
+  // login child process's stdin on the server — see ClaudeAccountAddOptions.
+  defineMethod({
+    name: 'accounts.submitLoginInput',
+    params: SubmitLoginInputParams,
+    handler: async (params, { runtime }) => {
+      runtime.submitAccountLoginInput(params.loginId, params.input)
+      return { submitted: true }
     }
   }),
   // Why: streaming counterpart so mobile usage bars refresh in place when the

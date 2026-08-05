@@ -316,6 +316,61 @@ If you later install the desktop CLI from Orca settings, use that CLI for normal
 shell workflows. Keep the AppImage path in systemd so service restarts do not
 depend on an interactive shell profile.
 
+## Managing Agent Accounts
+
+Use the `accounts` commands to manage the Codex and Claude accounts a headless
+server signs agents in with. They work the same way whether you run the
+AppImage directly or a separately installed CLI:
+
+```bash
+/opt/orca/orca-linux.AppImage accounts list --json
+/opt/orca/orca-linux.AppImage accounts add --provider codex
+/opt/orca/orca-linux.AppImage accounts add --provider claude --json
+/opt/orca/orca-linux.AppImage accounts select --provider codex --id <accountId>
+/opt/orca/orca-linux.AppImage accounts rm --provider claude --id <accountId>
+```
+
+`accounts list` shows every managed account per provider, which one is active,
+and its rate-limit usage when the server has already fetched it.
+
+`accounts add` runs the provider's login on the server and streams its raw
+output to your terminal live. For Codex, that login is `codex login
+--device-auth` (OAuth device-code authorization) rather than plain `codex
+login`: plain `codex login` starts a local OAuth callback server bound to the
+headless machine's `localhost`, so completing sign-in in a browser on a
+*different* device can never redirect back to it — the login would hang until
+timeout. Device-code auth has no local callback server at all; the terminal
+shows a static URL (open it on any device) and a short one-time code (valid
+about 15 minutes) to enter there, and Codex polls a remote endpoint until you
+approve it. Because that code can take up to 15 minutes to use, `accounts add`
+now waits up to about 16 minutes for Codex before timing out.
+
+Claude's login (`claude auth login --claudeai`) has no equivalent device-code
+flag today: it prints a real login URL (safe to open on any device) but then
+blocks waiting for you to paste back the code that page shows, on the same
+terminal running the login. For a headless server that terminal is the
+server process, not yours, so `orca accounts add --provider claude` detects
+that "Paste code here if prompted" prompt in the streamed output and
+interactively prompts you (in your own terminal) to paste the code once it
+appears, then forwards it to the server automatically — this works the same
+whether you're running the CLI locally on the same host as `orca serve` or
+remotely (e.g. over SSH or `--environment`/pairing). This means `accounts add
+--provider claude` is **not** fully non-interactive even with `--json`: it
+still needs to read the pasted code from your terminal's stdin, though
+`--json` keeps stdout as clean JSON and routes the prompt itself to stderr.
+Because pasting the code back can take a while, `accounts add` now waits up
+to about 16 minutes for Claude before timing out, the same budget as Codex.
+
+`--json` mode suppresses the live stdout stream and prints one final JSON
+result once the login settles, with the detected login URL included — but the
+login URL and (for Codex) one-time code are also announced on stderr as soon
+as they're detected, so you don't have to wait for completion to see them.
+
+`accounts select` and `accounts rm` take `--provider codex|claude` and `--id
+<accountId>` (from `accounts list --json`) to switch the active account or
+remove one. `accounts rm` is destructive — it permanently deletes the managed
+account's stored credentials.
+
 ## Upgrade
 
 `orca serve` never updates itself. In headless mode Orca wires up no auto-updater
