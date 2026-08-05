@@ -32,6 +32,14 @@ describe('isGoogleSourceBoundCookie', () => {
     expect(normalizeCookieDomain('münich.example')).toBe('xn--mnich-kva.example')
     expect(normalizeCookieDomain('')).toBeNull()
   })
+
+  it('rejects URL syntax that could normalize an invalid cookie scope to another domain', () => {
+    expect(normalizeCookieDomain('example.com/path')).toBeNull()
+    expect(normalizeCookieDomain('user@example.com')).toBeNull()
+    expect(normalizeCookieDomain('example.com:443')).toBeNull()
+    expect(normalizeCookieDomain('%65xample.com')).toBeNull()
+    expect(isGoogleSourceBoundCookie('SIDCC', 'user@google.com')).toBe(false)
+  })
 })
 
 describe('replaceCookiesForImportedDomains', () => {
@@ -45,24 +53,66 @@ describe('replaceCookiesForImportedDomains', () => {
     ]
     const get = vi.fn().mockResolvedValue(existing)
     const remove = vi.fn().mockResolvedValue(undefined)
+    const set = vi.fn().mockResolvedValue(undefined)
 
-    const removed = await replaceCookiesForImportedDomains({ get, remove }, ['accounts.google.com'])
+    const removed = await replaceCookiesForImportedDomains({ get, remove, set }, [
+      'accounts.google.com'
+    ])
 
-    expect(removed).toBe(3)
+    expect(removed).toHaveLength(3)
     expect(get).toHaveBeenCalledWith({})
     expect(remove.mock.calls).toEqual([
       ['https://google.com/', 'parent'],
       ['https://accounts.google.com/signin', 'exact'],
       ['http://child.accounts.google.com/nested', 'child']
     ])
+    expect(set).not.toHaveBeenCalled()
   })
 
   it('does not read or mutate the store when no valid domain scope exists', async () => {
     const get = vi.fn()
     const remove = vi.fn()
+    const set = vi.fn()
 
-    await expect(replaceCookiesForImportedDomains({ get, remove }, ['', '...'])).resolves.toBe(0)
+    await expect(
+      replaceCookiesForImportedDomains({ get, remove, set }, [
+        '',
+        '...',
+        'com',
+        'co.uk',
+        'github.io'
+      ])
+    ).resolves.toEqual([])
     expect(get).not.toHaveBeenCalled()
     expect(remove).not.toHaveBeenCalled()
+    expect(set).not.toHaveBeenCalled()
+  })
+
+  it('restores cookies removed before a later removal fails', async () => {
+    const existing = [
+      cookie('.example.com', 'first', '/one'),
+      cookie('.example.com', 'second', '/two')
+    ]
+    const get = vi.fn().mockResolvedValue(existing)
+    const remove = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('cookie store unavailable'))
+    const set = vi.fn().mockResolvedValue(undefined)
+
+    await expect(
+      replaceCookiesForImportedDomains({ get, remove, set }, ['example.com'])
+    ).rejects.toThrow('cookie store unavailable')
+    expect(set).toHaveBeenCalledOnce()
+    expect(set).toHaveBeenCalledWith({
+      url: 'https://example.com/one',
+      name: 'first',
+      value: 'secret',
+      domain: '.example.com',
+      path: '/one',
+      secure: true,
+      httpOnly: undefined,
+      sameSite: 'unspecified'
+    })
   })
 })

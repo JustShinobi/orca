@@ -30,7 +30,7 @@ vi.mock('electron', () => ({
 
 import { importCookiesFromBrowser, importCookiesFromFile } from './browser-cookie-import'
 import { createChromiumCookieTestDatabase } from './browser-cookie-import-test-database'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -109,6 +109,52 @@ describe('validated cookie replacement', () => {
     expect(cookiesSetMock).not.toHaveBeenCalled()
   })
 
+  it('rejects URL-shaped domains before replacement can clear their normalized scope', async () => {
+    const filePath = writeCookies([
+      { domain: 'example.com/path', name: 'session', value: 'new', secure: true }
+    ])
+
+    const result = await importCookiesFromFile(filePath, 'persist:test')
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'No valid cookies found. 1 entries were skipped due to missing or invalid fields.'
+    })
+    expect(cookiesGetMock).not.toHaveBeenCalled()
+    expect(cookiesRemoveMock).not.toHaveBeenCalled()
+    expect(cookiesSetMock).not.toHaveBeenCalled()
+  })
+
+  it('restores the previous snapshot when an incoming cookie is rejected', async () => {
+    cookiesGetMock.mockResolvedValue([cookie('.example.com', 'existing')])
+    cookiesSetMock
+      .mockResolvedValue(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('cookie rejected'))
+    const filePath = writeCookies([
+      { domain: '.example.com', name: 'first', value: 'new', secure: true },
+      { domain: '.example.com', name: 'second', value: 'new', secure: true }
+    ])
+
+    const result = await importCookiesFromFile(filePath, 'persist:test')
+
+    expect(result.ok).toBe(false)
+    expect(cookiesRemoveMock.mock.calls).toEqual([
+      ['https://example.com/', 'existing'],
+      ['https://example.com/', 'first']
+    ])
+    expect(cookiesSetMock).toHaveBeenLastCalledWith({
+      url: 'https://example.com/',
+      name: 'existing',
+      value: 'old',
+      domain: '.example.com',
+      path: '/',
+      secure: true,
+      httpOnly: undefined,
+      sameSite: 'unspecified'
+    })
+  })
+
   it('fails closed when existing cookies cannot be replaced', async () => {
     cookiesGetMock.mockRejectedValue(new Error('cookie store unavailable'))
     const filePath = writeCookies([
@@ -123,6 +169,7 @@ describe('validated cookie replacement', () => {
 })
 
 describe('native Chromium integrity-cookie accounting', () => {
+  let clearStorageDataMock: ReturnType<typeof vi.fn>
   let cookiesSetMock: ReturnType<typeof vi.fn>
   let tmpDir: string
 
@@ -132,6 +179,9 @@ describe('native Chromium integrity-cookie accounting', () => {
     execFileSyncMock.mockReset().mockImplementation(() => {
       throw new Error('OS browser version lookup unavailable')
     })
+    clearPendingCookieImportMock.mockClear()
+    setPendingCookieImportMock.mockClear()
+    clearStorageDataMock = vi.fn().mockResolvedValue(undefined)
     cookiesSetMock = vi.fn().mockResolvedValue(undefined)
     sessionFromPartitionMock.mockReset().mockReturnValue({
       cookies: {
@@ -139,7 +189,7 @@ describe('native Chromium integrity-cookie accounting', () => {
         remove: vi.fn().mockResolvedValue(undefined),
         set: cookiesSetMock
       },
-      clearStorageData: vi.fn().mockResolvedValue(undefined)
+      clearStorageData: clearStorageDataMock
     })
   })
 
@@ -170,6 +220,41 @@ describe('native Chromium integrity-cookie accounting', () => {
         domains: ['example.com', 'google.com']
       })
       expect(cookiesSetMock.mock.calls.map(([details]) => details.name)).toEqual(['SAPISID', 'AEC'])
+    } finally {
+      platformSpy.mockRestore()
+    }
+  })
+
+  it('preserves the destination when every source cookie is filtered or invalid', async () => {
+    const sourceCookiesPath = join(tmpDir, 'Chrome', 'Default', 'Network', 'Cookies')
+    const targetCookiesPath = join(tmpDir, 'userData', 'Partitions', 'test', 'Network', 'Cookies')
+    createChromiumCookieTestDatabase(sourceCookiesPath, [
+      { domain: '.google.com', name: 'AEC', value: 'source-bound' },
+      { domain: '.accounts.google.com', name: 'SIDCC', value: 'source-bound' },
+      { domain: 'example.com/path', name: 'invalid-domain', value: 'invalid' }
+    ]).close()
+    createChromiumCookieTestDatabase(targetCookiesPath, [
+      { domain: '.example.com', name: 'existing', value: 'keep' }
+    ]).close()
+    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+
+    try {
+      const result = await importCookiesFromBrowser(
+        chromeBrowser(sourceCookiesPath),
+        'persist:test'
+      )
+
+      expect(result.ok && result.summary).toEqual({
+        totalCookies: 3,
+        importedCookies: 0,
+        skippedCookies: 3,
+        domains: []
+      })
+      expect(clearStorageDataMock).not.toHaveBeenCalled()
+      expect(cookiesSetMock).not.toHaveBeenCalled()
+      expect(setPendingCookieImportMock).not.toHaveBeenCalled()
+      expect(clearPendingCookieImportMock).not.toHaveBeenCalled()
+      expect(readdirSync(join(tmpDir, 'userData', 'cookie-import-staging'))).toEqual([])
     } finally {
       platformSpy.mockRestore()
     }

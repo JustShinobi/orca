@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- Why: cookie import is one pipeline (detect → decrypt → stage → swap) that must stay together to keep encryption/schema/staging in sync. */
-import { app, type BrowserWindow, dialog, session } from 'electron'
+import { app, type BrowserWindow, type Cookie, dialog, session } from 'electron'
 import { execFileSync } from 'node:child_process'
 import { createDecipheriv, pbkdf2Sync, randomUUID } from 'node:crypto'
 import {
@@ -77,7 +77,10 @@ import { browserSessionRegistry } from './browser-session-registry'
 import { setupClientHintsOverride } from './browser-session-ua'
 import {
   isGoogleSourceBoundCookie,
+  normalizeCookieDomain,
+  normalizeCookieImportDomain,
   replaceCookiesForImportedDomains,
+  restoreImportedDomainCookies,
   type CookieImportMode
 } from './browser-cookie-import-policy'
 import {
@@ -505,13 +508,13 @@ function normalizeSameSite(raw: unknown): 'unspecified' | 'no_restriction' | 'la
 
 // Why: cookies.set() needs a url to scope the cookie; derive it from domain + secure flag.
 function deriveUrl(domain: string, secure: boolean): string | null {
-  const cleanDomain = domain.startsWith('.') ? domain.slice(1) : domain
-  if (!cleanDomain || cleanDomain.includes(' ')) {
+  const normalizedDomain = normalizeCookieDomain(domain)
+  if (!normalizedDomain) {
     return null
   }
   const protocol = secure ? 'https' : 'http'
   try {
-    const url = new URL(`${protocol}://${cleanDomain}/`)
+    const url = new URL(`${protocol}://${normalizedDomain}/`)
     return url.toString()
   } catch {
     return null
@@ -560,25 +563,36 @@ async function importValidatedCookies(
   targetPartition: string,
   mode: CookieImportMode
 ): Promise<BrowserCookieImportResult> {
-  const importableCookies = cookies.filter(
+  const importDomainCache = new Map<string, boolean>()
+  const validDomainCookies = cookies.filter((cookie) => {
+    let valid = importDomainCache.get(cookie.domain)
+    if (valid === undefined) {
+      valid = normalizeCookieImportDomain(cookie.domain) !== null
+      importDomainCache.set(cookie.domain, valid)
+    }
+    return valid
+  })
+  const importableCookies = validDomainCookies.filter(
     (cookie) => !isGoogleSourceBoundCookie(cookie.name, cookie.domain)
   )
-  const integritySkipped = cookies.length - importableCookies.length
+  const integritySkipped = validDomainCookies.length - importableCookies.length
+  const invalidDomainSkipped = cookies.length - validDomainCookies.length
   diag(
-    `importValidatedCookies: ${cookies.length} validated, ${integritySkipped} source-bound skipped of ${totalInput} total, partition="${targetPartition}"`
+    `importValidatedCookies: ${cookies.length} validated, ${invalidDomainSkipped} unsafe-domain skipped, ${integritySkipped} source-bound skipped of ${totalInput} total, partition="${targetPartition}"`
   )
   const targetSession = session.fromPartition(targetPartition)
   let importedCount = 0
   let skipped = totalInput - importableCookies.length
   const domainSet = new Set<string>()
+  let replacedCookies: Cookie[] | null = null
 
   if (mode === 'replace-imported-domains' && importableCookies.length > 0) {
     try {
-      const removed = await replaceCookiesForImportedDomains(
+      replacedCookies = await replaceCookiesForImportedDomains(
         targetSession.cookies,
         importableCookies.map((cookie) => cookie.domain)
       )
-      diag(`  removed ${removed} existing cookies in imported domain scopes`)
+      diag(`  removed ${replacedCookies.length} existing cookies in imported domain scopes`)
     } catch (err) {
       diag(`  existing cookie replacement failed: ${summarizeCookieImportError(err)}`)
       return {
@@ -590,28 +604,35 @@ async function importValidatedCookies(
 
   // Why: Electron's cookies.set() rejects any non-printable-ASCII byte; strip as a safety net.
   const stripNonPrintable = (s: string): string => s.replace(/[^\x20-\x7E]/g, '')
+  const importedCookieKeys: { url: string; name: string }[] = []
+  let setFailure: unknown = null
 
   for (const cookie of importableCookies) {
     try {
       // Why: Chromium rejects __Host- cookies unless they omit domain and use path=/.
       const isHostPrefixed = cookie.name.startsWith('__Host-')
+      const path = isHostPrefixed ? '/' : cookie.path
       await targetSession.cookies.set({
         url: cookie.url,
         name: cookie.name,
         value: stripNonPrintable(cookie.value),
         ...(isHostPrefixed ? {} : { domain: cookie.domain }),
-        path: isHostPrefixed ? '/' : cookie.path,
+        path,
         secure: cookie.secure,
         httpOnly: cookie.httpOnly,
         sameSite: cookie.sameSite,
         expirationDate: cookie.expirationDate
       })
+      const removalUrl = new URL(cookie.url)
+      removalUrl.pathname = path.startsWith('/') ? path : '/'
+      importedCookieKeys.push({ url: removalUrl.toString(), name: cookie.name })
       importedCount++
       // Why: surface only the domain (never name/value/path) so the summary doesn't leak secret cookie data.
       const cleanDomain = cookie.domain.startsWith('.') ? cookie.domain.slice(1) : cookie.domain
       domainSet.add(cleanDomain)
     } catch (err) {
       skipped++
+      setFailure = err
       if (skipped <= 5) {
         // Find the exact offending character position and code
         const val = cookie.value
@@ -627,6 +648,32 @@ async function importValidatedCookies(
           `  cookie.set FAILED: domain=${cookie.domain} name=${cookie.name} valLen=${val.length} badChar=${badInfo} err=${String(err)}`
         )
       }
+      if (replacedCookies) {
+        break
+      }
+    }
+  }
+
+  if (setFailure && replacedCookies) {
+    const rollbackFailures: unknown[] = []
+    for (const cookie of importedCookieKeys.toReversed()) {
+      try {
+        await targetSession.cookies.remove(cookie.url, cookie.name)
+      } catch (err) {
+        rollbackFailures.push(err)
+      }
+    }
+    try {
+      await restoreImportedDomainCookies(targetSession.cookies, replacedCookies)
+    } catch (err) {
+      rollbackFailures.push(err)
+    }
+    if (rollbackFailures.length > 0) {
+      diag(`  cookie replacement rollback failed: ${rollbackFailures.length} operation(s)`)
+    }
+    return {
+      ok: false,
+      reason: reasonWithDiagLog('Could not safely replace cookies for the imported sites.')
     }
   }
 
@@ -1633,6 +1680,7 @@ export async function importCookiesFromBrowser(
     }
 
     const decryptedCookies: DecryptedCookie[] = []
+    const sourceDomainValidity = new Map<string, boolean>()
 
     // Why: staging only backs the cold-restart replay, so any failure writing it disables that
     // fallback instead of aborting an import whose in-memory half still works.
@@ -1688,6 +1736,16 @@ export async function importCookiesFromBrowser(
         continue
       }
 
+      let validDomain = sourceDomainValidity.get(domain)
+      if (validDomain === undefined) {
+        validDomain = normalizeCookieImportDomain(domain) !== null
+        sourceDomainValidity.set(domain, validDomain)
+      }
+      if (!validDomain) {
+        skipped++
+        continue
+      }
+
       const cleanDomain = domain.startsWith('.') ? domain.slice(1) : domain
       domainSet.add(cleanDomain)
 
@@ -1728,6 +1786,21 @@ export async function importCookiesFromBrowser(
       imported++
     }
     diag(`  skipped ${integritySkipped} Google integrity cookies (SIDCC/STRP/AEC)`)
+
+    if (decryptedCookies.length === 0) {
+      closeStagingDb()
+      discardStagingFile()
+      return {
+        ok: true,
+        profileId: '',
+        summary: {
+          totalCookies: sourceRows.length,
+          importedCookies: 0,
+          skippedCookies: skipped + integritySkipped,
+          domains: []
+        }
+      }
+    }
 
     if (stagingDb) {
       try {

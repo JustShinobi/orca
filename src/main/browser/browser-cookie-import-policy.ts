@@ -1,4 +1,5 @@
 import type { Cookie, Cookies } from 'electron'
+import { parse as parseDomain } from 'psl'
 
 const GOOGLE_SOURCE_BOUND_COOKIE_NAMES = new Set([
   'SIDCC',
@@ -12,14 +13,44 @@ export type CookieImportMode = 'merge' | 'replace-imported-domains'
 
 export function normalizeCookieDomain(domain: string): string | null {
   const candidate = domain.trim().replace(/^\.+/, '')
-  if (!candidate) {
+  const isBracketedIpv6 = candidate.startsWith('[') && candidate.endsWith(']')
+  if (!candidate || /[/\\@?#%]/.test(candidate) || (!isBracketedIpv6 && candidate.includes(':'))) {
     return null
   }
   try {
-    return new URL(`https://${candidate}/`).hostname.toLowerCase()
+    const parsed = new URL(`https://${candidate}/`)
+    const normalized = parsed.hostname.toLowerCase()
+    if (
+      parsed.username ||
+      parsed.password ||
+      parsed.port ||
+      parsed.pathname !== '/' ||
+      parsed.search ||
+      parsed.hash ||
+      normalized.endsWith('.') ||
+      normalized.includes('..')
+    ) {
+      return null
+    }
+    return normalized
   } catch {
     return null
   }
+}
+
+export function normalizeCookieImportDomain(domain: string): string | null {
+  const normalized = normalizeCookieDomain(domain)
+  if (!normalized) {
+    return null
+  }
+  const parsed = parseDomain(normalized)
+  if ('error' in parsed) {
+    return normalized.startsWith('[') && normalized.endsWith(']') ? normalized : null
+  }
+  if (parsed.domain === null && parsed.listed) {
+    return null
+  }
+  return normalized
 }
 
 export function isGoogleSourceBoundCookie(name: string, domain: string): boolean {
@@ -41,8 +72,14 @@ function importedDomainScopes(domains: readonly string[]): {
 } {
   const exact = new Set<string>()
   const ancestors = new Set<string>()
+  const seen = new Set<string>()
   for (const domain of domains) {
-    const normalized = normalizeCookieDomain(domain)
+    const candidate = normalizeCookieDomain(domain)
+    if (!candidate || seen.has(candidate)) {
+      continue
+    }
+    seen.add(candidate)
+    const normalized = normalizeCookieImportDomain(candidate)
     if (!normalized || exact.has(normalized)) {
       continue
     }
@@ -74,17 +111,49 @@ function cookieRemovalUrl(cookie: Cookie, domain: string): string | null {
   }
 }
 
+export async function restoreImportedDomainCookies(
+  store: Pick<Cookies, 'set'>,
+  cookies: readonly Cookie[]
+): Promise<void> {
+  const failures: unknown[] = []
+  for (const cookie of cookies) {
+    try {
+      const domain = cookie.domain ? normalizeCookieDomain(cookie.domain) : null
+      const url = domain ? cookieRemovalUrl(cookie, domain) : null
+      if (!url) {
+        continue
+      }
+      await store.set({
+        url,
+        name: cookie.name,
+        value: cookie.value,
+        ...(cookie.hostOnly ? {} : { domain: cookie.domain }),
+        ...(cookie.path ? { path: cookie.path } : {}),
+        secure: cookie.secure,
+        httpOnly: cookie.httpOnly,
+        sameSite: cookie.sameSite,
+        ...(cookie.expirationDate ? { expirationDate: cookie.expirationDate } : {})
+      })
+    } catch (err) {
+      failures.push(err)
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Could not restore replaced cookies')
+  }
+}
+
 export async function replaceCookiesForImportedDomains(
-  store: Pick<Cookies, 'get' | 'remove'>,
+  store: Pick<Cookies, 'get' | 'remove' | 'set'>,
   importedDomains: readonly string[]
-): Promise<number> {
+): Promise<Cookie[]> {
   const scopes = importedDomainScopes(importedDomains)
   if (scopes.exact.size === 0) {
-    return 0
+    return []
   }
 
   const existingCookies = await store.get({})
-  let removed = 0
+  const removedCookies: Cookie[] = []
   for (const cookie of existingCookies) {
     const domain = cookie.domain ? normalizeCookieDomain(cookie.domain) : null
     if (!domain || !overlapsImportedDomain(domain, scopes)) {
@@ -94,8 +163,17 @@ export async function replaceCookiesForImportedDomains(
     if (!url) {
       continue
     }
-    await store.remove(url, cookie.name)
-    removed++
+    try {
+      await store.remove(url, cookie.name)
+      removedCookies.push(cookie)
+    } catch (err) {
+      try {
+        await restoreImportedDomainCookies(store, removedCookies)
+      } catch (restoreError) {
+        throw new AggregateError([err, restoreError], 'Cookie replacement and rollback failed')
+      }
+      throw err
+    }
   }
-  return removed
+  return removedCookies
 }

@@ -370,7 +370,7 @@ describe('importCookiesFromFile', () => {
     expect(cookiesSetMock.mock.calls[2][0].url).toBe('http://nodot.com/')
   })
 
-  it('counts cookies that fail to set', async () => {
+  it('rolls back replacement when a cookie fails to set', async () => {
     cookiesSetMock.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('set failed'))
 
     const filePath = writeCookieFile([
@@ -379,12 +379,8 @@ describe('importCookiesFromFile', () => {
     ])
 
     const result = await importCookiesFromFile(filePath, 'persist:test')
-    expect(result.ok).toBe(true)
-    if (!result.ok) {
-      return
-    }
-    expect(result.summary.importedCookies).toBe(1)
-    expect(result.summary.skippedCookies).toBe(1)
+    expect(result.ok).toBe(false)
+    expect(cookiesRemoveMock).toHaveBeenCalledWith('http://a.com/', 'ok')
   })
 })
 
