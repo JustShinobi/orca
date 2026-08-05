@@ -160,14 +160,22 @@ function buildExpiredSafariCookie(index: number): Buffer {
 
 describe('importCookiesFromFile', () => {
   let tmpDir: string
+  let cookiesGetMock: ReturnType<typeof vi.fn>
+  let cookiesRemoveMock: ReturnType<typeof vi.fn>
   let cookiesSetMock: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'orca-cookie-test-'))
+    cookiesGetMock = vi.fn().mockResolvedValue([])
+    cookiesRemoveMock = vi.fn().mockResolvedValue(undefined)
     cookiesSetMock = vi.fn().mockResolvedValue(undefined)
     sessionFromPartitionMock.mockReset()
     sessionFromPartitionMock.mockReturnValue({
-      cookies: { set: cookiesSetMock }
+      cookies: {
+        get: cookiesGetMock,
+        remove: cookiesRemoveMock,
+        set: cookiesSetMock
+      }
     })
   })
 

@@ -76,6 +76,11 @@ import type {
 import { browserSessionRegistry } from './browser-session-registry'
 import { setupClientHintsOverride } from './browser-session-ua'
 import {
+  isGoogleSourceBoundCookie,
+  replaceCookiesForImportedDomains,
+  type CookieImportMode
+} from './browser-cookie-import-policy'
+import {
   createChromiumCookieSnapshot,
   type ChromiumCookieSnapshot
 } from './chromium-cookie-snapshot'
@@ -552,20 +557,41 @@ function validateCookieEntry(raw: RawCookieEntry): ValidatedCookie | null {
 async function importValidatedCookies(
   cookies: ValidatedCookie[],
   totalInput: number,
-  targetPartition: string
+  targetPartition: string,
+  mode: CookieImportMode
 ): Promise<BrowserCookieImportResult> {
+  const importableCookies = cookies.filter(
+    (cookie) => !isGoogleSourceBoundCookie(cookie.name, cookie.domain)
+  )
+  const integritySkipped = cookies.length - importableCookies.length
   diag(
-    `importValidatedCookies: ${cookies.length} validated of ${totalInput} total, partition="${targetPartition}"`
+    `importValidatedCookies: ${cookies.length} validated, ${integritySkipped} source-bound skipped of ${totalInput} total, partition="${targetPartition}"`
   )
   const targetSession = session.fromPartition(targetPartition)
   let importedCount = 0
-  let skipped = totalInput - cookies.length
+  let skipped = totalInput - importableCookies.length
   const domainSet = new Set<string>()
+
+  if (mode === 'replace-imported-domains' && importableCookies.length > 0) {
+    try {
+      const removed = await replaceCookiesForImportedDomains(
+        targetSession.cookies,
+        importableCookies.map((cookie) => cookie.domain)
+      )
+      diag(`  removed ${removed} existing cookies in imported domain scopes`)
+    } catch (err) {
+      diag(`  existing cookie replacement failed: ${summarizeCookieImportError(err)}`)
+      return {
+        ok: false,
+        reason: reasonWithDiagLog('Could not replace existing cookies for the imported sites.')
+      }
+    }
+  }
 
   // Why: Electron's cookies.set() rejects any non-printable-ASCII byte; strip as a safety net.
   const stripNonPrintable = (s: string): string => s.replace(/[^\x20-\x7E]/g, '')
 
-  for (const cookie of cookies) {
+  for (const cookie of importableCookies) {
     try {
       // Why: Chromium rejects __Host- cookies unless they omit domain and use path=/.
       const isHostPrefixed = cookie.name.startsWith('__Host-')
@@ -690,7 +716,12 @@ export async function importCookiesFromFile(
     }
   }
 
-  return importValidatedCookies(validated, parsed.length, targetPartition)
+  return importValidatedCookies(
+    validated,
+    parsed.length,
+    targetPartition,
+    'replace-imported-domains'
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -1338,7 +1369,12 @@ async function importCookiesFromFirefox(
       return { ok: false, reason: 'No valid cookies found in Firefox.' }
     }
 
-    return importValidatedCookies(validated, rows.length, targetPartition)
+    return importValidatedCookies(
+      validated,
+      rows.length,
+      targetPartition,
+      'replace-imported-domains'
+    )
   } catch (err) {
     rmSync(tmpDir, { recursive: true, force: true })
     diag(`  Firefox import failed: ${String(err)}`)
@@ -1392,7 +1428,12 @@ async function importCookiesFromSafari(
       return { ok: false, reason: 'All Safari cookies are expired.' }
     }
 
-    return importValidatedCookies(valid, cookies.length, targetPartition)
+    return importValidatedCookies(
+      valid,
+      cookies.length,
+      targetPartition,
+      'replace-imported-domains'
+    )
   } catch (err) {
     diag(`  Safari import failed: ${String(err)}`)
     return { ok: false, reason: 'Could not import cookies from Safari.' }
@@ -1572,22 +1613,6 @@ export async function importCookiesFromBrowser(
       }
     }
 
-    // Why: Google integrity cookies are bound to the source browser's TLS/env; importing them triggers CookieMismatch, so skip and let Google reissue.
-    const INTEGRITY_COOKIE_NAMES = new Set([
-      'SIDCC',
-      '__Secure-1PSIDCC',
-      '__Secure-3PSIDCC',
-      '__Secure-STRP',
-      'AEC'
-    ])
-    function isIntegrityCookie(name: string, domain: string): boolean {
-      if (!INTEGRITY_COOKIE_NAMES.has(name)) {
-        return false
-      }
-      const d = domain.startsWith('.') ? domain.slice(1) : domain
-      return d === 'google.com' || d.endsWith('.google.com')
-    }
-
     let imported = 0
     let skipped = 0
     let integritySkipped = 0
@@ -1658,7 +1683,7 @@ export async function importCookiesFromBrowser(
       const domain = sourceRow.host_key as string
       const name = sourceRow.name as string
 
-      if (isIntegrityCookie(name, domain)) {
+      if (isGoogleSourceBoundCookie(name, domain)) {
         integritySkipped++
         continue
       }
@@ -1786,7 +1811,7 @@ export async function importCookiesFromBrowser(
     const summary: BrowserCookieImportSummary = {
       totalCookies: sourceRows.length,
       importedCookies: imported,
-      skippedCookies: skipped,
+      skippedCookies: skipped + integritySkipped,
       domains: [...domainSet].sort(),
       ...(warning ? { warning } : {})
     }
