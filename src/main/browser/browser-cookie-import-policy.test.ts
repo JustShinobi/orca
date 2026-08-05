@@ -88,6 +88,20 @@ describe('replaceCookiesForImportedDomains', () => {
     expect(set).not.toHaveBeenCalled()
   })
 
+  it('keeps single-label intranet scopes from selecting descendant hosts', async () => {
+    const get = vi
+      .fn()
+      .mockResolvedValue([cookie('local', 'exact'), cookie('.service.local', 'descendant')])
+    const remove = vi.fn().mockResolvedValue(undefined)
+    const set = vi.fn().mockResolvedValue(undefined)
+
+    const removed = await replaceCookiesForImportedDomains({ get, remove, set }, ['local'])
+
+    expect(removed.map(({ name }) => name)).toEqual(['exact'])
+    expect(remove).toHaveBeenCalledOnce()
+    expect(remove).toHaveBeenCalledWith('https://local/', 'exact')
+  })
+
   it('restores cookies removed before a later removal fails', async () => {
     const existing = [
       cookie('.example.com', 'first', '/one'),

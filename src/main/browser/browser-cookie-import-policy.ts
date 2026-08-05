@@ -69,9 +69,11 @@ function domainSuffixes(domain: string): string[] {
 function importedDomainScopes(domains: readonly string[]): {
   exact: Set<string>
   ancestors: Set<string>
+  descendantRoots: Set<string>
 } {
   const exact = new Set<string>()
   const ancestors = new Set<string>()
+  const descendantRoots = new Set<string>()
   const seen = new Set<string>()
   for (const domain of domains) {
     const candidate = normalizeCookieDomain(domain)
@@ -84,11 +86,14 @@ function importedDomainScopes(domains: readonly string[]): {
       continue
     }
     exact.add(normalized)
+    if (normalized.includes('.')) {
+      descendantRoots.add(normalized)
+    }
     for (const suffix of domainSuffixes(normalized)) {
       ancestors.add(suffix)
     }
   }
-  return { exact, ancestors }
+  return { exact, ancestors, descendantRoots }
 }
 
 function overlapsImportedDomain(
@@ -98,7 +103,7 @@ function overlapsImportedDomain(
   if (scopes.ancestors.has(domain)) {
     return true
   }
-  return domainSuffixes(domain).some((suffix) => scopes.exact.has(suffix))
+  return domainSuffixes(domain).some((suffix) => scopes.descendantRoots.has(suffix))
 }
 
 function cookieRemovalUrl(cookie: Cookie, domain: string): string | null {
