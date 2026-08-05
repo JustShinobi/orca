@@ -70,7 +70,14 @@ jobs:
       - name: Package AppImage
         env:
           ORCA_REUSE_PREPARED_NATIVE_RUNTIME: '1'
-        run: pnpm exec electron-builder --config config/electron-builder.config.cjs --linux AppImage
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        # Why: config/electron-builder.config.cjs hardcodes publish.owner/repo to
+        # stablyai/orca (the upstream project). Override both so this fork's
+        # build publishes to JustShinobi/orca instead of the real upstream repo.
+        run: |
+          pnpm exec electron-builder --config config/electron-builder.config.cjs --linux AppImage \
+            -c.publish.owner="${{ github.repository_owner }}" \
+            -c.publish.repo="${{ github.event.repository.name }}"
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
@@ -126,7 +133,14 @@ jobs:
         env:
           ORCA_REUSE_PREPARED_NATIVE_RUNTIME: '1'
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: pnpm exec electron-builder --config config/electron-builder.config.cjs --win nsis
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        # Why: config/electron-builder.config.cjs hardcodes publish.owner/repo to
+        # stablyai/orca (the upstream project). Override both so this fork's
+        # build publishes to JustShinobi/orca instead of the real upstream repo.
+        run: |
+          pnpm exec electron-builder --config config/electron-builder.config.cjs --win nsis `
+            "-c.publish.owner=${{ github.repository_owner }}" `
+            "-c.publish.repo=${{ github.event.repository.name }}"
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
