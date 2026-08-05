@@ -11,7 +11,6 @@ import {
   CommandEmpty,
   CommandItem
 } from '@/components/ui/command'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { prepareQuickOpenFiles, rankQuickOpenFiles } from '@/components/quick-open-search'
 import { useRuntimeFileListForWorktree } from '@/components/quick-open-file-list'
 import { useModalReturnFocus } from '@/hooks/useModalReturnFocus'
@@ -153,28 +152,17 @@ export default function QuickOpen(): React.JSX.Element | null {
             const FileIcon = getFileTypeIcon(item.path)
 
             return (
-              <Tooltip key={item.path}>
-                <TooltipTrigger asChild>
-                  <div className="min-w-0">
-                    <CommandItem
-                      value={item.path}
-                      onSelect={() => handleSelect(item.path)}
-                      className="flex min-w-0 items-center gap-2 px-3 py-1.5"
-                    >
-                      <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 shrink-0 truncate text-foreground">{filename}</span>
-                      {dir && <span className="min-w-0 truncate text-muted-foreground">{dir}</span>}
-                    </CommandItem>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent
-                  side="top"
-                  sideOffset={4}
-                  className="max-w-[min(90vw,600px)] break-all font-mono"
-                >
-                  {item.path}
-                </TooltipContent>
-              </Tooltip>
+              <CommandItem
+                key={item.path}
+                value={item.path}
+                title={item.path}
+                onSelect={() => handleSelect(item.path)}
+                className="flex min-w-0 items-center gap-2 px-3 py-1.5"
+              >
+                <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 shrink-0 truncate text-foreground">{filename}</span>
+                {dir && <span className="min-w-0 truncate text-muted-foreground">{dir}</span>}
+              </CommandItem>
             )
           })
         )}

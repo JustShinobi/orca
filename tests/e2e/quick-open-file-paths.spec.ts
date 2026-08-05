@@ -6,7 +6,7 @@ import { ensureTerminalVisible, waitForActiveWorktree, waitForSessionReady } fro
 const relativeFilePath =
   'packages/orca/src/renderer/src/components/navigation/worktree/quick-open/long-path-fixtures/very-deeply-nested-folder/QuickOpenTarget.tsx'
 
-test('cmd+p quick open prioritizes the filename and reveals the full path on hover', async ({
+test('cmd+p quick open prioritizes the filename and exposes the full path natively', async ({
   electronApp,
   orcaPage,
   testRepoPath
@@ -37,9 +37,7 @@ test('cmd+p quick open prioritizes the filename and reveals the full path on hov
   )
 
   await row.hover({ force: true })
-  await expect(
-    orcaPage.locator('[role="tooltip"]').filter({ hasText: relativeFilePath })
-  ).toBeVisible()
+  await expect(row).toHaveAttribute('title', relativeFilePath)
 
   const proofPath = process.env.ORCA_QUICK_OPEN_PROOF_PATH
   if (proofPath) {
