@@ -8512,6 +8512,7 @@ export function connectPanePty(
       // Why: a removed SSH target (ghost workspace) would fail reattach with a spurious "file an issue" banner for an expected action, so skip it (runtime-owned targets exempt).
       // A present map missing this id = target removed; an absent map = not yet hydrated (test stubs), so don't treat it as gone.
       if (
+        runtimeEnvironmentId === null &&
         !isRuntimeOwnedSshTargetId(connectionId) &&
         storeState.sshTargetLabels instanceof Map &&
         !storeState.sshTargetLabels.has(connectionId)
@@ -8524,6 +8525,7 @@ export function connectPanePty(
           : null
       const gate = resolveSshPaneConnectGate({
         connectionId,
+        sshOwnerEnvironmentId: runtimeEnvironmentId,
         sshStatus: storeState.sshConnectionStates.get(connectionId)?.status,
         isDeferredTarget: storeState.deferredSshReconnectTargets.includes(connectionId),
         restoredLeafSessionId,

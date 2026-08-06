@@ -3998,7 +3998,9 @@
           "35831a7312": "添加...",
           "lockedDescription": "输入 {{value0}} 上 Git 仓库的路径。",
           "lockedDisconnected": "{{value0}} 已断开连接。",
-          "93e0221434": "连接"
+          "93e0221434": "连接",
+          "noServerSshTargets": "No SSH targets configured on this Orca server.",
+          "backToHostMenu": "Back to host menu"
         },
         "AddRepoServerStartStep": {
           "ae990c86a0": "返回添加选项",
@@ -5044,12 +5046,16 @@
           "sshImportAlreadySynced": "~/.ssh/config 已同步。",
           "sshImportSynced": "已同步 {{value0}} 个主机{{value1}}。",
           "sshImportFailed": "导入 SSH 配置失败。",
+          "importing": "正在导入...",
+          "importSshConfig": "导入 ~/.ssh/config",
           "sshPersistenceDefault": "此主机上的远程终端会保持运行，直到你结束它们或重置中继。",
           "advanced": "Advanced",
           "linkDestination": "链接目标",
           "sshTunnel": "我正在使用 SSH 隧道",
           "sshTunnelHelp": "否则，此链接会指回此设备，无法识别另一台计算机。",
-          "loopbackBlocked": "启用 SSH 隧道选项，或使用另一台主机的 Tailscale 或 LAN 地址创建新链接。"
+          "loopbackBlocked": "启用 SSH 隧道选项，或使用另一台主机的 Tailscale 或 LAN 地址创建新链接。",
+          "sshServerTitle": "Add SSH host to {{value0}}",
+          "sshServerDescription": "Save this SSH machine on {{value0}} so projects and workspaces run through that server."
         },
         "ForgetSshWorkspaceDialog": {
           "reconnectFailed": "重新连接失败",

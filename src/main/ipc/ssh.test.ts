@@ -261,6 +261,7 @@ vi.mock('../ssh/ssh-port-scanner', () => ({
 import {
   beginSshShutdown,
   SSH_SHUTDOWN_BUDGET_MS,
+  connectRegisteredSshTarget,
   getActiveMultiplexer,
   getSshConnectionManager,
   registerSshHandlers,
@@ -1005,6 +1006,35 @@ describe('SSH IPC handlers', () => {
         connectionGeneration: 1
       })
     })
+  })
+
+  it('connects registered targets without a BrowserWindow', async () => {
+    const runtime = {
+      notifySshStateChanged: vi.fn()
+    }
+    registerSshHandlers(mockStore as never, () => null, runtime as never)
+    const target: SshTarget = {
+      id: 'ssh-1',
+      label: 'Headless Server Target',
+      host: 'example.com',
+      port: 22,
+      username: 'deploy'
+    }
+    const connectedState = {
+      targetId: 'ssh-1',
+      status: 'connected' as const,
+      error: null,
+      reconnectAttempt: 0
+    }
+    mockSshStore.getTarget.mockReturnValue(target)
+    mockConnectionManager.connect.mockResolvedValue({})
+    mockConnectionManager.getState.mockReturnValue(connectedState)
+
+    await expect(connectRegisteredSshTarget('ssh-1')).resolves.toEqual(connectedState)
+
+    expect(mockConnectionManager.connect).toHaveBeenCalledWith(target)
+    expect(runtime.notifySshStateChanged).toHaveBeenCalledWith('ssh-1', connectedState)
+    expect(mockWindow.webContents.send).not.toHaveBeenCalled()
   })
 
   it('ssh:connect exposes the detected remote platform in public state', async () => {

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   addRemote: vi.fn(),
   listTargets: vi.fn(),
   getState: vi.fn(),
+  runtimeRpc: vi.fn(),
   onStateChanged: vi.fn(() => vi.fn()),
   fetchWorktrees: vi.fn(),
   onGitRepoReady: vi.fn()
@@ -48,6 +49,10 @@ vi.mock('react', async (importOriginal) => {
 
 vi.mock('@/hooks/useMountedRef', () => ({
   useMountedRef: () => ({ current: true })
+}))
+
+vi.mock('@/runtime/runtime-rpc-client', () => ({
+  callRuntimeRpc: mocks.runtimeRpc
 }))
 
 vi.mock('@/store', () => {
@@ -101,6 +106,7 @@ describe('useRemoteRepo default-checkout handoff', () => {
       { id: 'ssh-2', label: 'Builder 2' }
     ])
     mocks.getState.mockResolvedValue({ status: 'connected' })
+    mocks.runtimeRpc.mockReset()
     vi.stubGlobal('window', {
       api: {
         ssh: {
@@ -195,6 +201,53 @@ describe('useRemoteRepo default-checkout handoff', () => {
     expect(mocks.stateSetters[1]).toHaveBeenCalledWith('ssh-2')
   })
 
+  it('loads SSH targets from the selected runtime server', async () => {
+    mocks.stateValues = [[], null, '~/', null, false, null]
+    mocks.runtimeRpc.mockImplementation(
+      (_target: unknown, method: string, params?: { targetId?: string }) => {
+        if (method === 'ssh.listTargets') {
+          return Promise.resolve({ targets: [{ id: 'ssh-p8', label: 'p8' }] })
+        }
+        if (method === 'ssh.getState') {
+          return Promise.resolve({
+            state: {
+              targetId: params?.targetId,
+              status: 'connected',
+              error: null,
+              reconnectAttempt: 0
+            }
+          })
+        }
+        throw new Error(`Unexpected method: ${method}`)
+      }
+    )
+    const { useRemoteRepo } = await import('./AddRepoSteps')
+
+    const result = useRemoteRepo(
+      mocks.fetchWorktrees,
+      vi.fn(),
+      vi.fn(),
+      mocks.onGitRepoReady,
+      vi.fn().mockResolvedValue(null),
+      undefined,
+      undefined,
+      'env-linux'
+    )
+    await result.handleOpenRemoteStep('ssh-p8')
+
+    expect(mocks.runtimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'env-linux' },
+      'ssh.listTargets'
+    )
+    expect(mocks.runtimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'env-linux' },
+      'ssh.getState',
+      { targetId: 'ssh-p8' }
+    )
+    expect(mocks.listTargets).not.toHaveBeenCalled()
+    expect(mocks.stateSetters[1]).toHaveBeenCalledWith('ssh-p8')
+  })
+
   it('pins SSH nested scans and cancellation to the local provider', async () => {
     const scanNestedRepos = vi.fn().mockResolvedValue(null)
     mocks.addRemote.mockResolvedValue({ repo: makeRepo() })
@@ -225,5 +278,33 @@ describe('useRemoteRepo default-checkout handoff', () => {
     expect(mocks.storeState.cancelNestedRepoScan).toHaveBeenCalledWith('scan-ssh', {
       runtimeEnvironmentId: null
     })
+  })
+
+  it('adds an SSH project through the selected runtime server', async () => {
+    const repo = makeRepo({ connectionId: 'ssh-p8', executionHostId: 'runtime:env-linux' })
+    mocks.stateValues = [[], 'ssh-p8', '/srv/repo', null, false, null]
+    mocks.runtimeRpc.mockResolvedValue({ repo })
+    mocks.fetchWorktrees.mockResolvedValue(true)
+    const { useRemoteRepo } = await import('./AddRepoSteps')
+
+    const result = useRemoteRepo(
+      mocks.fetchWorktrees,
+      vi.fn(),
+      vi.fn(),
+      mocks.onGitRepoReady,
+      vi.fn().mockResolvedValue(null),
+      undefined,
+      undefined,
+      'env-linux'
+    )
+    await result.handleAddRemoteRepo()
+
+    expect(mocks.runtimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'env-linux' },
+      'repo.addRemote',
+      { connectionId: 'ssh-p8', remotePath: '/srv/repo' }
+    )
+    expect(mocks.addRemote).not.toHaveBeenCalled()
+    expect(mocks.onGitRepoReady).toHaveBeenCalledWith(repo.id)
   })
 })

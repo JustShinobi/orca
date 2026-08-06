@@ -4005,7 +4005,9 @@
           "35831a7312": "Agregando...",
           "lockedDescription": "Introduce la ruta a un repositorio Git en {{value0}}.",
           "lockedDisconnected": "{{value0}} está desconectado.",
-          "93e0221434": "Conectar"
+          "93e0221434": "Conectar",
+          "noServerSshTargets": "No SSH targets configured on this Orca server.",
+          "backToHostMenu": "Back to host menu"
         },
         "AddRepoServerStartStep": {
           "ae990c86a0": "Volver a opciones de agregado",
@@ -5032,12 +5034,16 @@
           "sshImportAlreadySynced": "~/.ssh/config ya está sincronizado.",
           "sshImportSynced": "Se sincronizó {{value0}} host{{value1}}.",
           "sshImportFailed": "No se pudo importar la configuración SSH.",
+          "importing": "Importando...",
+          "importSshConfig": "Importar ~/.ssh/config",
           "sshPersistenceDefault": "Los terminales remotos en este host seguirán activos hasta que los cierres o restablezcas el relay.",
           "advanced": "Advanced",
           "linkDestination": "Destino del enlace",
           "sshTunnel": "Estoy usando un túnel SSH",
           "sshTunnelHelp": "De lo contrario, este enlace apunta a este dispositivo y no puede identificar el otro equipo.",
-          "loopbackBlocked": "Activa la opción de túnel SSH o crea un enlace nuevo con la dirección de Tailscale o LAN del otro host."
+          "loopbackBlocked": "Activa la opción de túnel SSH o crea un enlace nuevo con la dirección de Tailscale o LAN del otro host.",
+          "sshServerTitle": "Add SSH host to {{value0}}",
+          "sshServerDescription": "Save this SSH machine on {{value0}} so projects and workspaces run through that server."
         },
         "ForgetSshWorkspaceDialog": {
           "reconnectFailed": "Error de reconexión",

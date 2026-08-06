@@ -127,7 +127,10 @@ import { resolveDirectSshTerminalWorkspaceKeys } from './direct-ssh-terminal-wor
 import { hasWorktreeSleepIntent } from '@/lib/worktree-sleep-intent'
 import { sanitizeTerminalLayoutPaneTitles } from '@/lib/terminal-pane-title-sanitization'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
-import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import {
+  getExplicitRuntimeEnvironmentIdForWorktree,
+  getRuntimeEnvironmentIdForWorktree
+} from '@/lib/worktree-runtime-owner'
 import { resolveTerminalWorktreeRoute } from '@/lib/terminal-worktree-route'
 import { resolveWorktreeOperationRouteResult } from '@/lib/worktree-operation-route'
 import { isWebClientLocation } from '@/lib/web-client-location'
@@ -4216,10 +4219,22 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       const tabs = tabsByWorktree[worktreeId] ?? []
       const worktree = worktreeById.get(worktreeId)
       const repo = worktree ? (repoById.get(worktree.repoId) ?? null) : null
-      // Why: only allow deferred reattach when the SSH connection is active; reattaching to a not-yet-connected relay (deferred/passphrase targets) would fail.
+      // Why: SSH-backed tabs were previously always skipped because the SSH
+      // connection wasn't re-established on startup. Now that we auto-reconnect
+      // SSH targets before this loop runs, we allow deferred reattach when the
+      // SSH connection is active. Without the active-connection check, we'd try
+      // to reattach to a relay that isn't connected yet (the deferred/passphrase
+      // targets), which would fail.
       const sshTargetId = options?.directSshAuthority.targetId ?? repo?.connectionId ?? null
-      const sshState = sshTargetId ? get().sshConnectionStates.get(sshTargetId) : null
-      const sshConnected = sshTargetId != null && sshState?.status === 'connected'
+      const sshOwnerEnvironmentId = repo?.connectionId
+        ? getExplicitRuntimeEnvironmentIdForWorktree(get(), worktreeId)
+        : null
+      const sshState =
+        sshTargetId && !sshOwnerEnvironmentId ? get().sshConnectionStates.get(sshTargetId) : null
+      const sshConnected =
+        sshTargetId != null && (sshOwnerEnvironmentId !== null || sshState?.status === 'connected')
+      // Runtime-owned SSH terminals restore through runtime handles; only
+      // desktop-owned SSH sessions depend on the local provider being ready.
       const supportsDeferredReattach = options ? sshConnected : !repo?.connectionId || sshConnected
       console.debug(
         `[reconnect-terminals] worktree=${worktreeId} connectionId=${repo?.connectionId} sshStatus=${sshState?.status} supportsDeferredReattach=${supportsDeferredReattach}`
@@ -4301,6 +4316,11 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       // the orphan sweep could never remove the dead tab. Defer while the list is
       // still unknown so a normal cold-start reconnect isn't dropped (#9911).
       if (get().sshTargetsHydrated && !get().sshTargetLabels.has(connectionId)) {
+        continue
+      }
+      // Why: runtime-owned SSH terminals restore through runtime handles, not
+      // the local sshConnectionStates map, so they never reach 'connected' here.
+      if (getExplicitRuntimeEnvironmentIdForWorktree(get(), worktreeId)) {
         continue
       }
       const sshConnected = get().sshConnectionStates.get(connectionId)?.status === 'connected'

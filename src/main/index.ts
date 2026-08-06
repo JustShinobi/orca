@@ -245,6 +245,7 @@ import { setDefaultWslDistroOverride } from './git/runner'
 import { getRepoIdFromWorktreeId } from '../shared/worktree-id'
 import { parseWorkspaceKey } from '../shared/workspace-scope'
 import { setMigrationUnsupportedPtyListener } from './agent-hooks/migration-unsupported-pty-state'
+import { registerSshHandlers } from './ipc/ssh'
 import { AgentBrowserBridge } from './browser/agent-browser-bridge'
 import { EmulatorBridge } from './emulator/emulator-bridge'
 import { browserCertificateTrustController, browserManager } from './browser/browser-manager'
@@ -2854,7 +2855,13 @@ void app.whenReady().then(async () => {
     )
     await runtime.refreshRestoredOrchestrationAuthority()
     await runtime.reconcileLegacyWorkerTerminals()
-    // Why: headless servers can't mount <webview> panes; use offscreen WebContents, gated on a real display so browser.headless.v1 stays honest.
+    // Why: serve has no BrowserWindow, so desktop startup never installs the
+    // SSH managers required by runtime RPC clients and SSH-backed projects.
+    registerSshHandlers(store, () => null, runtime)
+    // Why: headless servers have no renderer to mount <webview> browser panes.
+    // Back them with main-process offscreen WebContents instead, so this host can
+    // own browser pages and advertise browser.headless.v1 — but only when a
+    // display is actually available (set up above), so the capability stays honest.
     if (headlessBrowserDisplayAvailable) {
       runtime.setOffscreenBrowserBackend(new OffscreenBrowserBackend(browserManager))
     }

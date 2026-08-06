@@ -32,6 +32,12 @@ import {
 } from '../../../shared/execution-host'
 import { parseWorkspaceKey } from '../../../shared/workspace-scope'
 import { getFolderWorkspaceConnectionId } from '@/lib/folder-workspace-connection'
+import { getExplicitRuntimeOwnerEnvironmentId } from '@/lib/repo-runtime-owner'
+import {
+  connectRuntimeEnvironmentSshTarget,
+  hydrateRuntimeEnvironmentSshState
+} from '@/runtime/runtime-environment-ssh-state'
+import { selectRuntimeAwareSshStatus } from '@/store/slices/runtime-environment-ssh'
 
 const AUTOMATIONS_CHANGED_EVENT = 'orca:automations-changed'
 const activeReuseDispatchTabIds = new Set<string>()
@@ -149,26 +155,46 @@ export function useAutomationDispatchEvents(): void {
               ? (folderWorkspaceConnectionId ?? null)
               : (repo.connectionId ?? null)
           if (sshTargetId) {
-            const needsPrompt = await window.api.ssh.needsPassphrasePrompt({
-              targetId: sshTargetId
-            })
-            if (needsPrompt) {
-              await markDispatchResult({
-                runId: run.id,
-                status: 'skipped_needs_interactive_auth',
-                workspaceId: dispatchWorkspaceId,
-                workspaceDisplayName: dispatchWorkspaceDisplayName,
-                error: translate(
-                  'auto.hooks.useAutomationDispatchEvents.16a21d6413',
-                  'SSH reconnect requires interactive credentials.'
-                )
+            // Why: server-owned SSH targets (a paired Orca runtime) are managed
+            // through runtime RPC rather than the desktop's local SSH provider.
+            // Folder workspaces resolve their SSH target independent of any
+            // repo's executionHostId, so runtime ownership only applies to the
+            // repo-scoped case.
+            const sshOwnerEnvironmentId =
+              automationWorkspaceScope?.type === 'folder'
+                ? null
+                : getExplicitRuntimeOwnerEnvironmentId(
+                    { repos: [repo], settings: state.settings },
+                    repo.id
+                  )
+            if (sshOwnerEnvironmentId) {
+              await hydrateRuntimeEnvironmentSshState(sshOwnerEnvironmentId)
+            } else {
+              const needsPrompt = await window.api.ssh.needsPassphrasePrompt({
+                targetId: sshTargetId
               })
-              return
+              if (needsPrompt) {
+                await markDispatchResult({
+                  runId: run.id,
+                  status: 'skipped_needs_interactive_auth',
+                  workspaceId: dispatchWorkspaceId,
+                  workspaceDisplayName: dispatchWorkspaceDisplayName,
+                  error: translate(
+                    'auto.hooks.useAutomationDispatchEvents.16a21d6413',
+                    'SSH reconnect requires interactive credentials.'
+                  )
+                })
+                return
+              }
             }
-            const sshState = await window.api.ssh.getState({ targetId: sshTargetId })
-            if (sshState?.status !== 'connected') {
+            const sshStatus = sshOwnerEnvironmentId
+              ? selectRuntimeAwareSshStatus(useAppStore.getState(), sshOwnerEnvironmentId, sshTargetId)
+              : (await window.api.ssh.getState({ targetId: sshTargetId }))?.status
+            if (sshStatus !== 'connected') {
               try {
-                const connected = await window.api.ssh.connect({ targetId: sshTargetId })
+                const connected = sshOwnerEnvironmentId
+                  ? await connectRuntimeEnvironmentSshTarget(sshOwnerEnvironmentId, sshTargetId)
+                  : await window.api.ssh.connect({ targetId: sshTargetId })
                 if (connected?.status !== 'connected') {
                   throw new Error('SSH target is unavailable.')
                 }

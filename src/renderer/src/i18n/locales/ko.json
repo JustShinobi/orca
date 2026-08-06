@@ -3986,7 +3986,9 @@
           "35831a7312": "추가 중...",
           "lockedDescription": "{{value0}}의 Git 리포지토리 경로를 입력하세요.",
           "lockedDisconnected": "{{value0}} 연결이 끊어졌습니다.",
-          "93e0221434": "연결"
+          "93e0221434": "연결",
+          "noServerSshTargets": "No SSH targets configured on this Orca server.",
+          "backToHostMenu": "Back to host menu"
         },
         "AddRepoServerStartStep": {
           "ae990c86a0": "옵션 추가로 돌아가기",
@@ -5032,12 +5034,16 @@
           "sshImportAlreadySynced": "~/.ssh/config가 이미 동기화되어 있습니다.",
           "sshImportSynced": "{{value0}} 호스트{{value1}}을(를) 동기화했습니다.",
           "sshImportFailed": "SSH 구성을 가져오지 못했습니다.",
+          "importing": "가져오는 중...",
+          "importSshConfig": "~/.ssh/config 가져오기",
           "sshPersistenceDefault": "이 호스트의 원격 터미널은 종료하거나 릴레이를 재설정할 때까지 계속 실행됩니다.",
           "advanced": "고급",
           "linkDestination": "링크 대상",
           "sshTunnel": "SSH 터널을 사용하고 있습니다",
           "sshTunnelHelp": "그렇지 않으면 이 링크는 이 기기 자체를 가리키므로 다른 컴퓨터를 식별할 수 없습니다.",
-          "loopbackBlocked": "SSH 터널 재정의를 활성화하거나 다른 호스트의 Tailscale 또는 LAN 주소를 사용해 새 링크를 만드세요."
+          "loopbackBlocked": "SSH 터널 재정의를 활성화하거나 다른 호스트의 Tailscale 또는 LAN 주소를 사용해 새 링크를 만드세요.",
+          "sshServerTitle": "Add SSH host to {{value0}}",
+          "sshServerDescription": "Save this SSH machine on {{value0}} so projects and workspaces run through that server."
         },
         "ForgetSshWorkspaceDialog": {
           "reconnectFailed": "재연결 실패",

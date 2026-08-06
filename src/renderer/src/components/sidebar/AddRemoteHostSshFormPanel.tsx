@@ -9,6 +9,7 @@ export function AddRemoteHostSshFormPanel({
   disabled,
   preferAdvancedOpen,
   configIdentityAlias,
+  ownerLabel = null,
   onFormChange,
   onSubmit,
   onCancel,
@@ -18,6 +19,8 @@ export function AddRemoteHostSshFormPanel({
   disabled: boolean
   preferAdvancedOpen: boolean
   configIdentityAlias: string | null
+  /** When set, this host is being saved on the named paired runtime server instead of locally. */
+  ownerLabel?: string | null
   onFormChange: (updater: (prev: EditingTarget) => EditingTarget) => void
   onSubmit: () => void
   onCancel: () => void
@@ -27,13 +30,25 @@ export function AddRemoteHostSshFormPanel({
     <>
       <DialogHeader>
         <DialogTitle>
-          {translate('auto.components.sidebar.AddRemoteHostDialog.sshTitle', 'Add SSH host')}
+          {ownerLabel
+            ? translate(
+                'auto.components.sidebar.AddRemoteHostDialog.sshServerTitle',
+                'Add SSH host to {{value0}}',
+                { value0: ownerLabel }
+              )
+            : translate('auto.components.sidebar.AddRemoteHostDialog.sshTitle', 'Add SSH host')}
         </DialogTitle>
         <DialogDescription>
-          {translate(
-            'auto.components.sidebar.AddRemoteHostDialog.sshDescription',
-            'Add a persistent machine you can log into over SSH.'
-          )}
+          {ownerLabel
+            ? translate(
+                'auto.components.sidebar.AddRemoteHostDialog.sshServerDescription',
+                'Save this SSH machine on {{value0}} so projects and workspaces run through that server.',
+                { value0: ownerLabel }
+              )
+            : translate(
+                'auto.components.sidebar.AddRemoteHostDialog.sshDescription',
+                'Add a persistent machine you can log into over SSH.'
+              )}
         </DialogDescription>
       </DialogHeader>
 

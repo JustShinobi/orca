@@ -107,7 +107,8 @@ export default React.memo(function AddRepoDialog({
     (repoId, executionHostId) => completeGitRepoAdd(repoId, 'ssh_remote_path', executionHostId),
     scanNestedRepos,
     showRemoteNestedRepoReview,
-    trackRemoteNestedScanResult
+    trackRemoteNestedScanResult,
+    selectedRuntimeEnvironmentId
   )
   const {
     createName,
@@ -323,7 +324,7 @@ export default React.memo(function AddRepoDialog({
         createError={createError}
         isCreating={isCreating}
         hostSelector={<AddRepoHostSelectorSlot hostSelection={hostSelection} />}
-        showRemoteAction={false}
+        showRemoteAction={selectedHostKind === 'runtime'}
         browseHostKind={
           selectedHostKind === 'ssh' || selectedHostKind === 'runtime' ? selectedHostKind : 'local'
         }
@@ -360,7 +361,16 @@ export default React.memo(function AddRepoDialog({
           setRemoteError(null)
         }}
         onAddRemoteRepo={handleAddRemoteRepo}
-        onOpenSshSettings={handleOpenSshSettings}
+        onOpenSshSettings={() => {
+          // Why: a paired server's SSH targets are managed from the Add SSH
+          // host step scoped to that server, not the desktop's local Settings
+          // page — Settings → SSH only edits the Desktop's own targets.
+          if (selectedRuntimeEnvironmentId) {
+            setStep('add')
+            return
+          }
+          handleOpenSshSettings()
+        }}
         onConnectTarget={handleConnectTarget}
         onStopRemoteNestedScan={stopRemoteNestedScan}
         onCloneUrlChange={(value) => {

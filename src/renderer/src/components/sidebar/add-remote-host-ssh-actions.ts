@@ -22,6 +22,11 @@ import type {
   SshTargetAddResult
 } from '../../../../shared/ssh-types'
 import { isDuplicateSshTargetAlias } from './ssh-target-duplicate'
+import {
+  addSshTargetForOwner,
+  importSshConfigForOwner,
+  type SshTargetOwnerEnvironment
+} from '@/runtime/runtime-ssh-target-management'
 
 type SshApi = {
   listTargets: () => Promise<SshTarget[]>
@@ -37,12 +42,15 @@ type SshApi = {
 export async function saveNewSshHostFromForm({
   form,
   ssh,
+  owner = null,
   recordSshRepoReadoptions,
   setSshTargetsMetadata,
   recordFeatureInteraction
 }: {
   form: EditingTarget
   ssh: SshApi
+  /** When set, the target is added on the paired runtime server instead of locally. */
+  owner?: SshTargetOwnerEnvironment | null
   recordSshRepoReadoptions: (readoptions: SshRepoReadoption[]) => void
   setSshTargetsMetadata: (targets: SshTarget[]) => void
   recordFeatureInteraction: (feature: 'ssh') => void
@@ -97,27 +105,34 @@ export async function saveNewSshHostFromForm({
   }
 
   try {
-    const existingTargets = await ssh.listTargets()
-    if (
-      isDuplicateSshTargetAlias({
-        existingTargets,
-        configHost: target.configHost,
-        label: target.label,
-        host: target.host
-      })
-    ) {
-      toast.error(
-        translate(
-          'auto.components.sidebar.AddRemoteHostDialog.sshAlreadyExists',
-          'That SSH host is already in Orca.'
+    // Why: the dedup check only sees this client's local target list, so it's
+    // skipped for server-owned targets — the paired runtime is the source of
+    // truth for what's already configured there.
+    if (!owner) {
+      const existingTargets = await ssh.listTargets()
+      if (
+        isDuplicateSshTargetAlias({
+          existingTargets,
+          configHost: target.configHost,
+          label: target.label,
+          host: target.host
+        })
+      ) {
+        toast.error(
+          translate(
+            'auto.components.sidebar.AddRemoteHostDialog.sshAlreadyExists',
+            'That SSH host is already in Orca.'
+          )
         )
-      )
-      return 'validation-failed'
+        return 'validation-failed'
+      }
     }
 
-    const result = await ssh.addTarget({ target })
-    recordSshRepoReadoptions(result.repoReadoptions)
-    setSshTargetsMetadata(await ssh.listTargets())
+    const result = await addSshTargetForOwner(owner, target)
+    if (!owner) {
+      recordSshRepoReadoptions(result.repoReadoptions)
+      setSshTargetsMetadata(await ssh.listTargets())
+    }
     recordFeatureInteraction('ssh')
     toast.success(
       translate('auto.components.sidebar.AddRemoteHostDialog.sshSaved', 'SSH host added.')
@@ -165,11 +180,14 @@ export async function prefillFormFromSshConfigHost(
 /** Bulk-load ~/.ssh/config hosts into Orca’s host list (sidebar targets). */
 export async function addAllSshConfigHostsToOrca({
   ssh,
+  owner = null,
   recordSshRepoReadoptions,
   setSshTargetsMetadata,
   recordFeatureInteraction
 }: {
   ssh: SshApi
+  /** When set, ~/.ssh/config is imported on the paired runtime server instead of locally. */
+  owner?: SshTargetOwnerEnvironment | null
   recordSshRepoReadoptions: (readoptions: SshRepoReadoption[]) => void
   setSshTargetsMetadata: (targets: SshTarget[]) => void
   recordFeatureInteraction: (feature: 'ssh') => void
@@ -178,9 +196,11 @@ export async function addAllSshConfigHostsToOrca({
     // Why: no reAdopt — the button counts and promises only the *new* hosts the picker
     // showed. Re-adopting would resurrect hosts the user deleted, which the count omits.
     // Settings → Import stays the explicit re-adopt path.
-    const result = await ssh.importConfig()
-    recordSshRepoReadoptions(result.repoReadoptions)
-    setSshTargetsMetadata(await ssh.listTargets())
+    const result = await importSshConfigForOwner(owner)
+    if (!owner) {
+      recordSshRepoReadoptions(result.repoReadoptions)
+      setSshTargetsMetadata(await ssh.listTargets())
+    }
     recordFeatureInteraction('ssh')
     if (result.targets.length === 0) {
       toast(

@@ -99,6 +99,7 @@ import {
   selectRuntimeAwareSshTargetRemoved
 } from '@/store/slices/runtime-environment-ssh'
 import { hydrateRuntimeEnvironmentSshState } from '@/runtime/runtime-environment-ssh-state'
+import { isPairedWebClientWindow } from '@/lib/desktop-window-chrome'
 
 type WorktreeRenameRequest = {
   worktreeId: string
@@ -353,7 +354,9 @@ const WorktreeCard = React.memo(function WorktreeCard({
 
   // SSH disconnected state
   const sshOwnerEnvironmentId = useAppStore((s) =>
-    repo?.connectionId ? getExplicitRuntimeEnvironmentIdForWorktree(s, worktree.id) : null
+    repo?.connectionId && !isPairedWebClientWindow()
+      ? getExplicitRuntimeEnvironmentIdForWorktree(s, worktree.id)
+      : null
   )
   const sshStatus = useAppStore((s) => {
     // Why: runtime-owned SSH targets suppress their ssh:state-changed broadcasts, so don't show a false "disconnected" chip for them.
@@ -408,6 +411,12 @@ const WorktreeCard = React.memo(function WorktreeCard({
       ? selectRuntimeAwareSshTargetLabel(s, sshOwnerEnvironmentId, repo.connectionId)
       : ''
   )
+  useEffect(() => {
+    if (!sshOwnerEnvironmentId) {
+      return
+    }
+    void hydrateRuntimeEnvironmentSshState(sshOwnerEnvironmentId).catch(() => {})
+  }, [sshOwnerEnvironmentId])
 
   const gitIdentityDisplay = getWorktreeGitIdentityDisplay(worktree)
   const detachedHeadDisplay = gitIdentityDisplay?.kind === 'detached' ? gitIdentityDisplay : null
