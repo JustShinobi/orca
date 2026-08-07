@@ -2406,7 +2406,9 @@ const api = {
     request: (args: { id: string }): Promise<unknown> =>
       ipcRenderer.invoke('developerPermissions:request', args),
     openSettings: (args: { id: string }): Promise<void> =>
-      ipcRenderer.invoke('developerPermissions:openSettings', args)
+      ipcRenderer.invoke('developerPermissions:openSettings', args),
+    testLocalNetworkConnection: (args: { host: string; port: number }): Promise<unknown> =>
+      ipcRenderer.invoke('developerPermissions:testLocalNetworkConnection', args)
   },
 
   computerUsePermissions: {
@@ -4688,7 +4690,8 @@ const api = {
           qrDataUrl: string | null
           qrError?: 'encoding_failed'
           pairingUrl: string
-          endpoint: string
+          /** Null when no direct address was advertised — the QR pairs over Relay alone. */
+          endpoint: string | null
           deviceId: string
           connectionMode: MobilePairingConnectionMode
         }

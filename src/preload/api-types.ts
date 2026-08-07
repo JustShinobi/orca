@@ -432,7 +432,8 @@ import type {
 import type {
   DeveloperPermissionId,
   DeveloperPermissionRequestResult,
-  DeveloperPermissionState
+  DeveloperPermissionState,
+  LocalNetworkConnectionTestResult
 } from '../shared/developer-permissions-types'
 import type {
   ComputerUsePermissionId,
@@ -2558,6 +2559,10 @@ export type PreloadApi = {
     getStatus: () => Promise<DeveloperPermissionState[]>
     request: (args: { id: DeveloperPermissionId }) => Promise<DeveloperPermissionRequestResult>
     openSettings: (args: { id: DeveloperPermissionId }) => Promise<void>
+    testLocalNetworkConnection: (args: {
+      host: string
+      port: number
+    }) => Promise<LocalNetworkConnectionTestResult>
   }
   computerUsePermissions: {
     getStatus: () => Promise<ComputerUsePermissionStatusResult>
@@ -3673,7 +3678,8 @@ export type PreloadApi = {
           qrDataUrl: string | null
           qrError?: 'encoding_failed'
           pairingUrl: string
-          endpoint: string
+          /** Null when no direct address was advertised — the QR pairs over Relay alone. */
+          endpoint: string | null
           deviceId: string
           /** Mode the QR actually encodes. */
           connectionMode: MobilePairingConnectionMode
