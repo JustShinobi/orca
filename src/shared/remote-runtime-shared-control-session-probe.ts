@@ -31,6 +31,8 @@ export class SharedControlSessionProbe {
       !this.hooks.hasSubscriptions() ||
       !this.hooks.isReady()
     ) {
+      // Why: a connection that stops qualifying must also retire any in-flight probe,
+      // so schedule() doubles as teardown when its guards fail.
       this.clear()
       return
     }

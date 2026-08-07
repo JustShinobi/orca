@@ -9,6 +9,8 @@ export function reconnectSharedControlNow(
   if (!unavailable) {
     return
   }
+  // Why: replace even a stuck CONNECTING/awaiting-ready socket instead of waiting
+  // behind stale backoff when the caller has proof the endpoint is reachable.
   closeSocket(remoteRuntimeUnavailableError('Refreshing remote runtime control transport.'))
   open()
 }
