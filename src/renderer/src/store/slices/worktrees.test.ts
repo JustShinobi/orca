@@ -5881,7 +5881,9 @@ describe('worktree remote runtime mutations', () => {
       })
     )
     expect(mockApi.worktrees.create).not.toHaveBeenCalled()
-    expect(store.getState().worktreesByRepo.repo1).toEqual([{ ...wt, hostId: 'runtime:env-linux' }])
+    expect(store.getState().worktreesByRepo.repo1).toEqual([
+      { ...wt, hostId: 'runtime:env-linux', runtimeOwnerEnvironmentId: 'env-linux' }
+    ])
   })
 
   it('passes startup commands through remote runtime worktree creation', async () => {
