@@ -3643,6 +3643,9 @@ function updateEnvironmentFromResponse(
     return
   }
   const runtimeId = response.ok ? response._meta.runtimeId : (response._meta?.runtimeId ?? null)
+  if (runtimeId === activeEnvironment.runtimeId) {
+    return
+  }
   activeEnvironment = updateStoredEnvironmentRuntimeId(environment, runtimeId)
 }
 
