@@ -15,7 +15,7 @@ on:
         description: Branch, tag, or SHA to build from
         required: false
         type: string
-        default: headless-account-switch
+        default: justshinobi/main
 
 jobs:
   build-linux:
