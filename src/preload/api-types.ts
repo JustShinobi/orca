@@ -286,7 +286,8 @@ import type {
   WorktreeStartupLaunch,
   WorkspaceSessionPatch,
   WorkspaceSessionState,
-  LinuxPackageInstallInstructions
+  LinuxPackageInstallInstructions,
+  PreviewProxyStatus
 } from '../shared/types'
 import type { PtyModelRestoreNeededEvent } from '../shared/pty-model-restore-marker'
 import type { PtyListedSession } from '../shared/pty-listed-session'
@@ -1523,6 +1524,10 @@ export type PreloadApi = {
     onAdvertisedUrlChanged: (
       callback: (event: WorkspacePortAdvertisedUrlChangedEvent) => void
     ) => () => void
+  }
+  previewProxy: {
+    /** Null when the connected runtime predates the preview proxy. */
+    status: () => Promise<PreviewProxyStatus | null>
   }
   pty: {
     spawn: (opts: {

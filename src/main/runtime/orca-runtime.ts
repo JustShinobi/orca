@@ -232,7 +232,8 @@ import type {
   MRListState,
   PRRefreshOutcome,
   ClaudeRateLimitAccountsState,
-  CodexRateLimitAccountsState
+  CodexRateLimitAccountsState,
+  PreviewProxyStatus
 } from '../../shared/types'
 import type { TaskSourceContext } from '../../shared/task-source-context'
 import { assertWorktreeUnlockedForRemoval } from '../../shared/worktree-removal'
@@ -1151,6 +1152,7 @@ type RuntimeStore = {
     terminalMainSideEffectAuthority?: GlobalSettings['terminalMainSideEffectAuthority']
     terminalHiddenDeliveryGate?: GlobalSettings['terminalHiddenDeliveryGate']
     terminalModelQueryAuthority?: GlobalSettings['terminalModelQueryAuthority']
+    previewProxy?: GlobalSettings['previewProxy']
   }
   // Why: narrow to `unknown` return so test mocks can return void without
   // a cast. The runtime never reads the return value — the persisted value
@@ -3566,12 +3568,14 @@ export class OrcaRuntimeService {
     | 'minimaxGroupId'
     | 'minimaxUsageModels'
     | 'prBotAuthorOverrides'
+    | 'previewProxy'
   > {
     if (!this.store?.getSettings) {
       throw new Error('runtime_unavailable')
     }
     const settings = this.store.getSettings()
     return {
+      ...(settings.previewProxy ? { previewProxy: settings.previewProxy } : {}),
       defaultTuiAgent: settings.defaultTuiAgent ?? null,
       disabledTuiAgents: settings.disabledTuiAgents ?? [],
       agentCmdOverrides: settings.agentCmdOverrides ?? {},
@@ -3590,6 +3594,18 @@ export class OrcaRuntimeService {
       minimaxUsageModels: settings.minimaxUsageModels ?? 'general',
       prBotAuthorOverrides: settings.prBotAuthorOverrides ?? []
     }
+  }
+
+  // Why: the reconciler lives in main wiring; the runtime only relays its
+  // status so paired clients can render the settings card's live state.
+  private previewProxyStatusProvider: (() => PreviewProxyStatus) | null = null
+
+  setPreviewProxyStatusProvider(provider: () => PreviewProxyStatus): void {
+    this.previewProxyStatusProvider = provider
+  }
+
+  getPreviewProxyStatus(): PreviewProxyStatus | null {
+    return this.previewProxyStatusProvider?.() ?? null
   }
 
   private reconcileManagedAgentHooks(): Promise<void> {
@@ -3638,6 +3654,7 @@ export class OrcaRuntimeService {
       | 'minimaxGroupId'
       | 'minimaxUsageModels'
       | 'prBotAuthorOverrides'
+      | 'previewProxy'
     >
   ): Promise<
     Pick<
@@ -3659,6 +3676,7 @@ export class OrcaRuntimeService {
       | 'minimaxGroupId'
       | 'minimaxUsageModels'
       | 'prBotAuthorOverrides'
+      | 'previewProxy'
     >
   > {
     if (!this.store?.getSettings || !this.store.updateSettings) {

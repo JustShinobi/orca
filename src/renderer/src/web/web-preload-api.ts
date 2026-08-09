@@ -25,6 +25,7 @@ import type {
   DirEntry,
   ForceDeleteWorktreeBranchResult,
   GlobalSettings,
+  PreviewProxyStatus,
   MemorySnapshot,
   OnboardingState,
   PersistedUIState,
@@ -610,6 +611,25 @@ function createWebPreloadApi(): Partial<PreloadApi> {
           reason: 'Workspace port management is unavailable for browser-local workspaces.'
         }),
       onAdvertisedUrlChanged: () => noopUnsubscribe
+    },
+    previewProxy: {
+      status: async () => {
+        if (!requireActiveEnvironmentOrNull()) {
+          return null
+        }
+        try {
+          const result = await callRuntimeResult<{ status: PreviewProxyStatus | null }>(
+            'previewProxy.status',
+            undefined,
+            15_000
+          )
+          return result.status
+        } catch {
+          // Why: older runtimes answer method_not_found; the settings card
+          // simply hides live status instead of erroring.
+          return null
+        }
+      }
     },
     orcaProfiles: {
       list: () =>
@@ -3736,6 +3756,9 @@ async function getRuntimeBackedStoredSettings(): Promise<GlobalSettings> {
         result.settings.prBotAuthorOverrides
       )
     }
+    if (result.settings.previewProxy && typeof result.settings.previewProxy === 'object') {
+      runtimeSettings.previewProxy = result.settings.previewProxy
+    }
     const next = mergeSettings(local, runtimeSettings)
     writeStoredSettings(next)
     return next
@@ -3769,6 +3792,9 @@ async function syncRuntimeBackedSettings(
     runtimeUpdates.prBotAuthorOverrides = normalizePRBotAuthorOverrides(
       updates.prBotAuthorOverrides
     )
+  }
+  if (updates.previewProxy && typeof updates.previewProxy === 'object') {
+    runtimeUpdates.previewProxy = updates.previewProxy
   }
   if (Object.keys(runtimeUpdates).length === 0) {
     return localNext
