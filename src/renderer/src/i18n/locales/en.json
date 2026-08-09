@@ -10714,7 +10714,9 @@
             "740aca88ab": "Workspace port scan failed.",
             "5be4f7f727": "Port {{value0}} menu",
             "7550998473": "Copy",
-            "1004af16ab": "Copy {{value0}}"
+            "1004af16ab": "Copy {{value0}}",
+            "7b2e54b080": "Copy Preview URL",
+            "3442c66cc7": "Copy SSH Forward Command"
           },
           "Search": {
             "1abfb25a66": "Type to search in files",
