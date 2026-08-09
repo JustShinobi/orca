@@ -6,7 +6,6 @@ import { Button } from '../ui/button'
 import { Label } from '../ui/label'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
 import { AdvancedNetworkSettingsSection } from './AdvancedNetworkSettingsSection'
-import { PreviewProxySettingsSection } from './PreviewProxySettingsSection'
 import { SearchableSetting } from './SearchableSetting'
 import { SettingsSubsectionHeader, SettingsSwitch } from './SettingsFormControls'
 import { getAdvancedPaneSearchEntries, getAdvancedSearchEntry } from './advanced-search'
@@ -147,7 +146,6 @@ export function AdvancedPane({ settings, updateSettings }: AdvancedPaneProps): R
           )}
         />
         <AdvancedNetworkSettingsSection settings={settings} updateSettings={updateSettings} />
-        <PreviewProxySettingsSection settings={settings} updateSettings={updateSettings} />
       </section>
     </div>
   )
