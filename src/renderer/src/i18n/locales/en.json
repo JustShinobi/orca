@@ -10474,6 +10474,26 @@
           "openAutomationsDescription": "Create schedules and inspect recent runs.",
           "title": "Automations",
           "description": "Schedule agent work and choose whether Automations appears in the sidebar."
+        },
+        "PreviewProxySettingsSection": {
+          "a6d49f6741": "Workspace Preview Proxy",
+          "bfadb61ecf": "Expose workspace dev servers through one host-routed listener, so browsers and paired clients open them directly.",
+          "c5b96de11c": "Requests to <workspace>.<domain> are forwarded to that workspace's dev server. Point a wildcard DNS record and reverse-proxy route at the listener port.",
+          "a4a7afac96": "Enable preview proxy",
+          "29f99ff349": "Public domain",
+          "fa3d3820e3": "Listener port",
+          "3743f05344": "Bind address",
+          "e54c382974": "Authentication",
+          "bcee22a1ea": "Auto",
+          "ab818db66b": "Open",
+          "33b8314a61": "Token",
+          "b2e49d6552": "Token value",
+          "ccdbfdffff": "Configured by orca serve --preview-* flags; these settings apply after the server restarts without them.",
+          "448276c164": "Preview proxy error: {{value0}}",
+          "1d15aae5bc": "Running at {{value0}}",
+          "d71f803a7d": "Anyone who can reach the listener and pass its auth mode can reach your dev servers. Keep token auth on untrusted networks.",
+          "e759090f76": "Apply",
+          "d77f62edce": "Generated session token: {{value0}}"
         }
       },
       "right": {

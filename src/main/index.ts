@@ -1,5 +1,4 @@
 /* eslint-disable max-lines -- main-process entry point; owns app lifecycle, service wiring, window creation, and hook/daemon startup with no cleaner split seam. */
-import { randomBytes } from 'node:crypto'
 import { existsSync, statSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import os from 'node:os'
@@ -83,9 +82,13 @@ import {
 } from './runtime/runtime-rpc-startup-failure'
 import { resolveAdvertisedPairingEndpoint } from './runtime/pairing-endpoint'
 import { ServeReadinessPublisher, type ServePreviewReadiness } from './server/serve-readiness'
-import { WorktreePreviewProxy } from './ports/worktree-preview-proxy'
+import {
+  defaultPreviewAuthForBind,
+  PreviewProxyReconciler,
+  type PreviewProxyStatus
+} from './ports/preview-proxy-reconciler'
 import { createPreviewRouteResolver } from './ports/preview-route-resolver'
-import { parsePreviewDomain, setActivePreviewProxyConfig } from './ports/worktree-preview-routes'
+import type { PreviewWorktreeDescriptor } from './ports/worktree-preview-routes'
 import { reserveServeStdoutForReadiness } from './server/serve-stdout-boundary'
 import { DesktopRelayService } from './runtime/relay/desktop-relay-service'
 import type { RelayBrokerStatus } from './runtime/relay/relay-session-broker'
@@ -1852,42 +1855,64 @@ function getServePreviewOptions(flags: {
   }
 }
 
-const PREVIEW_LOOPBACK_BINDS = new Set(['127.0.0.1', 'localhost', '::1'])
-
 // Why: printServeReady's call shape is a startup-ordering test anchor; the
 // preview block reaches it through module state like runtime/runtimeRpc do.
 let servePreviewReadiness: ServePreviewReadiness | null = null
+let previewProxyReconciler: PreviewProxyReconciler | null = null
+
+// Why: runs for desktop and serve alike — the persisted previewProxy setting
+// drives the listener on both; serve flags override it via setFlagsConfig.
+function initPreviewProxyReconciler(runtimeService: {
+  getPreviewWorktreeDescriptors(): Promise<PreviewWorktreeDescriptor[]>
+  setPreviewProxyStatusProvider(provider: () => PreviewProxyStatus): void
+}): void {
+  if (previewProxyReconciler || !store) {
+    return
+  }
+  const settingsStore = store
+  const reconciler = new PreviewProxyReconciler({
+    resolveRoutes: createPreviewRouteResolver({
+      descriptors: () => runtimeService.getPreviewWorktreeDescriptors()
+    })
+  })
+  previewProxyReconciler = reconciler
+  runtimeService.setPreviewProxyStatusProvider(() => reconciler.status())
+  ipcMain.removeHandler('previewProxy:status')
+  ipcMain.handle('previewProxy:status', () => reconciler.status())
+  settingsStore.onSettingsChanged((updates) => {
+    if ('previewProxy' in updates) {
+      void reconciler.applySettings(settingsStore.getSettings())
+    }
+  })
+  void reconciler.applySettings(settingsStore.getSettings())
+}
 
 async function startServePreviewProxy(options: ServeOptions): Promise<void> {
   const preview = options.preview
-  if (!preview || !runtime) {
+  if (!preview || !previewProxyReconciler) {
     return
   }
-  const activeRuntime = runtime
-  const origin = parsePreviewDomain(preview.domain)
   // Why: a loopback bind is only reachable through a local reverse proxy the
   // operator already trusts; a wide bind is one LAN scan away from every
   // workspace dev server, so it defaults to token auth.
-  const auth = preview.auth ?? (PREVIEW_LOOPBACK_BINDS.has(preview.bindHost) ? 'open' : 'token')
-  const token = auth === 'token' ? (preview.token ?? randomBytes(24).toString('base64url')) : null
-  const proxy = new WorktreePreviewProxy({
-    bindHost: preview.bindHost,
+  const auth = preview.auth ?? defaultPreviewAuthForBind(preview.bindHost)
+  await previewProxyReconciler.setFlagsConfig({
     port: preview.port,
-    origin,
-    auth,
-    token,
-    resolveRoutes: createPreviewRouteResolver({
-      descriptors: () => activeRuntime.getPreviewWorktreeDescriptors()
-    })
-  })
-  const { port } = await proxy.start()
-  setActivePreviewProxyConfig({ origin, token })
-  servePreviewReadiness = {
     bindHost: preview.bindHost,
-    port,
-    origin: `${origin.protocol}://*.${origin.host}${origin.port ? `:${origin.port}` : ''}`,
+    domain: preview.domain,
     auth,
-    token
+    token: preview.token
+  })
+  const status = previewProxyReconciler.status()
+  if (!status.running) {
+    throw new Error(`Preview proxy failed to start: ${status.error ?? 'unknown error'}`)
+  }
+  servePreviewReadiness = {
+    bindHost: status.bindHost ?? preview.bindHost,
+    port: status.port ?? preview.port,
+    origin: status.origin ?? preview.domain,
+    auth: status.auth ?? auth,
+    token: status.token ?? null
   }
 }
 
@@ -2548,6 +2573,7 @@ void app.whenReady().then(async () => {
   })
   runtime = runtimeService
   runtimeService.prepareLegacyWorkerTerminalRecovery()
+  initPreviewProxyReconciler(runtimeService)
   publishProviderSessionChanges(agentHookServer.getProviderSessionIdentities())
   browserManager.setBrowserGuestStateChangedListener((worktreeId) => {
     runtimeService.notifyMobileSessionTabsChanged(worktreeId)
