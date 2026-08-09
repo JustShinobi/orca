@@ -128,7 +128,7 @@ export async function saveNewSshHostFromForm({
       }
     }
 
-    const result = await addSshTargetForOwner(owner, target)
+    const result = await addSshTargetForOwner(owner, target, ssh.addTarget)
     if (!owner) {
       recordSshRepoReadoptions(result.repoReadoptions)
       setSshTargetsMetadata(await ssh.listTargets())
@@ -196,7 +196,7 @@ export async function addAllSshConfigHostsToOrca({
     // Why: no reAdopt — the button counts and promises only the *new* hosts the picker
     // showed. Re-adopting would resurrect hosts the user deleted, which the count omits.
     // Settings → Import stays the explicit re-adopt path.
-    const result = await importSshConfigForOwner(owner)
+    const result = await importSshConfigForOwner(owner, ssh.importConfig)
     if (!owner) {
       recordSshRepoReadoptions(result.repoReadoptions)
       setSshTargetsMetadata(await ssh.listTargets())

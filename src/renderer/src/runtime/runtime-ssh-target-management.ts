@@ -10,10 +10,13 @@ export type SshTargetOwnerEnvironment = { id: string; label: string }
 /** Add an SSH target locally or through the paired runtime selected by the caller. */
 export function addSshTargetForOwner(
   owner: SshTargetOwnerEnvironment | null,
-  target: Omit<SshTarget, 'id'>
+  target: Omit<SshTarget, 'id'>,
+  addLocalTarget: (args: { target: Omit<SshTarget, 'id'> }) => Promise<SshTargetAddResult> = (
+    args
+  ) => window.api.ssh.addTarget(args)
 ): Promise<SshTargetAddResult> {
   if (!owner) {
-    return window.api.ssh.addTarget({ target })
+    return addLocalTarget({ target })
   }
   return callRuntimeRpc<SshTargetAddResult>(
     { kind: 'environment', environmentId: owner.id },
@@ -24,10 +27,11 @@ export function addSshTargetForOwner(
 
 /** Import OpenSSH hosts locally or through the paired runtime selected by the caller. */
 export function importSshConfigForOwner(
-  owner: SshTargetOwnerEnvironment | null
+  owner: SshTargetOwnerEnvironment | null,
+  importLocalConfig: () => Promise<SshConfigImportResult> = () => window.api.ssh.importConfig()
 ): Promise<SshConfigImportResult> {
   if (!owner) {
-    return window.api.ssh.importConfig()
+    return importLocalConfig()
   }
   return callRuntimeRpc<SshConfigImportResult>(
     { kind: 'environment', environmentId: owner.id },
