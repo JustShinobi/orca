@@ -245,6 +245,11 @@ import {
 } from '@/components/task-page-cache-selectors'
 import { shouldHideTaskPageListChrome } from '@/components/task-page-list-chrome-visibility'
 import {
+  buildTaskPageGitHubResumeContextKey,
+  taskPageGitHubResumeCache,
+  TASK_PAGE_GITHUB_RESUME_FRESH_MS
+} from '@/components/task-page-github-resume-cache'
+import {
   applyEmptyPageClamp,
   applyWindowPageLimit,
   buildSelectedReposKey,
@@ -261,8 +266,11 @@ import {
   buildLinearIssueListReadArgs,
   buildLinearIssueListRequestSignature,
   isLinearIssueSearchActive,
+  shouldClearTeamDerivedFacets,
   shouldForceLinearIssueListRead,
-  teamDerivedFacetsForPrimaryTeamChange
+  teamDerivedFacetsForPrimaryTeamChange,
+  type LinearIssueListFilterRead,
+  type LinearPrimaryTeamObservation
 } from '@/components/task-page-linear-issue-request'
 import {
   resolveLinearIssueEmptyKind,
@@ -276,10 +284,19 @@ import {
   readLinkedLinearIssuesWithLimit
 } from '@/components/task-page-linear-in-orca-issues'
 import {
-  emptyLinearIssueAttributeFilter,
   linearIssueAttributeFilterSignature,
   type LinearIssueAttributeFilter
 } from '../../../shared/linear-issue-attribute-filter'
+import {
+  DEFAULT_LINEAR_GROUP_BY,
+  DEFAULT_LINEAR_ORDER_BY,
+  DEFAULT_LINEAR_VIEW_MODE,
+  LINEAR_DISPLAY_PROPERTIES,
+  resolveLinearIssueViewResumeState,
+  selectLinearWorkspaceIssueFilter,
+  serializeLinearIssueViewResumeState,
+  setLinearWorkspaceIssueFilter
+} from '../../../shared/linear-issue-view-resume-state'
 import {
   isNewIssueDraftContentful,
   resolveNewIssueOpenSeed,
@@ -431,6 +448,7 @@ import {
   type LinearOrderBy,
   type LinearViewMode
 } from '@/components/task-page-localized-options'
+import { useGitHubTaskSearchCommit } from '@/components/use-github-task-search-commit'
 
 function isGitLabMRFilter(value: GitLabTaskFilter | GitLabIssueFilter): value is GitLabTaskFilter {
   return value === 'opened' || value === 'merged' || value === 'closed' || value === 'all'
@@ -663,15 +681,6 @@ function mergeLinearCollectionResults<T>(
     ...(results.some((result) => result.hasMore) ? { hasMore: true } : {})
   }
 }
-
-const DEFAULT_LINEAR_DISPLAY_PROPERTIES: LinearDisplayProperty[] = [
-  'state',
-  'priority',
-  'assignee',
-  'team',
-  'labels',
-  'updated'
-]
 
 function getLinearStatusSectionState(section: LinearGroupSection): LinearIssue['state'] | null {
   if (!section.key.startsWith('status:')) {
@@ -3763,6 +3772,7 @@ export default function TaskPage(): React.JSX.Element {
   const taskResumeAppliedRef = useRef(false)
   const githubSearchPersistReadyRef = useRef(false)
   const linearSearchPersistReadyRef = useRef(false)
+  const linearViewPersistReadyRef = useRef(false)
   const jiraSearchPersistReadyRef = useRef(false)
   const [taskResumeApplied, setTaskResumeApplied] = useState(false)
 
@@ -3881,6 +3891,11 @@ export default function TaskPage(): React.JSX.Element {
     CROSS_REPO_DISPLAY_LIMIT
   )
   const githubPageSize = githubPerRepoPageLimit * Math.max(1, selectedRepos.length)
+  const githubResumeContextKey = buildTaskPageGitHubResumeContextKey({
+    selectedReposKey,
+    query: appliedTaskSearch.trim(),
+    pageSize: githubPageSize
+  })
   // Why: null entries are pages not fetched yet; numbered provider pages let a high-page click load directly without reading intermediate pages.
   const [pages, setPages] = useState<(GitHubWorkItem[] | null)[]>(() => {
     const trimmed = initialTaskQuery.trim()
@@ -3908,6 +3923,11 @@ export default function TaskPage(): React.JSX.Element {
   const currentPageRef = useRef(currentPage)
   pagesRef.current = pages
   currentPageRef.current = currentPage
+  const githubResumeConsumedRef = useRef(false)
+  const githubResumeContextRef = useRef('')
+  const githubListScrollRef = useRef<HTMLDivElement>(null)
+  const githubListScrollTopRef = useRef(0)
+  const pendingGithubScrollRestoreRef = useRef<number | null>(null)
   const [paginationLoading, setPaginationLoading] = useState(false)
   const [loadingTargetPage, setLoadingTargetPage] = useState<number | null>(null)
   const [countedTotalPages, setCountedTotalPages] = useState<number | null>(null)
@@ -3921,6 +3941,51 @@ export default function TaskPage(): React.JSX.Element {
   const hardRefreshEpochRef = useRef(0)
   const fetchWorkItemsNextPage = useAppStore((s) => s.fetchWorkItemsNextPage)
   const countWorkItemsAcrossRepos = useAppStore((s) => s.countWorkItemsAcrossRepos)
+
+  useEffect(() => {
+    const page = pages[currentPage]
+    if (!taskResumeApplied || taskSource !== 'github' || githubMode !== 'items' || !page) {
+      return
+    }
+    taskPageGitHubResumeCache.write(githubResumeContextKey, currentPage, page)
+  }, [currentPage, githubMode, githubResumeContextKey, pages, taskResumeApplied, taskSource])
+
+  const taskListPositionRef = useRef<{
+    contextKey: string
+    page: number
+    scrollTop: number
+  } | null>(null)
+
+  useLayoutEffect(() => {
+    if (
+      taskSource !== 'github' ||
+      githubMode !== 'items' ||
+      pageData.openGitHubWorkItem ||
+      pendingGithubScrollRestoreRef.current !== null
+    ) {
+      return
+    }
+    taskListPositionRef.current = {
+      contextKey: githubResumeContextKey,
+      page: currentPage,
+      scrollTop: githubListScrollTopRef.current
+    }
+  }, [currentPage, githubMode, githubResumeContextKey, pageData.openGitHubWorkItem, taskSource])
+
+  useEffect(
+    () => () => {
+      const position = taskListPositionRef.current
+      const state = useAppStore.getState()
+      if (position && !state.taskPageData.openGitHubWorkItem) {
+        state.setTaskListPosition({
+          contextKey: position.contextKey,
+          page: position.page,
+          scrollTop: position.scrollTop
+        })
+      }
+    },
+    []
+  )
 
   // Why: keyed on selectedReposKey, not the selectedRepos array — a background
   // repos:changed refresh mid-flight would otherwise bump the generation and
@@ -3971,6 +4036,68 @@ export default function TaskPage(): React.JSX.Element {
   const dialogWorkItem = dialogWorkItemKey
     ? (cachedDialogWorkItem ?? githubTaskDrawerWorkItem)
     : null
+
+  useLayoutEffect(() => {
+    const scrollTop = pendingGithubScrollRestoreRef.current
+    const scrollElement = githubListScrollRef.current
+    if (scrollTop === null || !scrollElement || !pages[currentPage]) {
+      return
+    }
+    let frame: number | null = null
+    let timeout: number | null = null
+    let observer: ResizeObserver | null = null
+    const clearScheduledRestore = (): void => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame)
+        frame = null
+      }
+      if (timeout !== null) {
+        window.clearTimeout(timeout)
+        timeout = null
+      }
+      observer?.disconnect()
+    }
+    const restore = (): void => {
+      const committedScrollElement = githubListScrollRef.current
+      if (!committedScrollElement || pendingGithubScrollRestoreRef.current !== scrollTop) {
+        return
+      }
+      committedScrollElement.scrollTop = scrollTop
+      githubListScrollTopRef.current = scrollTop
+      taskListPositionRef.current = {
+        contextKey: githubResumeContextKey,
+        page: currentPage,
+        scrollTop
+      }
+      if (Math.abs(committedScrollElement.scrollTop - scrollTop) < 1) {
+        pendingGithubScrollRestoreRef.current = null
+        clearScheduledRestore()
+      }
+    }
+    observer = new ResizeObserver(restore)
+    for (const child of scrollElement.children) {
+      observer.observe(child)
+    }
+    restore()
+    if (pendingGithubScrollRestoreRef.current === scrollTop) {
+      frame = window.requestAnimationFrame(restore)
+      timeout = window.setTimeout(() => {
+        if (pendingGithubScrollRestoreRef.current === scrollTop) {
+          const committedScrollTop = githubListScrollRef.current?.scrollTop ?? 0
+          githubListScrollTopRef.current = committedScrollTop
+          taskListPositionRef.current = {
+            contextKey: githubResumeContextKey,
+            page: currentPage,
+            scrollTop: committedScrollTop
+          }
+          pendingGithubScrollRestoreRef.current = null
+        }
+        clearScheduledRestore()
+      }, 5_000)
+    }
+    return clearScheduledRestore
+  }, [currentPage, dialogWorkItem, githubResumeContextKey, pages])
+
   const dialogRepoPath = dialogWorkItem ? (repoMap.get(dialogWorkItem.repoId)?.path ?? null) : null
   const dialogSourceContext = useMemo(() => {
     if (!dialogWorkItem) {
@@ -4034,6 +4161,15 @@ export default function TaskPage(): React.JSX.Element {
 
   const openGitHubDetailPage = useCallback(
     (item: GitHubWorkItem, initialTab: ItemDialogTab = 'conversation') => {
+      const scrollTop = githubListScrollRef.current?.scrollTop ?? githubListScrollTopRef.current
+      githubListScrollTopRef.current = scrollTop
+      pendingGithubScrollRestoreRef.current = scrollTop
+      taskListPositionRef.current = {
+        contextKey: githubResumeContextKey,
+        page: currentPageRef.current,
+        scrollTop
+      }
+      useAppStore.getState().setTaskListPosition(taskListPositionRef.current)
       openTaskPage(
         {
           taskSource: 'github',
@@ -4045,7 +4181,7 @@ export default function TaskPage(): React.JSX.Element {
         { recordTasksInteraction: false }
       )
     },
-    [openTaskPage, repoMap]
+    [githubResumeContextKey, openTaskPage, repoMap]
   )
 
   const openGitLabDetailPage = useCallback(
@@ -4449,20 +4585,29 @@ export default function TaskPage(): React.JSX.Element {
   const [linearError, setLinearError] = useState<string | null>(null)
   const [linearSearchInput, setLinearSearchInput] = useState('')
   const [appliedLinearSearch, setAppliedLinearSearch] = useState('')
-  const [linearAttributeFilter, setLinearAttributeFilter] = useState<LinearIssueAttributeFilter>(
-    () => emptyLinearIssueAttributeFilter()
+  const [linearIssueFiltersByWorkspaceId, setLinearIssueFiltersByWorkspaceId] = useState<
+    Record<string, LinearIssueAttributeFilter>
+  >(() => ({}))
+  const linearAttributeFilterWorkspaceId =
+    selectedLinearWorkspaceId && selectedLinearWorkspaceId !== 'all'
+      ? selectedLinearWorkspaceId
+      : null
+  const linearAttributeFilter = useMemo(
+    () =>
+      selectLinearWorkspaceIssueFilter(
+        linearIssueFiltersByWorkspaceId,
+        linearAttributeFilterWorkspaceId
+      ),
+    [linearAttributeFilterWorkspaceId, linearIssueFiltersByWorkspaceId]
   )
-  const linearAttributeFilterSignatureRef = useRef(
-    linearIssueAttributeFilterSignature(emptyLinearIssueAttributeFilter())
-  )
-  const linearPrimaryTeamIdRef = useRef<string | null>(null)
-  const previousLinearWorkspaceIdForFiltersRef = useRef<string | null | undefined>(undefined)
-  const [linearViewMode, setLinearViewMode] = useState<LinearViewMode>('list')
-  const [linearGroupBy, setLinearGroupBy] = useState<LinearGroupBy>('none')
-  const [linearOrderBy, setLinearOrderBy] = useState<LinearOrderBy>('priority')
+  const linearAttributeFilterReadRef = useRef<LinearIssueListFilterRead | null>(null)
+  const linearPrimaryTeamRef = useRef<LinearPrimaryTeamObservation | null>(null)
+  const [linearViewMode, setLinearViewMode] = useState<LinearViewMode>(DEFAULT_LINEAR_VIEW_MODE)
+  const [linearGroupBy, setLinearGroupBy] = useState<LinearGroupBy>(DEFAULT_LINEAR_GROUP_BY)
+  const [linearOrderBy, setLinearOrderBy] = useState<LinearOrderBy>(DEFAULT_LINEAR_ORDER_BY)
   const [linearDisplayProperties, setLinearDisplayProperties] = useState<
     ReadonlySet<LinearDisplayProperty>
-  >(() => new Set(DEFAULT_LINEAR_DISPLAY_PROPERTIES))
+  >(() => new Set(LINEAR_DISPLAY_PROPERTIES))
   const [linearTeamPropertyTouched, setLinearTeamPropertyTouched] = useState(false)
   const [linearRefreshNonce, setLinearRefreshNonce] = useState(0)
   const [linearProjectSearchInput, setLinearProjectSearchInput] = useState('')
@@ -4739,6 +4884,14 @@ export default function TaskPage(): React.JSX.Element {
     setLinearMode(taskResumeState?.linearMode ?? 'issues')
     setLinearSearchInput(linearQuery)
     setAppliedLinearSearch(linearQuery)
+
+    const linearIssueView = resolveLinearIssueViewResumeState(taskResumeState?.linearIssueView)
+    setLinearViewMode(linearIssueView.viewMode)
+    setLinearGroupBy(linearIssueView.groupBy)
+    setLinearOrderBy(linearIssueView.orderBy)
+    setLinearDisplayProperties(new Set(linearIssueView.displayProperties))
+    setLinearTeamPropertyTouched(linearIssueView.teamPropertyTouched)
+    setLinearIssueFiltersByWorkspaceId(linearIssueView.filtersByWorkspaceId)
 
     const jiraPreset = taskResumeState?.jiraPreset ?? 'assigned'
     const jiraQuery = taskResumeState?.jiraQuery ?? ''
@@ -5246,41 +5399,50 @@ export default function TaskPage(): React.JSX.Element {
     [linearTeamOptions, linearTeamSelection]
   )
 
-  const applyLinearAttributeFilter = useCallback((next: LinearIssueAttributeFilter) => {
-    // Why: batch filter + limit/page reset so the fetch effect never issues an old expanded-limit request for the new filter.
-    setLinearAttributeFilter(next)
-    setLinearIssueLimit(LINEAR_ITEM_LIMIT)
-    setLinearIssuePage(0)
-    setLinearIssueLoadingTargetPage(null)
-  }, [])
+  const applyLinearAttributeFilter = useCallback(
+    (next: LinearIssueAttributeFilter) => {
+      if (linearAttributeFilterWorkspaceId) {
+        setLinearIssueFiltersByWorkspaceId((previous) =>
+          setLinearWorkspaceIssueFilter(previous, linearAttributeFilterWorkspaceId, next)
+        )
+      }
+      setLinearIssueLimit(LINEAR_ITEM_LIMIT)
+      setLinearIssuePage(0)
+      setLinearIssueLoadingTargetPage(null)
+    },
+    [linearAttributeFilterWorkspaceId]
+  )
 
   useEffect(() => {
-    const workspaceId = selectedLinearWorkspaceId ?? null
-    const previous = previousLinearWorkspaceIdForFiltersRef.current
-    previousLinearWorkspaceIdForFiltersRef.current = workspaceId
-    if (previous === undefined || previous === workspaceId) {
+    const nextTeamId = availableTeams.length > 0 ? (linearAttributePrimaryTeam?.id ?? null) : null
+    if (!nextTeamId) {
       return
     }
-    applyLinearAttributeFilter(emptyLinearIssueAttributeFilter())
-  }, [applyLinearAttributeFilter, selectedLinearWorkspaceId])
-
-  useEffect(() => {
-    const nextId = linearAttributePrimaryTeam?.id ?? null
-    const previousId = linearPrimaryTeamIdRef.current
-    linearPrimaryTeamIdRef.current = nextId
-    if (previousId === null || previousId === nextId) {
+    const previous = linearPrimaryTeamRef.current
+    const next: LinearPrimaryTeamObservation = {
+      workspaceId: linearAttributeFilterWorkspaceId,
+      teamId: nextTeamId
+    }
+    linearPrimaryTeamRef.current = next
+    if (!shouldClearTeamDerivedFacets({ previous, next })) {
       return
     }
     // Why: team-scoped facets; clearing them is a filter change, so reset limit/page via applyLinearAttributeFilter (R6), not a bare set.
-    const next = teamDerivedFacetsForPrimaryTeamChange(linearAttributeFilter)
+    const cleared = teamDerivedFacetsForPrimaryTeamChange(linearAttributeFilter)
     if (
       linearIssueAttributeFilterSignature(linearAttributeFilter) ===
-      linearIssueAttributeFilterSignature(next)
+      linearIssueAttributeFilterSignature(cleared)
     ) {
       return
     }
-    applyLinearAttributeFilter(next)
-  }, [applyLinearAttributeFilter, linearAttributeFilter, linearAttributePrimaryTeam?.id])
+    applyLinearAttributeFilter(cleared)
+  }, [
+    applyLinearAttributeFilter,
+    availableTeams.length,
+    linearAttributeFilter,
+    linearAttributeFilterWorkspaceId,
+    linearAttributePrimaryTeam?.id
+  ])
 
   const linearSearchActive = isLinearIssueSearchActive(linearSearchInput, appliedLinearSearch)
   const showLinearAttributeFilters =
@@ -6533,19 +6695,21 @@ export default function TaskPage(): React.JSX.Element {
     ]
   )
 
-  useEffect(() => {
-    if (!taskResumeApplied) {
-      return
-    }
-    const timeout = window.setTimeout(() => {
-      const scoped = scopeGitHubTaskSearch(taskSearchInput, activeGithubTaskKind)
+  const commitTaskSearch = useCallback(
+    (value: string): void => {
+      const scoped = scopeGitHubTaskSearch(value, activeGithubTaskKind)
       if (scoped !== appliedTaskSearch) {
         setTasksFiltering(true)
       }
       setAppliedTaskSearch(scoped)
-    }, TASK_SEARCH_DEBOUNCE_MS)
-    return () => window.clearTimeout(timeout)
-  }, [activeGithubTaskKind, appliedTaskSearch, taskSearchInput, taskResumeApplied])
+    },
+    [activeGithubTaskKind, appliedTaskSearch]
+  )
+  useGitHubTaskSearchCommit({
+    enabled: taskResumeApplied,
+    onCommit: commitTaskSearch,
+    value: taskSearchInput
+  })
 
   useEffect(() => {
     if (!taskResumeApplied) {
@@ -6583,6 +6747,30 @@ export default function TaskPage(): React.JSX.Element {
     // Why: strip repo:owner/name qualifiers before fan-out — cross-repo they'd pin every fetch to one repo. See stripRepoQualifiers.
     const q = stripRepoQualifiers(appliedTaskSearch.trim())
     let cancelled = false
+    const contextChanged = githubResumeContextRef.current !== githubResumeContextKey
+    githubResumeContextRef.current = githubResumeContextKey
+    const savedPosition = !githubResumeConsumedRef.current
+      ? useAppStore.getState().taskListPosition
+      : undefined
+    githubResumeConsumedRef.current = true
+    const savedPositionMatches = savedPosition?.contextKey === githubResumeContextKey
+    const targetPage = savedPositionMatches
+      ? savedPosition.page
+      : contextChanged
+        ? 0
+        : currentPageRef.current
+    const liveTargetItems = pagesRef.current[targetPage]
+    const cachedTargetPage = liveTargetItems
+      ? { items: liveTargetItems, cachedAt: Date.now() }
+      : taskPageGitHubResumeCache.read(githubResumeContextKey, targetPage)
+    const cachedTargetIsFresh =
+      cachedTargetPage !== null &&
+      Date.now() - cachedTargetPage.cachedAt < TASK_PAGE_GITHUB_RESUME_FRESH_MS
+    if (savedPositionMatches) {
+      pendingGithubScrollRestoreRef.current = savedPosition.scrollTop
+    } else if (contextChanged) {
+      pendingGithubScrollRestoreRef.current = 0
+    }
 
     // Why: paint cached rows synchronously before the fan-out so a selection change doesn't leave the prior rows on screen for a frame.
     const preMerged: GitHubWorkItem[] = []
@@ -6603,26 +6791,33 @@ export default function TaskPage(): React.JSX.Element {
         preMerged.push(...cached)
       }
     }
-    // Why: always replace so an empty cache clears the previous query's rows.
+    // Why: page-one metadata and the restored numbered page have independent lifecycles.
     const page0Raw =
       preMerged.length > 0 ? sortWorkItemsByNumber(preMerged).slice(0, githubPageSize) : []
     // Why: pre-paint must still overlay in-flight mutations (K4/K18).
-    setPages((previous) => [
-      materializeTaskPageItemList({
-        networkItems: page0Raw,
-        previousItems: previous.flatMap((page) => page ?? []),
-        queryKey: githubWorkItemMutationQueryKey
-      })
-    ])
-    currentPageRef.current = 0
-    setCurrentPage(0)
+    const landingPages: (GitHubWorkItem[] | null)[] = Array.from(
+      { length: targetPage + 1 },
+      () => null
+    )
+    landingPages[0] = materializeTaskPageItemList({
+      networkItems: page0Raw,
+      previousItems: pagesRef.current.flatMap((page) => page ?? []),
+      queryKey: githubWorkItemMutationQueryKey
+    })
+    if (targetPage > 0 && cachedTargetPage) {
+      landingPages[targetPage] = overlayPendingOnTaskPagePages([cachedTargetPage.items])[0] ?? []
+    }
+    pagesRef.current = landingPages
+    currentPageRef.current = targetPage
+    setPages(landingPages)
+    setCurrentPage(targetPage)
     setCountedTotalPages(null)
     countedTotalPagesRef.current = null
     setProvenPageLimit(null)
     setTasksError(null)
     setFailedCount(0) // reset so a prior failure banner doesn't linger
     setGithubUnavailable(false)
-    setTasksLoading(anyUncached)
+    setTasksLoading(targetPage > 0 ? cachedTargetPage === null : anyUncached)
 
     // Preserve the existing nonce-gated force behavior.
     const forceRefresh = taskRefreshNonce !== lastFetchedNonceRef.current
@@ -6646,7 +6841,10 @@ export default function TaskPage(): React.JSX.Element {
     }))
     const landingRefreshKey = `${repoArgs.map((r) => `${r.repoId}:${r.path}`).join('|')}::${q}`
     const shouldProbeOnLanding =
-      !forcedFetch && anyRepoCached && !landingGitHubRefreshKeysRef.current.has(landingRefreshKey)
+      !forcedFetch &&
+      !cachedTargetIsFresh &&
+      anyRepoCached &&
+      !landingGitHubRefreshKeysRef.current.has(landingRefreshKey)
     if (shouldProbeOnLanding) {
       landingGitHubRefreshKeysRef.current = new Set([
         ...landingGitHubRefreshKeysRef.current,
@@ -6655,6 +6853,63 @@ export default function TaskPage(): React.JSX.Element {
     }
     // Why: manual refresh keeps cached rows (tasksLoading stays false), so track forced fetch separately for the toolbar spinner.
     setTasksRefreshing(forcedFetch)
+
+    if (targetPage > 0 && (!cachedTargetIsFresh || forcedFetch)) {
+      const requestGeneration = paginationGenerationRef.current
+      if (!cachedTargetPage) {
+        setPaginationLoading(true)
+        setLoadingTargetPage(targetPage)
+      }
+      void fetchWorkItemsNextPage(
+        repoArgs,
+        githubPerRepoPageLimit,
+        githubPageSize,
+        q,
+        taskPageToGitHubApiPage(targetPage)
+      )
+        .then(({ items, failedCount, errorTypes }) => {
+          if (cancelled || paginationGenerationRef.current !== requestGeneration) {
+            return
+          }
+          if (items.length === 0) {
+            const { reason } = resolveEmptyPageOutcome({
+              target: targetPage,
+              failedCount,
+              errorTypes,
+              countedTotalPages: null
+            })
+            if (reason === 'load-failed' && cachedTargetPage) {
+              return
+            }
+            pendingGithubScrollRestoreRef.current = 0
+            currentPageRef.current = 0
+            setCurrentPage(0)
+            const next = [pagesRef.current[0] ?? []]
+            pagesRef.current = next
+            setPages(next)
+            return
+          }
+          const restoredItems = overlayPendingOnTaskPagePages([items])[0] ?? []
+          taskPageGitHubResumeCache.write(githubResumeContextKey, targetPage, restoredItems)
+          const next = [...pagesRef.current]
+          while (next.length <= targetPage) {
+            next.push(null)
+          }
+          next[targetPage] = restoredItems
+          pagesRef.current = next
+          setPages(next)
+        })
+        .catch((error) => {
+          console.error('Failed to restore GitHub task page:', error)
+        })
+        .finally(() => {
+          if (!cancelled && paginationGenerationRef.current === requestGeneration) {
+            setPaginationLoading(false)
+            setLoadingTargetPage(null)
+            setTasksLoading(false)
+          }
+        })
+    }
 
     // Why: snapshot retrying keys at dispatch so an earlier settling effect doesn't wipe a newer retry's pending source.
     const dispatchedRetrySourceKeys = retryingSourceKeys
@@ -6706,7 +6961,16 @@ export default function TaskPage(): React.JSX.Element {
             patchWorkItem: useAppStore.getState().patchWorkItem,
             sourceContextByRepoId
           })
-          if (shouldProbeOnLanding) {
+          if (targetPage > 0) {
+            const next = [...pagesRef.current]
+            next[0] = materializeTaskPageItemList({
+              networkItems: items,
+              previousItems: next.flatMap((page) => page ?? []),
+              queryKey: githubWorkItemMutationQueryKey
+            })
+            pagesRef.current = next
+            setPages(next)
+          } else if (shouldProbeOnLanding) {
             const replaceFirstPage = shouldReplaceTaskPageItemsAfterRefresh(page0Raw, items)
             const resetPagination = shouldResetTaskPagePaginationAfterLandingRefresh(
               page0Raw,
@@ -6734,7 +6998,9 @@ export default function TaskPage(): React.JSX.Element {
           }
           setFailedCount(failed)
           setGithubUnavailable(unavailable)
-          setTasksLoading(false)
+          if (targetPage === 0 || cachedTargetPage) {
+            setTasksLoading(false)
+          }
           setTasksRefreshing(false)
           setTasksFiltering(false)
         }
@@ -6758,7 +7024,9 @@ export default function TaskPage(): React.JSX.Element {
         setTasksError(err instanceof Error ? err.message : 'Failed to load GitHub work.')
         setFailedCount(0) // the per-repo banner would be misleading next to tasksError
         setGithubUnavailable(false)
-        setTasksLoading(false)
+        if (targetPage === 0 || cachedTargetPage) {
+          setTasksLoading(false)
+        }
         setTasksRefreshing(false)
         setTasksFiltering(false)
       })
@@ -7140,17 +7408,11 @@ export default function TaskPage(): React.JSX.Element {
     setTaskRefreshNonce((current) => current + 1)
   }, [activeGithubTaskKind, setTaskResumeState, taskSearchInput])
 
-  const handleTaskSearchChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>): void => {
-      const next = event.target.value
-      const scoped = scopeGitHubTaskSearch(next, activeGithubTaskKind)
-      setTaskSearchInput(next)
-      setActiveTaskPreset(null)
-      // Why: visible rows are keyed by appliedTaskSearch, not the draft input; hide stale rows once the draft changes the query.
-      setTasksFiltering(scoped !== appliedTaskSearch)
-    },
-    [activeGithubTaskKind, appliedTaskSearch]
-  )
+  const handleTaskSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>): void => {
+    const next = event.target.value
+    setTaskSearchInput(next)
+    setActiveTaskPreset(null)
+  }, [])
 
   const handleSetDefaultTaskPreset = useCallback(
     (presetId: TaskViewPresetId): void => {
@@ -7815,6 +8077,15 @@ export default function TaskPage(): React.JSX.Element {
         return
       }
 
+      // Why: open menus/popovers/selects own Esc; capture-phase leave would steal it from Radix.
+      if (
+        document.querySelector(
+          '[data-slot="dropdown-menu-content"], [data-slot="popover-content"], [data-slot="select-content"], [role="menu"]'
+        )
+      ) {
+        return
+      }
+
       // Why: Esc first blurs a focused input so it doesn't accidentally close the whole page; only closes once focus is outside an input.
       if (
         target instanceof HTMLInputElement ||
@@ -7892,6 +8163,35 @@ export default function TaskPage(): React.JSX.Element {
   }, [appliedLinearSearch, setTaskResumeState, taskResumeApplied])
 
   useEffect(() => {
+    if (!taskResumeApplied) {
+      return
+    }
+    if (!linearViewPersistReadyRef.current) {
+      linearViewPersistReadyRef.current = true
+      return
+    }
+    setTaskResumeState({
+      linearIssueView: serializeLinearIssueViewResumeState({
+        viewMode: linearViewMode,
+        groupBy: linearGroupBy,
+        orderBy: linearOrderBy,
+        displayProperties: linearDisplayProperties,
+        teamPropertyTouched: linearTeamPropertyTouched,
+        filtersByWorkspaceId: linearIssueFiltersByWorkspaceId
+      })
+    })
+  }, [
+    linearDisplayProperties,
+    linearGroupBy,
+    linearIssueFiltersByWorkspaceId,
+    linearOrderBy,
+    linearTeamPropertyTouched,
+    linearViewMode,
+    setTaskResumeState,
+    taskResumeApplied
+  ])
+
+  useEffect(() => {
     setLinearIssueLimit(LINEAR_ITEM_LIMIT)
     setLinearIssuePage(0)
     setLinearIssueLoadingTargetPage(null)
@@ -7949,12 +8249,15 @@ export default function TaskPage(): React.JSX.Element {
       )
     }
 
-    const nextFilterSignature = linearIssueAttributeFilterSignature(linearAttributeFilter)
-    const previousFilterSignature = linearAttributeFilterSignatureRef.current
-    linearAttributeFilterSignatureRef.current = nextFilterSignature
+    const nextFilterRead: LinearIssueListFilterRead = {
+      workspaceId: linearAttributeFilterWorkspaceId,
+      signature: linearIssueAttributeFilterSignature(linearAttributeFilter)
+    }
+    const previousFilterRead = linearAttributeFilterReadRef.current
+    linearAttributeFilterReadRef.current = nextFilterRead
     const filterForce = shouldForceLinearIssueListRead({
-      previousFilterSignature,
-      nextFilterSignature,
+      previousFilterRead,
+      nextFilterRead,
       refreshForced: false
     })
 
@@ -9457,11 +9760,11 @@ export default function TaskPage(): React.JSX.Element {
                           <LinearIssueAttributeFilterDropdowns
                             value={linearAttributeFilter}
                             onChange={applyLinearAttributeFilter}
-                            workspaceId={selectedLinearWorkspaceId ?? null}
-                            isAllWorkspaces={selectedLinearWorkspaceId === 'all'}
+                            workspaceId={linearAttributeFilterWorkspaceId}
                             primaryTeam={linearAttributePrimaryTeam}
                             selectedTeamIds={[...linearTeamSelection]}
                             availableTeams={linearTeamOptions}
+                            teamsSettled={availableTeams.length > 0}
                             settings={linearTaskSourceContext ?? settings}
                           />
                         ) : null}
@@ -9906,8 +10209,27 @@ export default function TaskPage(): React.JSX.Element {
             // chrome (no gap, no top border/radius) so toolbar + table read as one.
             <div className="flex min-h-0 min-w-0 max-h-full flex-col overflow-hidden rounded-md rounded-t-none border border-t-0 border-border/50 bg-background shadow-sm">
               <div
+                ref={githubListScrollRef}
+                data-task-list-scroll="github"
                 className="min-h-0 flex-initial overflow-auto scrollbar-sleek scrollbar-sleek-lg"
                 style={{ scrollbarGutter: 'stable' }}
+                onScroll={(event) => {
+                  const state = useAppStore.getState()
+                  if (
+                    state.activeView !== 'tasks' ||
+                    state.taskPageData.openGitHubWorkItem ||
+                    pendingGithubScrollRestoreRef.current !== null
+                  ) {
+                    return
+                  }
+                  const scrollTop = event.currentTarget.scrollTop
+                  githubListScrollTopRef.current = scrollTop
+                  taskListPositionRef.current = {
+                    contextKey: githubResumeContextKey,
+                    page: currentPageRef.current,
+                    scrollTop
+                  }
+                }}
               >
                 <div
                   // Why: z-40 must beat the rows' sticky left cells (z-20); this stacking context's z sets the whole header's level.
@@ -10493,6 +10815,11 @@ export default function TaskPage(): React.JSX.Element {
                     totalPages={totalPages}
                     loadingTarget={loadingTargetPage}
                     onPageChange={(page) => {
+                      pendingGithubScrollRestoreRef.current = null
+                      githubListScrollTopRef.current = 0
+                      if (githubListScrollRef.current) {
+                        githubListScrollRef.current.scrollTop = 0
+                      }
                       if (pages[page] !== null && pages[page] !== undefined) {
                         currentPageRef.current = page
                         setCurrentPage(page)
