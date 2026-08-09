@@ -545,23 +545,25 @@ describe('RemoteRuntimeSharedControlConnection', () => {
     })
     const onClose = vi.fn()
 
-    await connection.subscribe('runtime.clientEvents.subscribe', null, 1000, {
-      onResponse: vi.fn(),
-      onError: vi.fn(),
-      onClose
-    })
+    try {
+      await connection.subscribe('runtime.clientEvents.subscribe', null, 1000, {
+        onResponse: vi.fn(),
+        onError: vi.fn(),
+        onClose
+      })
 
-    await vi.waitFor(() => expect(server.connectionCount()).toBe(2), { timeout: 5000 })
-    await vi.waitFor(
-      () =>
-        expect(
-          server.requests.filter((request) => request.method === 'runtime.clientEvents.subscribe')
-        ).toHaveLength(2),
-      { timeout: 5000 }
-    )
-    expect(onClose).not.toHaveBeenCalled()
-
-    connection.close()
+      await vi.waitFor(() => expect(server.connectionCount()).toBe(2), { timeout: 5000 })
+      await vi.waitFor(
+        () =>
+          expect(
+            server.requests.filter((request) => request.method === 'runtime.clientEvents.subscribe')
+          ).toHaveLength(2),
+        { timeout: 5000 }
+      )
+      expect(onClose).not.toHaveBeenCalled()
+    } finally {
+      connection.close()
+    }
   })
 
   it('reschedules a locally admission-blocked probe without closing a healthy socket', async () => {
@@ -693,6 +695,27 @@ describe('RemoteRuntimeSharedControlConnection', () => {
     }
   })
 
+  it('recovers when a session probe resolves with a failure response', async () => {
+    const server = await createServer({ failMethods: ['status.get'] })
+    const connection = new RemoteRuntimeSharedControlConnection(server.pairing, {
+      sessionProbeIntervalMs: 40,
+      sessionProbeTimeoutMs: 500
+    })
+
+    try {
+      await connection.subscribe('runtime.clientEvents.subscribe', null, 1000, {
+        onResponse: vi.fn(),
+        onError: vi.fn()
+      })
+
+      // Why: an ok:false status.get must count as lost session authority and
+      // force a replacement connection, not a quiet reschedule.
+      await vi.waitFor(() => expect(server.connectionCount()).toBe(2), { timeout: 5000 })
+    } finally {
+      connection.close()
+    }
+  })
+
   it('keeps a responsive connection on one socket while session probes succeed', async () => {
     const server = await createServer()
     const connection = new RemoteRuntimeSharedControlConnection(server.pairing, {
@@ -700,17 +723,19 @@ describe('RemoteRuntimeSharedControlConnection', () => {
       sessionProbeTimeoutMs: 500
     })
 
-    await connection.subscribe('runtime.clientEvents.subscribe', null, 1000, {
-      onResponse: vi.fn(),
-      onError: vi.fn()
-    })
+    try {
+      await connection.subscribe('runtime.clientEvents.subscribe', null, 1000, {
+        onResponse: vi.fn(),
+        onError: vi.fn()
+      })
 
-    await vi.waitFor(() =>
-      expect(server.requests.map((request) => request.method)).toContain('status.get')
-    )
-    expect(server.connectionCount()).toBe(1)
-
-    connection.close()
+      await vi.waitFor(() =>
+        expect(server.requests.map((request) => request.method)).toContain('status.get')
+      )
+      expect(server.connectionCount()).toBe(1)
+    } finally {
+      connection.close()
+    }
   })
 
   it('does not run session probes when no subscriptions are active', async () => {
@@ -720,12 +745,14 @@ describe('RemoteRuntimeSharedControlConnection', () => {
       sessionProbeTimeoutMs: 50
     })
 
-    await connection.request('worktree.ps', undefined, 1000)
-    await new Promise((resolve) => setTimeout(resolve, 60))
+    try {
+      await connection.request('worktree.ps', undefined, 1000)
+      await new Promise((resolve) => setTimeout(resolve, 60))
 
-    expect(server.requests.map((request) => request.method)).not.toContain('status.get')
-
-    connection.close()
+      expect(server.requests.map((request) => request.method)).not.toContain('status.get')
+    } finally {
+      connection.close()
+    }
   })
 
   it('keeps unrelated pending requests alive when one request times out', async () => {

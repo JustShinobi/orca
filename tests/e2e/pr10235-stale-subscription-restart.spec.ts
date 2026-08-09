@@ -25,6 +25,9 @@ function createGitRepo(): string {
       'user.name=Orca E2E',
       '-c',
       'user.email=orca-e2e@example.invalid',
+      // Why: ambient commit.gpgsign=true would fail the seed commit opaquely.
+      '-c',
+      'commit.gpgsign=false',
       'commit',
       '-m',
       'seed'
@@ -143,11 +146,12 @@ async function runStaleSubscriptionOracle(args: {
         { timeout: 30_000 }
       )
       .toBeGreaterThan(0)
-    await expect
-      .poll(() => readWorktreeSurface(client.page, addedRepoPath, client.environmentId), {
-        timeout: 2_000
-      })
-      .toEqual({ rendered: false, worktreeId: null })
+    // Why: a single immediate read — polling "stays stale" would fail a client
+    // that legitimately self-heals faster than the poll window.
+    expect(await readWorktreeSurface(client.page, addedRepoPath, client.environmentId)).toEqual({
+      rendered: false,
+      worktreeId: null
+    })
 
     try {
       await expect

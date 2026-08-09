@@ -1,5 +1,6 @@
 import type WebSocket from 'ws'
-import type { RemoteRuntimeClientError } from './remote-runtime-client-error'
+import { RemoteRuntimeClientError } from './remote-runtime-client-error'
+import type { RuntimeRpcResponse } from './runtime-rpc-envelope'
 import { toRemoteRuntimeClientError } from './remote-runtime-shared-control-protocol'
 import type { RemoteRuntimeSharedControlConnectionOptions } from './remote-runtime-shared-control-types'
 
@@ -107,13 +108,35 @@ export class SharedControlSessionProbe {
   }
 }
 
+// Why: an ok:false response proves lost session authority just like a rejected
+// request — resolving it would reschedule the probe instead of recovering.
+export function requireSessionProbeSuccess<T>(
+  response: RuntimeRpcResponse<T>
+): RuntimeRpcResponse<T> {
+  if (!response.ok) {
+    throw new RemoteRuntimeClientError(response.error.code, response.error.message)
+  }
+  return response
+}
+
+function requirePositiveFiniteMs(value: number | undefined, name: string): number | undefined {
+  if (value !== undefined && (!Number.isFinite(value) || value <= 0)) {
+    throw new RangeError(`${name} must be a positive finite number of milliseconds`)
+  }
+  return value
+}
+
 export function createSharedControlSessionProbe(
   options: RemoteRuntimeSharedControlConnectionOptions,
   hooks: Omit<SharedControlSessionProbeHooks, 'intervalMs' | 'timeoutMs'>
 ): SharedControlSessionProbe {
   return new SharedControlSessionProbe({
     ...hooks,
-    intervalMs: options.sessionProbeIntervalMs ?? SHARED_CONTROL_SESSION_PROBE_INTERVAL_MS,
-    timeoutMs: options.sessionProbeTimeoutMs ?? SHARED_CONTROL_SESSION_PROBE_TIMEOUT_MS
+    intervalMs:
+      requirePositiveFiniteMs(options.sessionProbeIntervalMs, 'sessionProbeIntervalMs') ??
+      SHARED_CONTROL_SESSION_PROBE_INTERVAL_MS,
+    timeoutMs:
+      requirePositiveFiniteMs(options.sessionProbeTimeoutMs, 'sessionProbeTimeoutMs') ??
+      SHARED_CONTROL_SESSION_PROBE_TIMEOUT_MS
   })
 }

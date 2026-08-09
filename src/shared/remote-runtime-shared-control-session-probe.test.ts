@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type WebSocket from 'ws'
-import { SharedControlSessionProbe } from './remote-runtime-shared-control-session-probe'
+import {
+  createSharedControlSessionProbe,
+  SharedControlSessionProbe
+} from './remote-runtime-shared-control-session-probe'
 
 type ProbeState = {
   intentionallyClosed: boolean
@@ -14,6 +17,25 @@ afterEach(() => {
 })
 
 describe('SharedControlSessionProbe', () => {
+  it('rejects non-positive or non-finite probe timing overrides', () => {
+    const hooks = {
+      isIntentionallyClosed: () => false,
+      hasSubscriptions: () => false,
+      isReady: () => false,
+      getSocket: () => null,
+      probe: () => Promise.resolve(),
+      forceClose: () => {}
+    }
+    for (const value of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() =>
+        createSharedControlSessionProbe({ sessionProbeIntervalMs: value }, hooks)
+      ).toThrow(RangeError)
+      expect(() =>
+        createSharedControlSessionProbe({ sessionProbeTimeoutMs: value }, hooks)
+      ).toThrow(RangeError)
+    }
+  })
+
   it('does not retain a timer without an active subscription', () => {
     vi.useFakeTimers()
     const { probe, run } = createProbe()

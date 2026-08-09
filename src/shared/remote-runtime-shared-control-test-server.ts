@@ -33,6 +33,7 @@ export type SharedControlTestServerOptions = {
   disableAutoPong?: boolean
   delayedMethods?: string[]
   silentMethods?: string[]
+  failMethods?: string[]
   goSilentOnFirstConnectionAfterFirstStreamingResponse?: boolean
   endStreamingResponseAfterReady?: boolean
 }
@@ -75,7 +76,10 @@ export async function createSharedControlTestServer(
 
   wss.on('connection', (ws) => {
     connectionCount += 1
-    const isFirstConnection = connectionCount === 1
+    // Why: captured per connection — the outer count keeps moving, so reading it
+    // at hello time would mis-suppress a first socket that raced a second connect.
+    const connectionIndex = connectionCount
+    const isFirstConnection = connectionIndex === 1
     let goneSilent = false
     let sharedKey: Uint8Array | null = null
     let authenticated = false
@@ -92,7 +96,7 @@ export async function createSharedControlTestServer(
         )
         if (
           options.suppressReadyFrame ||
-          connectionCount <= (options.suppressReadyFrameCount ?? 0)
+          connectionIndex <= (options.suppressReadyFrameCount ?? 0)
         ) {
           return
         }
@@ -188,6 +192,15 @@ function handleRequest(
   if (options.silentMethods?.includes(request.method)) {
     return
   }
+  if (options.failMethods?.includes(request.method)) {
+    sendEncrypted(ws, sharedKey, {
+      id: request.id,
+      ok: false,
+      error: { code: 'session_authority_lost', message: 'test failure response' },
+      _meta: { runtimeId: 'runtime-test' }
+    })
+    return
+  }
   if (options.closeBeforeResponse) {
     ws.close(4001, 'test close')
     return
@@ -226,8 +239,12 @@ function handleRequest(
     } else if (streaming) {
       subscriptionEnds.push(sendEnd)
     }
+    // Why: consume the one-shot close flag only when a streaming response is
+    // actually sent, so delayed/flushed responses still observe the close.
+    if (streaming && options.closeAfterStreamingResponse()) {
+      setTimeout(() => ws.close(), 0)
+    }
   }
-  const closeAfterResponse = streaming && options.closeAfterStreamingResponse()
   if (options.sendKeepaliveBeforeResponse && options.keepaliveDelayMs === undefined) {
     sendEncrypted(ws, sharedKey, { _keepalive: true })
   }
@@ -240,18 +257,10 @@ function handleRequest(
     return
   }
   if (options.responseDelayMs !== undefined) {
-    setTimeout(() => {
-      sendResponse()
-      if (closeAfterResponse) {
-        setTimeout(() => ws.close(), 0)
-      }
-    }, options.responseDelayMs)
+    setTimeout(sendResponse, options.responseDelayMs)
     return
   }
   sendResponse()
-  if (closeAfterResponse) {
-    setTimeout(() => ws.close(), 0)
-  }
 }
 
 function isStreamingMethod(method: string): boolean {

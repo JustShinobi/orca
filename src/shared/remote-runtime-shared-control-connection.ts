@@ -15,6 +15,7 @@ import { reconnectSharedControlNow } from './remote-runtime-shared-control-manua
 import { requestSharedControl } from './remote-runtime-shared-control-requests'
 import {
   createSharedControlSessionProbe,
+  requireSessionProbeSuccess,
   type SharedControlSessionProbe
 } from './remote-runtime-shared-control-session-probe'
 import { SharedControlRetiredRequestIds } from './remote-runtime-shared-control-retired-request-ids'
@@ -63,7 +64,8 @@ export class RemoteRuntimeSharedControlConnection {
       isReady: () =>
         isSharedControlReady({ state: this.state, ws: this.ws, sharedKey: this.sharedKey }),
       getSocket: () => this.ws,
-      probe: (timeoutMs, signal) => this.request('status.get', undefined, timeoutMs, signal),
+      probe: async (timeoutMs, signal) =>
+        requireSessionProbeSuccess(await this.request('status.get', undefined, timeoutMs, signal)),
       // Why: the probe's socket identity guard makes the current generation authoritative.
       forceClose: (error) =>
         this.handleSocketClosed(error, this.socketGeneration.currentGeneration())
@@ -111,9 +113,7 @@ export class RemoteRuntimeSharedControlConnection {
     this.intentionallyClosed = true
     this.socketGeneration.invalidate()
     this.reconnect.clear()
-    for (const subscription of Array.from(this.subscriptions.values())) {
-      this.closeSubscription(subscription.requestId)
-    }
+    Array.from(this.subscriptions.values()).forEach((s) => this.closeSubscription(s.requestId))
     this.closeSocket(error)
   }
 
