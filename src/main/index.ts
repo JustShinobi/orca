@@ -1,4 +1,5 @@
 /* eslint-disable max-lines -- main-process entry point; owns app lifecycle, service wiring, window creation, and hook/daemon startup with no cleaner split seam. */
+import { randomBytes } from 'node:crypto'
 import { existsSync, statSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import os from 'node:os'
@@ -81,7 +82,10 @@ import {
   showRuntimeRpcStartupFailureDialog
 } from './runtime/runtime-rpc-startup-failure'
 import { resolveAdvertisedPairingEndpoint } from './runtime/pairing-endpoint'
-import { ServeReadinessPublisher } from './server/serve-readiness'
+import { ServeReadinessPublisher, type ServePreviewReadiness } from './server/serve-readiness'
+import { WorktreePreviewProxy } from './ports/worktree-preview-proxy'
+import { createPreviewRouteResolver } from './ports/preview-route-resolver'
+import { parsePreviewDomain, setActivePreviewProxyConfig } from './ports/worktree-preview-routes'
 import { reserveServeStdoutForReadiness } from './server/serve-stdout-boundary'
 import { DesktopRelayService } from './runtime/relay/desktop-relay-service'
 import type { RelayBrokerStatus } from './runtime/relay/relay-session-broker'
@@ -1763,6 +1767,14 @@ const syntheticTitleSpinnerByPaneKey = new Map<
 >()
 let syntheticTitleSpinnerTimer: ReturnType<typeof setInterval> | null = null
 
+type ServePreviewOptions = {
+  port: number
+  bindHost: string
+  domain: string
+  auth: 'open' | 'token' | null
+  token: string | null
+}
+
 type ServeOptions = {
   json: boolean
   wsPort?: number
@@ -1771,6 +1783,7 @@ type ServeOptions = {
   mobilePairing: boolean
   recipeJson: boolean
   projectRoot: string | null
+  preview: ServePreviewOptions | null
 }
 
 function getServeOptions(argv = process.argv): ServeOptions {
@@ -1798,7 +1811,83 @@ function getServeOptions(argv = process.argv): ServeOptions {
     noPairing: argv.includes('--serve-no-pairing'),
     mobilePairing: argv.includes('--serve-mobile-pairing'),
     recipeJson: argv.includes('--serve-recipe-json'),
-    projectRoot: valueAfter('--serve-project-root')
+    projectRoot: valueAfter('--serve-project-root'),
+    preview: getServePreviewOptions({
+      rawPort: valueAfter('--serve-preview-port'),
+      bindHost: valueAfter('--serve-preview-bind'),
+      domain: valueAfter('--serve-preview-domain'),
+      rawAuth: valueAfter('--serve-preview-auth'),
+      token: valueAfter('--serve-preview-token')
+    })
+  }
+}
+
+function getServePreviewOptions(flags: {
+  rawPort: string | null
+  bindHost: string | null
+  domain: string | null
+  rawAuth: string | null
+  token: string | null
+}): ServePreviewOptions | null {
+  const { rawPort, bindHost, domain, rawAuth, token } = flags
+  if (!rawPort && !domain && !bindHost && !rawAuth && !token) {
+    return null
+  }
+  if (!rawPort || !domain) {
+    throw new Error('Preview proxy requires both --preview-port and --preview-domain.')
+  }
+  const port = Number(rawPort)
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(`Invalid --preview-port value: ${rawPort}`)
+  }
+  if (rawAuth && rawAuth !== 'open' && rawAuth !== 'token') {
+    throw new Error(`Invalid --preview-auth value: ${rawAuth} (use open or token)`)
+  }
+  return {
+    port,
+    bindHost: bindHost ?? '127.0.0.1',
+    domain,
+    auth: rawAuth === 'open' || rawAuth === 'token' ? rawAuth : null,
+    token
+  }
+}
+
+const PREVIEW_LOOPBACK_BINDS = new Set(['127.0.0.1', 'localhost', '::1'])
+
+// Why: printServeReady's call shape is a startup-ordering test anchor; the
+// preview block reaches it through module state like runtime/runtimeRpc do.
+let servePreviewReadiness: ServePreviewReadiness | null = null
+
+async function startServePreviewProxy(options: ServeOptions): Promise<void> {
+  const preview = options.preview
+  if (!preview || !runtime) {
+    return
+  }
+  const activeRuntime = runtime
+  const origin = parsePreviewDomain(preview.domain)
+  // Why: a loopback bind is only reachable through a local reverse proxy the
+  // operator already trusts; a wide bind is one LAN scan away from every
+  // workspace dev server, so it defaults to token auth.
+  const auth = preview.auth ?? (PREVIEW_LOOPBACK_BINDS.has(preview.bindHost) ? 'open' : 'token')
+  const token = auth === 'token' ? (preview.token ?? randomBytes(24).toString('base64url')) : null
+  const proxy = new WorktreePreviewProxy({
+    bindHost: preview.bindHost,
+    port: preview.port,
+    origin,
+    auth,
+    token,
+    resolveRoutes: createPreviewRouteResolver({
+      descriptors: () => activeRuntime.getPreviewWorktreeDescriptors()
+    })
+  })
+  const { port } = await proxy.start()
+  setActivePreviewProxyConfig({ origin, token })
+  servePreviewReadiness = {
+    bindHost: preview.bindHost,
+    port,
+    origin: `${origin.protocol}://*.${origin.host}${origin.port ? `:${origin.port}` : ''}`,
+    auth,
+    token
   }
 }
 
@@ -1869,6 +1958,7 @@ async function printServeReady(options: ServeOptions): Promise<void> {
       advertisedEndpoint: advertised?.ok ? advertised.endpoint : null,
       // Why: the WSL reconciliation barrier fails open, so 'pending' warns a WSL PTY launch may still race a repair.
       managedWslCliReconciliation: managedWslCliReconciliationStatus,
+      ...(servePreviewReadiness ? { preview: servePreviewReadiness } : {}),
       pairing: pairing.available
         ? {
             available: true,
@@ -2980,6 +3070,10 @@ void app.whenReady().then(async () => {
     // Why: serve deletes worktrees too, and the history GC that normally drains delete tombstones is
     // armed from the main window — without this, a quit mid-removal leaks the tree until a desktop launch.
     scheduleAllPendingHistoryTreeRemovals()
+    // Why: bind failures (port in use, bad domain) must abort serve startup
+    // loudly — a silently missing preview listener would 404 from the reverse
+    // proxy with nothing in the journal explaining why.
+    await startServePreviewProxy(serveOptions)
     await printServeReady(serveOptions)
     return
   }
