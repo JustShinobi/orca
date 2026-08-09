@@ -25,6 +25,8 @@ Skills:
   skills update             Update already-installed Orca skills via the community skills CLI
 
 Accounts:
+  account add               Add a managed Claude or Codex account on this Orca host
+  account list              List managed Claude and Codex accounts on this Orca host
   accounts list             List managed Codex and Claude accounts
   accounts add              Add a managed account via provider login
   accounts select           Switch the active managed account for a provider
@@ -223,6 +225,8 @@ Common Commands:
   orca status [--json]
   orca diagnostics memory [--json]
   orca agent-context [--json]
+  orca account add [--agent claude|codex] [--json]
+  orca account list [--json]
   orca accounts list [--json]
   orca accounts add --provider codex|claude [--json]
   orca accounts select --provider codex|claude --id <accountId> [--json]
@@ -514,6 +518,11 @@ function formatCommandFlagHelp(flag: string, commandPath: string[]): string {
   }
   if (flag === 'key' && command === 'computer press-key') {
     return '--key <key>            Single key, e.g. Return, Escape, Tab, Left, or PageUp'
+  }
+  // Why: the shared --agent help describes launching a TUI agent in a terminal,
+  // which is the wrong meaning here — this selects the account provider.
+  if (command === 'account add' && flag === 'agent') {
+    return '--agent <id>           Account provider: claude or codex (default claude)'
   }
   if (command.startsWith('accounts ') && flag === 'provider') {
     return '--provider <provider>  Managed account provider: codex or claude'
