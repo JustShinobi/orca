@@ -102,7 +102,7 @@ import {
 import { getGitCloneFailureMessage } from '../../shared/git-clone-failure-message'
 import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
 import { createHash, randomUUID } from 'node:crypto'
-import { homedir } from 'node:os'
+import { homedir, hostname, userInfo } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { resolveWorktreeCreateBase } from '../worktree-create-base'
@@ -507,6 +507,11 @@ import {
   scanWorkspacePortProbes
 } from '../ports/workspace-port-ownership'
 import { advertisedUrlWatcher } from '../ports/advertised-url-watcher'
+import {
+  enrichScanWithPreviewUrls,
+  getActivePreviewProxyConfig,
+  type PreviewWorktreeDescriptor
+} from '../ports/worktree-preview-routes'
 import type { AutomationService } from '../automations/service'
 import { RuntimeBrowserCommands } from './orca-runtime-browser'
 import { RemoteRuntimeTerminalCreateIdempotency } from './remote-runtime-terminal-create-idempotency'
@@ -21106,7 +21111,50 @@ export class OrcaRuntimeService {
   }
 
   async scanWorkspacePorts(repoId?: string): Promise<WorkspacePortScanResult> {
-    return scanWorkspacePortProbes(await this.getWorkspacePortProbes(repoId))
+    const scan = await scanWorkspacePortProbes(await this.getWorkspacePortProbes(repoId))
+    const previewConfig = getActivePreviewProxyConfig()
+    const enriched = previewConfig
+      ? enrichScanWithPreviewUrls(scan, await this.getPreviewWorktreeDescriptors(), previewConfig)
+      : scan
+    // Why: remote clients compose `ssh -L` hints from the runtime host identity;
+    // optional fields keep older clients' scans decoding unchanged.
+    let sshUsername: string | undefined
+    try {
+      sshUsername = userInfo().username || undefined
+    } catch {
+      // userInfo() throws when the uid has no passwd entry (minimal containers).
+    }
+    return {
+      ...enriched,
+      sshHostname: hostname(),
+      ...(sshUsername ? { sshUsername } : {})
+    }
+  }
+
+  /** Worktrees the preview proxy may route to, with the project name the
+   *  preview label derives from. Mirrors getWorkspacePortProbes' exclusion of
+   *  SSH-connected repos: their ports listen on another machine. */
+  async getPreviewWorktreeDescriptors(): Promise<PreviewWorktreeDescriptor[]> {
+    const reposById = new Map(
+      this.requireStore()
+        .getRepos()
+        .map((repo) => [repo.id, repo])
+    )
+    return (await this.listResolvedWorktrees()).flatMap((worktree) => {
+      const repo = reposById.get(worktree.repoId)
+      if (!repo || repo.connectionId) {
+        return []
+      }
+      return [
+        {
+          worktreeId: worktree.id,
+          repoId: worktree.repoId,
+          projectName: repo.displayName,
+          worktreeName: worktree.displayName,
+          worktreePath: worktree.git.path
+        }
+      ]
+    })
   }
 
   async killWorkspacePort(args: WorkspacePortKillRequest): Promise<WorkspacePortKillResult> {
