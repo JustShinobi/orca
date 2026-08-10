@@ -6,6 +6,9 @@ import {
 export type AgentPromptReadiness = {
   isRunningAgent: boolean
   status: 'working' | 'permission' | 'idle' | null
+  // Why: newest explicit agent-status hook timestamp for this terminal — advances on
+  // any status change, not only turn-start. An advance while baseline was idle proves
+  // a turn began; on a working baseline it may instead be the previous turn ending.
   explicitUpdatedAt: number | null
 }
 
