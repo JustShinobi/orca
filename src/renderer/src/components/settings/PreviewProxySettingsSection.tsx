@@ -1,6 +1,7 @@
 import type React from 'react'
 import { useCallback, useEffect, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
+import { isValidPreviewToken } from '../../../../shared/preview-proxy-token'
 import type {
   GlobalSettings,
   PreviewProxySettings,
@@ -55,9 +56,15 @@ export function settingsFromDraft(
 }
 
 /** A domain and a port are the minimum the reconciler will bind; without both,
- *  enabling would persist `enabled: true` against a config that never starts. */
+ *  enabling would persist `enabled: true` against a config that never starts.
+ *  A token outside the cookie-safe alphabet is refused for the same reason. */
 export function isApplicablePreviewDraft(draft: PreviewProxyDraft): boolean {
-  return draft.domain.trim() !== '' && Number.parseInt(draft.port, 10) > 0
+  const token = draft.token.trim()
+  return (
+    draft.domain.trim() !== '' &&
+    Number.parseInt(draft.port, 10) > 0 &&
+    (token === '' || isValidPreviewToken(token))
+  )
 }
 
 export function PreviewProxySettingsSection({
@@ -252,6 +259,14 @@ export function PreviewProxySettingsSection({
               {tokenRevealed ? <EyeOff size={14} /> : <Eye size={14} />}
             </Button>
           </div>
+          {draft.token.trim() !== '' && !isValidPreviewToken(draft.token.trim()) && (
+            <p className="text-xs text-destructive">
+              {translate(
+                'auto.components.settings.PreviewProxySettingsSection.ce9623628c',
+                'Tokens may only use letters, digits, and . _ ~ - (up to 512 characters).'
+              )}
+            </p>
+          )}
         </label>
       </div>
       <div className="flex items-center justify-between gap-3 pb-2">
@@ -274,8 +289,8 @@ export function PreviewProxySettingsSection({
                     { value0: status.origin }
                   )
                 : translate(
-                    'auto.components.settings.PreviewProxySettingsSection.d71f803a7d',
-                    'Anyone who can reach the listener and pass its auth mode can reach your dev servers. Keep token auth on untrusted networks.'
+                    'auto.components.settings.PreviewProxySettingsSection.28c4ebe2b2',
+                    'Anyone who can reach the listener and pass its auth mode can reach your dev servers. Keep token auth on untrusted networks. Use a dedicated subdomain: the auth cookie is sent to every host under the domain you configure.'
                   )}
         </p>
         <Button

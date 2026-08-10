@@ -178,6 +178,24 @@ describe('PreviewProxyReconciler', () => {
     expect(getActivePreviewProxyConfig()).toBeNull()
   })
 
+  it('reports a token outside the cookie-safe alphabet as status instead of binding', async () => {
+    const reconciler = makeReconciler()
+    await reconciler.applySettings({
+      previewProxy: {
+        enabled: true,
+        port: await freeLocalPort(),
+        domain: 'preview.test',
+        auth: 'token',
+        // Persisted before validation existed: `;` ends a cookie value.
+        token: 'sec;ret'
+      }
+    })
+    const status = reconciler.status()
+    expect(status.running).toBe(false)
+    expect(status.error).toContain('token')
+    expect(getActivePreviewProxyConfig()).toBeNull()
+  })
+
   it('reports a bind failure as status and recovers on the next valid config', async () => {
     const reconciler = makeReconciler()
     await reconciler.setFlagsConfig({

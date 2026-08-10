@@ -65,4 +65,16 @@ describe('PreviewProxySettingsSection drafts', () => {
       })
     ).toBe(true)
   })
+
+  it('refuses a token outside the cookie-safe alphabet', () => {
+    const draft = {
+      domain: 'https://preview.example.com',
+      port: '6769',
+      bindHost: '',
+      auth: 'token' as const,
+      token: 'sec;ret'
+    }
+    expect(isApplicablePreviewDraft(draft)).toBe(false)
+    expect(isApplicablePreviewDraft({ ...draft, token: 'sec.ret_2~ok-' })).toBe(true)
+  })
 })

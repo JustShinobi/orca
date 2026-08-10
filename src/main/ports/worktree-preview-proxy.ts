@@ -35,6 +35,7 @@ export type WorktreePreviewProxyOptions = {
 
 export class WorktreePreviewProxy {
   private server: Server | null = null
+  private readonly upgradeSockets = new Set<Duplex>()
 
   constructor(private readonly options: WorktreePreviewProxyOptions) {
     if (options.auth === 'token' && !options.token) {
@@ -52,6 +53,8 @@ export class WorktreePreviewProxy {
       })
     })
     server.on('upgrade', (request, socket, head) => {
+      this.upgradeSockets.add(socket)
+      socket.once('close', () => this.upgradeSockets.delete(socket))
       void this.handleUpgrade(request, socket, head).catch(() => socket.destroy())
     })
     await new Promise<void>((resolve, reject) => {
@@ -72,6 +75,10 @@ export class WorktreePreviewProxy {
     if (!server) {
       return
     }
+    for (const socket of this.upgradeSockets) {
+      socket.destroy()
+    }
+    this.upgradeSockets.clear()
     await new Promise<void>((resolve) => {
       server.close(() => resolve())
       // Why: keep-alive sockets would hold close() open past process teardown.
@@ -125,8 +132,11 @@ export class WorktreePreviewProxy {
     head: Buffer
   ): Promise<void> {
     const parsed = parsePreviewHost(request.headers.host, this.options.origin)
-    if (!parsed || !this.authorizeUpgrade(request, socket)) {
+    if (!parsed) {
       socket.destroy()
+      return
+    }
+    if (!this.authorizeUpgrade(request, socket)) {
       return
     }
     const entry = await this.resolveEntry(parsed.label)
@@ -198,9 +208,12 @@ export class WorktreePreviewProxy {
       // whole preview domain, so one visit authorizes every workspace label and
       // the token stops appearing in the app's own request logs.
       url.searchParams.delete(PREVIEW_TOKEN_QUERY_PARAM)
+      // Why: WHATWG parsing folds `\` into `/`, so a crafted path can surface
+      // as a protocol-relative `//host` Location (open redirect); pin to root.
+      const pathname = url.pathname.startsWith('//') ? '/' : url.pathname
       response.writeHead(302, {
         'set-cookie': this.buildAuthCookie(),
-        location: `${url.pathname}${url.search}`,
+        location: `${pathname}${url.search}`,
         'cache-control': 'no-store'
       })
       response.end()
