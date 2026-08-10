@@ -139,7 +139,7 @@ import {
   resolveTerminalStartupCwdForWorkspace,
   type TerminalStartupCwdMissingDirFallback
 } from '../../shared/terminal-startup-cwd'
-import { isWslUncPath } from '../../shared/wsl-paths'
+import { isWslUncPath, toWindowsWslPath } from '../../shared/wsl-paths'
 import { splitWorktreeIdForFilesystem } from '../../shared/worktree-id'
 import type { AgentSessionOwnerBinding } from '../../shared/agent-session-host-authority'
 import {
@@ -150,7 +150,7 @@ import {
   clearMigrationUnsupportedPty,
   clearMigrationUnsupportedPtysForPaneKey
 } from '../agent-hooks/migration-unsupported-pty-state'
-import { parseWslPath } from '../wsl'
+import { parseWslPath, wslUncDirectoryExistsAsync } from '../wsl'
 import { mergePersistedWindowsPath, resolvePathEnvKey } from '../pty/windows-environment-path'
 import { addOrcaWslInteropEnv, stampWslOrchestrationCompatibilityHost } from '../pty/wsl-orca-env'
 import { PtyProducerFlowController } from './pty-producer-flow-control'
@@ -5775,15 +5775,73 @@ export function registerPtyHandlers(
         await startupPromise
       }
       // Why: honor the fallback only for fresh local spawns — reattach needs exact cwd and SSH can't probe the local filesystem.
-      const allowMissingCwdFallback =
+      const requestedMissingCwdFallback =
         !args.connectionId && !args.sessionId && args.cwdFallback === 'worktree'
+      const isWslOwnedPosixCwd =
+        args.cwd?.startsWith('/') === true && !/^\/[A-Za-z](?:\/|$)/.test(args.cwd)
+      const startupWorkspaceCwd =
+        requestedMissingCwdFallback && isWslOwnedPosixCwd
+          ? resolvePtySpawnStartupCwd(args.worktreeId, '.')
+          : undefined
+      const initiallyResolvedStartupCwd =
+        requestedMissingCwdFallback && isWslOwnedPosixCwd
+          ? resolvePtySpawnStartupCwd(args.worktreeId, args.cwd)
+          : undefined
+      const startupTerminalRuntimeOptions =
+        requestedMissingCwdFallback && process.platform === 'win32'
+          ? resolveLocalWindowsTerminalRuntimeOptions({
+              requestedShellOverride: args.shellOverride,
+              settings: getSettings?.(),
+              projectRuntime: args.projectRuntime,
+              fallbackHostShell: process.env.COMSPEC || 'powershell.exe'
+            })
+          : undefined
+      const wslRuntimeOwnsStartupCwd =
+        requestedMissingCwdFallback &&
+        isWslOwnedPosixCwd &&
+        (isWslShellName(startupTerminalRuntimeOptions?.shellOverride) ||
+          isWslUncPath(startupWorkspaceCwd ?? ''))
+      const startupWslContext = wslRuntimeOwnsStartupCwd
+        ? resolveWslSessionContext({
+            cwd: startupWorkspaceCwd,
+            shellOverride: startupTerminalRuntimeOptions?.shellOverride,
+            terminalWindowsWslDistro: startupTerminalRuntimeOptions?.terminalWindowsWslDistro
+          })
+        : undefined
+      let wslStartupCwdExists: boolean | null = null
+      let wslWorkspaceCwdExists: boolean | null = null
+      if (startupWslContext && initiallyResolvedStartupCwd) {
+        const validationCwd = toWindowsWslPath(
+          initiallyResolvedStartupCwd,
+          startupWslContext.distro
+        )
+        wslStartupCwdExists = isWslUncPath(validationCwd)
+          ? await wslUncDirectoryExistsAsync(validationCwd)
+          : localStartupCwdDirectoryExists(validationCwd)
+        if (wslStartupCwdExists === false && startupWorkspaceCwd) {
+          wslWorkspaceCwdExists = isWslUncPath(startupWorkspaceCwd)
+            ? await wslUncDirectoryExistsAsync(startupWorkspaceCwd)
+            : localStartupCwdDirectoryExists(startupWorkspaceCwd)
+        }
+      }
+      const allowMissingCwdFallback =
+        requestedMissingCwdFallback &&
+        (!wslRuntimeOwnsStartupCwd ||
+          (wslStartupCwdExists === false && wslWorkspaceCwdExists === true))
       let didFallbackToWorkspaceRootCwd = false
       const cwd = resolvePtySpawnStartupCwd(
         args.worktreeId,
         args.cwd,
         allowMissingCwdFallback
           ? {
-              directoryExists: localStartupCwdDirectoryExists,
+              directoryExists: (path) =>
+                startupWslContext &&
+                wslStartupCwdExists === false &&
+                path === initiallyResolvedStartupCwd
+                  ? false
+                  : startupWslContext && path === startupWorkspaceCwd
+                    ? wslWorkspaceCwdExists === true
+                    : localStartupCwdDirectoryExists(path),
               onFallbackToWorkspaceRoot: () => {
                 didFallbackToWorkspaceRootCwd = true
               }

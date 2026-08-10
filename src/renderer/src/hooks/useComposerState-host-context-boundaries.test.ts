@@ -768,6 +768,7 @@ describe('useComposerState host-context boundaries', () => {
       'const submitQuick = useCallback'
     )
     expect(fullSubmit).toContain('platform: selectedRepoAgentLaunchPlatform')
+    expect(fullSubmit).toContain('startupDraft: startupPlan.draftPrompt')
     expect(fullSubmit).not.toContain('platform: CLIENT_PLATFORM')
 
     const quickSubmit = sourceBetween(
@@ -789,6 +790,7 @@ describe('useComposerState host-context boundaries', () => {
     )
 
     expect(activation).toContain('...(startupPlan && !backendSpawnedStartup')
+    expect(activation).toContain('backendStartupTerminalSpawned: true')
     expect(activation).toContain('command: startupPlan.launchCommand')
     expect(activation).toContain('launchAgent: tuiAgent')
     // The removed activation-time fallback must not come back through this caller.
