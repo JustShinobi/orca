@@ -24,6 +24,9 @@ export default function ArtifactsPage(): React.JSX.Element {
   const settings = useAppStore((state) => state.settings)
   const updateSettings = useAppStore((state) => state.updateSettings)
   const confirm = useConfirmationDialog()
+  // Why: publishing is off by default, so "ask your agent to share" is a dead end until the
+  // capability is granted. Only claim that once settings have actually loaded.
+  const publishingBlocked = settings ? settings.artifactSharingEnabled !== true : false
   const [deleting, setDeleting] = useState<{ identity: string; slug: string } | null>(null)
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
   const signedIn = authStatus?.state === 'connected'
@@ -306,19 +309,49 @@ export default function ArtifactsPage(): React.JSX.Element {
                     'auto.components.artifacts.ArtifactsPage.moreAvailable',
                     'More artifacts are available'
                   )
-                : translate('auto.components.artifacts.ArtifactsPage.empty', 'No shared artifacts')}
+                : publishingBlocked
+                  ? translate(
+                      'auto.components.artifacts.ArtifactsPage.publishingOff',
+                      'Publishing is turned off'
+                    )
+                  : translate(
+                      'auto.components.artifacts.ArtifactsPage.empty',
+                      'No shared artifacts'
+                    )}
             </h2>
-            <p className="text-xs text-muted-foreground">
+            <p className="max-w-sm text-xs leading-5 text-muted-foreground">
               {nextCursor
                 ? translate(
                     'auto.components.artifacts.ArtifactsPage.moreAvailableCopy',
                     'Load the next page to continue.'
                   )
-                : translate(
-                    'auto.components.artifacts.ArtifactsPage.emptyCopy',
-                    'Ask your agent to share an HTML or Markdown file, and it will appear here.'
-                  )}
+                : publishingBlocked
+                  ? translate(
+                      'auto.components.artifacts.ArtifactsPage.publishingOffCopy',
+                      'Nothing on this device can create a public artifact link yet. Allow publishing in Settings → Artifacts, then share from an open HTML or Markdown file or ask your agent.'
+                    )
+                  : translate(
+                      'auto.components.artifacts.ArtifactsPage.emptyCopy',
+                      'Open an HTML or Markdown file and select Share as artifact, or ask your agent to share it.'
+                    )}
             </p>
+            {!nextCursor && publishingBlocked ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-1"
+                onClick={() => {
+                  openSettingsTarget({ pane: 'artifacts', repoId: null })
+                  openSettingsPage()
+                }}
+              >
+                {translate(
+                  'auto.components.artifacts.ArtifactsPage.openArtifactsSettings',
+                  'Open Settings → Artifacts'
+                )}
+              </Button>
+            ) : null}
             {nextCursor ? (
               <Button
                 type="button"
