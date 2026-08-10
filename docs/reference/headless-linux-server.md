@@ -359,6 +359,17 @@ Flags:
 - `--preview-token <secret>`: pin the token across restarts; otherwise a fresh
   one is generated and printed in the ready block.
 
+The flags are not the only way in. **Settings > Remote Orca Servers > Workspace
+Preview Proxy** holds the same configuration (enable, public domain, listener
+port, bind address, auth mode, token) and applies it live: saving restarts the
+listener in place, on a headless server and on the desktop alike, with no
+restart and no shell access. It renders on the web client too, which is the
+point — a browser client cannot SSH-tunnel to the dev servers it needs. The
+serve flags win while they are set: with `--preview-*` present the card shows
+"Configured by orca serve --preview-* flags" and the stored settings apply only
+after the server restarts without them. A bind failure (port taken, address not
+available) surfaces in the card instead of taking the process down.
+
 The ready block reports the proxy (`Preview proxy: … (auth: token)`), and the
 JSON contract gains a `preview` object. Paired clients see a preview URL per
 port in the ports panel; opening a port there uses it automatically unless the
