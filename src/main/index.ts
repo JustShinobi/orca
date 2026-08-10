@@ -90,7 +90,7 @@ import {
 } from './ports/preview-proxy-reconciler'
 import { createPreviewRouteResolver } from './ports/preview-route-resolver'
 import type { PreviewWorktreeDescriptor } from './ports/worktree-preview-routes'
-import { isValidPreviewToken } from '../shared/preview-proxy-token'
+import { isValidPreviewToken, resolvePreviewToken } from '../shared/preview-proxy-token'
 import { reserveServeStdoutForReadiness } from './server/serve-stdout-boundary'
 import { DesktopRelayService } from './runtime/relay/desktop-relay-service'
 import type { RelayBrokerStatus } from './runtime/relay/relay-session-broker'
@@ -1850,15 +1850,17 @@ function getServePreviewOptions(flags: {
   if (rawAuth && rawAuth !== 'open' && rawAuth !== 'token') {
     throw new Error(`Invalid --preview-auth value: ${rawAuth} (use open or token)`)
   }
-  if (token && !isValidPreviewToken(token)) {
-    throw new Error('Invalid --preview-token value: use 1-512 characters from A-Za-z0-9 . _ ~ -')
+  const resolvedToken = resolvePreviewToken(token, process.env.ORCA_PREVIEW_TOKEN)
+  if (resolvedToken && !isValidPreviewToken(resolvedToken)) {
+    const source = token ? '--preview-token' : 'ORCA_PREVIEW_TOKEN'
+    throw new Error(`Invalid ${source} value: use 1-512 characters from A-Za-z0-9 . _ ~ -`)
   }
   return {
     port,
     bindHost: bindHost ?? '127.0.0.1',
     domain,
     auth: rawAuth === 'open' || rawAuth === 'token' ? rawAuth : null,
-    token
+    token: resolvedToken
   }
 }
 

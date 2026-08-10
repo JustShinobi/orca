@@ -8,3 +8,10 @@ export const PREVIEW_TOKEN_PATTERN = /^[A-Za-z0-9._~-]{1,512}$/
 export function isValidPreviewToken(token: string): boolean {
   return PREVIEW_TOKEN_PATTERN.test(token)
 }
+
+export function resolvePreviewToken(
+  flagToken: string | null,
+  environmentToken: string | undefined
+): string | null {
+  return flagToken ?? (environmentToken?.trim() || null)
+}

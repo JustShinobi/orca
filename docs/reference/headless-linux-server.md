@@ -360,6 +360,10 @@ Flags:
   one is generated and printed in the ready block. Tokens use letters, digits,
   and `. _ ~ -` only (they travel in a cookie value).
 
+To keep a pinned token out of the process command line, set
+`ORCA_PREVIEW_TOKEN` instead of passing `--preview-token`. An explicit flag wins
+when both are present.
+
 Use a dedicated subdomain (`preview.example.com`, not the `example.com` apex)
 as the preview domain: the auth cookie is `Domain`-scoped to whatever you
 configure, so browsers would send it to **every** host under an apex — including
