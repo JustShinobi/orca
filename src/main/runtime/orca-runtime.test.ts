@@ -93,6 +93,7 @@ import {
   AGENT_PROMPT_BRACKETED_PASTE_START,
   buildAgentPromptPasteBytes
 } from '../../shared/agent-prompt-injection'
+import { AGENT_PROMPT_BUFFERED_NOT_SUBMITTED } from '../../shared/agent-prompt-submission'
 import { CLIPBOARD_TEXT_MEASURE_YIELD_CODE_UNITS } from '../../shared/clipboard-text'
 import { projectHostSetupProjectionFromRepos } from '../../shared/project-host-setup-projection'
 import {
@@ -15968,13 +15969,165 @@ describe('OrcaRuntimeService', () => {
       const prompt = 'x'.repeat(TERMINAL_INPUT_CHUNK_MAX_BYTES + 1)
 
       const sendPromise = runtime.sendTerminalAgentPrompt(handle, prompt)
-      const sendRejection = expect(sendPromise).rejects.toThrow('terminal_not_writable')
+      const rejection = sendPromise.catch((error: unknown) => error)
       await vi.runAllTimersAsync()
+      const error = await rejection
 
-      await sendRejection
+      // Why: earlier chunk bytes already landed, so the body is buffered — the
+      // failure must carry the marker exactly once, not be a bare passthrough.
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe(
+        `terminal_not_writable (${AGENT_PROMPT_BUFFERED_NOT_SUBMITTED})`
+      )
       expect(writes[0]).toContain(AGENT_PROMPT_BRACKETED_PASTE_START)
       expect(writes.at(-1)).toBe(AGENT_PROMPT_BRACKETED_PASTE_END)
       expect(writes).not.toContain('\r')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not wrap terminal_not_writable when the first paste chunk write fails', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: () => false,
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'do the thing')
+      const rejection = sendPromise.catch((error: unknown) => error)
+      await vi.runAllTimersAsync()
+      const error = await rejection
+
+      // Why: nothing reached the PTY, so this is not a buffered body — the
+      // recovery marker must not appear anywhere in the message.
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe('terminal_not_writable')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reports an unverified submit when the agent has no readable status', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'do the thing')
+      await vi.runAllTimersAsync()
+
+      await expect(sendPromise).resolves.toMatchObject({ accepted: true, submitted: 'unverified' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('fails as buffered_not_submitted when a readable agent never leaves idle', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+      vi.spyOn(runtime, 'getTerminalAgentStatus').mockResolvedValue({
+        handle,
+        isRunningAgent: true,
+        status: 'idle'
+      })
+
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'do the thing')
+      const rejection = sendPromise.catch((error: unknown) => error)
+      await vi.runAllTimersAsync()
+      const error = await rejection
+
+      // Why: submitAgentPromptWithConfirmation's own throw already carries the
+      // bare marker — the outer wrap must not double it up.
+      expect(error).toBeInstanceOf(Error)
+      const message = (error as Error).message
+      const markerOccurrences = message.split(AGENT_PROMPT_BUFFERED_NOT_SUBMITTED).length - 1
+      expect(markerOccurrences).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reports an unverified submit when the agent is detected but its status is unreadable', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      const writes: string[] = []
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+      // Why: a detected agent (e.g. Cursor Agent) whose status Orca cannot read —
+      // isRunningAgent true, status null — must degrade to a single blind write,
+      // not retry against a status that can never confirm.
+      vi.spyOn(runtime, 'getTerminalAgentStatus').mockResolvedValue({
+        handle,
+        isRunningAgent: true,
+        status: null
+      })
+
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'do the thing')
+      await vi.runAllTimersAsync()
+
+      await expect(sendPromise).resolves.toMatchObject({ accepted: true, submitted: 'unverified' })
+      expect(writes.filter((write) => write === '\r')).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('confirms the submit when the agent starts working', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      const writes: string[] = []
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+      let reads = 0
+      vi.spyOn(runtime, 'getTerminalAgentStatus').mockImplementation(async () => ({
+        handle,
+        isRunningAgent: true,
+        status: reads++ === 0 ? ('idle' as const) : ('working' as const)
+      }))
+
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'do the thing')
+      await vi.runAllTimersAsync()
+
+      await expect(sendPromise).resolves.toMatchObject({ submitted: 'confirmed' })
+      expect(writes.filter((write) => write === '\r')).toHaveLength(1)
     } finally {
       vi.useRealTimers()
     }

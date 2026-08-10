@@ -42,6 +42,8 @@ import { ORCHESTRATION_LEGACY_RUN_ID } from '../../../shared/orchestration-rpc-c
 import { parsePaneKey } from '../../../shared/stable-pane-id'
 import { OrchestrationError } from './orchestration-error'
 import { resolveOrchestrationMigrationStartVersion } from './orchestration-schema-version-skew'
+import type { AgentPromptSubmitOutcome } from '../../../shared/agent-prompt-submission'
+import { workerReadyStage } from './worker-dispatch-stages'
 import {
   deriveWorkerTerminalListState,
   type WorkerTerminalResourceRow,
@@ -4300,7 +4302,11 @@ export class OrchestrationDb {
     }
   }
 
-  markWorkerDispatchReady(dispatchId: string, effects?: unknown[]): WorkerDispatchRow {
+  markWorkerDispatchReady(
+    dispatchId: string,
+    effects?: unknown[],
+    submitted: AgentPromptSubmitOutcome = 'unverified'
+  ): WorkerDispatchRow {
     this.db.exec('BEGIN IMMEDIATE')
     try {
       const dispatch = this.getDispatchContextById(dispatchId)
@@ -4314,11 +4320,11 @@ export class OrchestrationDb {
       this.db
         .prepare(
           `UPDATE worker_dispatches
-           SET state = 'ready', stage = 'input_accepted',
+           SET state = 'ready', stage = ?,
                effects = COALESCE(?, effects), updated_at = datetime('now')
            WHERE dispatch_id = ?`
         )
-        .run(effects ? JSON.stringify(effects) : null, dispatchId)
+        .run(workerReadyStage(submitted), effects ? JSON.stringify(effects) : null, dispatchId)
       this.db.exec('COMMIT')
       return this.getWorkerDispatch(dispatchId) as WorkerDispatchRow
     } catch (error) {
@@ -4803,15 +4809,19 @@ export class OrchestrationDb {
     return capability
   }
 
-  markRemoteAttachmentReady(dispatchId: string, effects?: unknown[]): RemoteDispatchAttachmentRow {
+  markRemoteAttachmentReady(
+    dispatchId: string,
+    effects?: unknown[],
+    submitted: AgentPromptSubmitOutcome = 'unverified'
+  ): RemoteDispatchAttachmentRow {
     const result = this.db
       .prepare(
         `UPDATE remote_dispatch_attachments
-         SET state = 'ready', stage = 'input_accepted',
+         SET state = 'ready', stage = ?,
              effects = COALESCE(?, effects), updated_at = datetime('now')
          WHERE dispatch_id = ? AND state = 'starting'`
       )
-      .run(effects ? JSON.stringify(effects) : null, dispatchId)
+      .run(workerReadyStage(submitted), effects ? JSON.stringify(effects) : null, dispatchId)
     if (result.changes !== 1) {
       throw new OrchestrationError(
         'dispatch_inactive',

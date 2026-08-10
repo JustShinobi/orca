@@ -93,6 +93,15 @@ import {
   AGENT_PROMPT_SUBMIT_DELAY_MS,
   buildAgentPromptPasteBytes
 } from '../../shared/agent-prompt-injection'
+import {
+  submitAgentPromptWithConfirmation,
+  type AgentPromptReadiness
+} from './agent-prompt-submit-confirmation'
+import {
+  AGENT_PROMPT_BUFFERED_NOT_SUBMITTED,
+  buildBufferedNotSubmittedError,
+  type AgentPromptSubmitOutcome
+} from '../../shared/agent-prompt-submission'
 import { gitExecFileAsync, gitSpawn, nonInteractiveGitEnv } from '../git/runner'
 import { runWithGitReadCacheInvalidation } from '../git/status'
 import {
@@ -16596,15 +16605,20 @@ export class OrcaRuntimeService {
     } = {}
   ): Promise<RuntimeTerminalSend> {
     const payload = buildAgentPromptPasteBytes(prompt)
-    const bytesWritten = Buffer.byteLength(`${payload}${AGENT_PROMPT_SUBMIT}`, 'utf8')
+    const payloadBytes = Buffer.byteLength(payload, 'utf8')
     const pty = this.getLivePtyForHandle(handle)
     if (pty) {
       if (!pty.pty.connected) {
         throw new Error('terminal_not_writable')
       }
       await assertTerminalInputWithinLimitWithYield(payload)
-      await this.writeTerminalAgentPrompt(pty.pty.ptyId, payload, options)
-      return { handle, accepted: true, bytesWritten }
+      const submit = await this.writeTerminalAgentPrompt(handle, pty.pty.ptyId, payload, options)
+      return {
+        handle,
+        accepted: true,
+        bytesWritten: payloadBytes + submit.submitBytes,
+        submitted: submit.outcome
+      }
     }
 
     const { leaf } = this.getLiveLeafForHandle(handle)
@@ -16617,8 +16631,13 @@ export class OrcaRuntimeService {
     if (await this.isLeafPtyProvenAbsent(leaf.ptyId)) {
       throw new Error('terminal_not_writable')
     }
-    await this.writeTerminalAgentPrompt(leaf.ptyId, payload, options)
-    return { handle, accepted: true, bytesWritten }
+    const submit = await this.writeTerminalAgentPrompt(handle, leaf.ptyId, payload, options)
+    return {
+      handle,
+      accepted: true,
+      bytesWritten: payloadBytes + submit.submitBytes,
+      submitted: submit.outcome
+    }
   }
 
   async getTerminalAgentStatus(handle: string): Promise<RuntimeTerminalAgentStatus> {
@@ -17155,13 +17174,14 @@ export class OrcaRuntimeService {
   }
 
   private async writeTerminalAgentPrompt(
+    handle: string,
     ptyId: string,
     pastePayload: string,
     options: {
       beforeWrite?: (ptyId: string) => void | Promise<void>
       suffixFailureError?: string
     } = {}
-  ): Promise<void> {
+  ): Promise<{ outcome: AgentPromptSubmitOutcome; submitBytes: number }> {
     let wrotePasteBytes = false
     let completedPaste = false
     try {
@@ -17184,21 +17204,63 @@ export class OrcaRuntimeService {
       if (wrotePasteBytes && !completedPaste) {
         this.ptyController?.write(ptyId, AGENT_PROMPT_BRACKETED_PASTE_END)
       }
-      throw error
+      // Why: a partial body already sits in the composer, so recovery is a lone
+      // Enter — re-running the dispatch would duplicate the prompt.
+      throw wrotePasteBytes
+        ? buildBufferedNotSubmittedError(error instanceof Error ? error.message : String(error))
+        : error
     }
 
     await new Promise((resolve) => setTimeout(resolve, AGENT_PROMPT_SUBMIT_DELAY_MS))
+    let submitBytes = 0
     try {
-      await options.beforeWrite?.(ptyId)
+      const outcome = await submitAgentPromptWithConfirmation({
+        wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        readReadiness: () => this.readAgentPromptReadiness(handle),
+        writeSubmit: async () => {
+          try {
+            await options.beforeWrite?.(ptyId)
+          } catch (error) {
+            throw options.suffixFailureError ? new Error(options.suffixFailureError) : error
+          }
+          const wrote = this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT) ?? false
+          if (!wrote) {
+            throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
+          }
+          submitBytes = Buffer.byteLength(AGENT_PROMPT_SUBMIT, 'utf8')
+        }
+      })
+      return { outcome, submitBytes }
     } catch (error) {
-      if (options.suffixFailureError) {
-        throw new Error(options.suffixFailureError)
-      }
-      throw error
+      // Why: submitAgentPromptWithConfirmation already throws the bare marker
+      // string on timeout — do not double-wrap it.
+      const message = error instanceof Error ? error.message : String(error)
+      throw message.includes(AGENT_PROMPT_BUFFERED_NOT_SUBMITTED)
+        ? error
+        : buildBufferedNotSubmittedError(message)
     }
-    const suffixWrote = this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT) ?? false
-    if (!suffixWrote) {
-      throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
+  }
+
+  private async readAgentPromptReadiness(handle: string): Promise<AgentPromptReadiness | null> {
+    let status: RuntimeTerminalAgentStatus
+    try {
+      status = await this.getTerminalAgentStatus(handle)
+    } catch {
+      // Why: an unreadable status is not proof of unreadiness; degrade to the
+      // historical blind write and let the PTY write itself reject a dead terminal.
+      return null
+    }
+    // Why: an absent status is a missing signal regardless of isRunningAgent —
+    // e.g. a detected Cursor Agent pane whose status Orca cannot read must
+    // degrade to a single blind write, not retry against a value that can
+    // never confirm.
+    if (status.status === null) {
+      return null
+    }
+    return {
+      isRunningAgent: status.isRunningAgent,
+      status: status.status,
+      explicitUpdatedAt: this.getFreshExplicitAgentStatusForHandle(handle)?.updatedAt ?? null
     }
   }
 

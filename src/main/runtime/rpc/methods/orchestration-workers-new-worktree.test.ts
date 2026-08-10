@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ORCHESTRATION_CONTRACT_VERSION } from '../../../../shared/protocol-version'
+import { buildBufferedNotSubmittedError } from '../../../../shared/agent-prompt-submission'
 import { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationDb } from '../../orchestration/db'
 import { RpcDispatcher } from '../dispatcher'
@@ -625,13 +626,72 @@ describe('orchestration new-worktree workers', () => {
       })
     )
 
-    finishPrompt?.({ handle: 'term_worker', accepted: true, bytesWritten: 1 })
+    finishPrompt?.({
+      handle: 'term_worker',
+      accepted: true,
+      bytesWritten: 1,
+      submitted: 'confirmed'
+    })
     await expect(pending).resolves.toMatchObject({
-      result: { state: 'ready', stage: 'input_accepted' }
+      result: { state: 'ready', stage: 'prompt_submitted' }
     })
     expect(db.getWorkerDispatch(dispatch.id)).toMatchObject({
       state: 'ready',
-      stage: 'input_accepted'
+      stage: 'prompt_submitted'
+    })
+  })
+
+  it('fails at dispatch_input with buffered_not_submitted when the submit never registers', async () => {
+    mockCreatedWorktree({ hookFound: false })
+    let finishWait:
+      | ((value: Awaited<ReturnType<OrcaRuntimeService['waitForTerminal']>>) => void)
+      | undefined
+    let finishPromptRejection: ((reason: unknown) => void) | undefined
+    vi.mocked(runtime.waitForTerminal).mockImplementationOnce(
+      async () =>
+        await new Promise((resolve) => {
+          finishWait = resolve
+        })
+    )
+    vi.mocked(runtime.sendTerminalAgentPrompt).mockImplementationOnce(
+      async () =>
+        await new Promise((_resolve, reject) => {
+          finishPromptRejection = reject
+        })
+    )
+
+    const pending = startWorker({ name: 'buffered-worker' })
+    await vi.waitFor(() => {
+      const task = db.listTasks()[0]
+      const dispatch = task ? db.getDispatchContext(task.id) : undefined
+      expect(dispatch && db.getWorkerDispatch(dispatch.id)).toMatchObject({
+        state: 'starting',
+        stage: 'terminal_readying'
+      })
+    })
+
+    finishWait?.({
+      handle: 'term_worker',
+      condition: 'tui-idle',
+      satisfied: true,
+      status: 'running',
+      exitCode: null
+    })
+    await vi.waitFor(() => {
+      const dispatch = db.getDispatchContext(db.listTasks()[0]!.id)!
+      expect(db.getWorkerDispatch(dispatch.id)).toMatchObject({
+        state: 'starting',
+        stage: 'authority_attached'
+      })
+    })
+
+    finishPromptRejection?.(buildBufferedNotSubmittedError('idle'))
+    await expect(pending).resolves.toMatchObject({
+      result: {
+        state: 'failed',
+        failedStage: 'dispatch_input',
+        recovery: 'buffered_not_submitted'
+      }
     })
   })
 })

@@ -5,6 +5,7 @@ import type {
   AgentStatusState,
   AgentType
 } from './agent-status-types'
+import type { AgentPromptSubmitOutcome } from './agent-prompt-submission'
 import type {
   BaseRefSearchResult,
   BrowserCookieImportResult,
@@ -605,6 +606,9 @@ export type RuntimeTerminalSend = {
   accepted: boolean
   bytesWritten: number
   refusedReason?: 'no-agent' | 'permission'
+  // Why: optional so an older host that predates confirmation still decodes;
+  // readers must treat an absent value as 'unverified'.
+  submitted?: AgentPromptSubmitOutcome
 }
 
 export type RuntimeTerminalAgentStatusState = 'working' | 'permission' | 'idle' | null

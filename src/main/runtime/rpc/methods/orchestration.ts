@@ -29,6 +29,7 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { RunRow } from '../../orchestration/types'
 import { encodeFederatedControlMessage } from '../../orchestration/federation-control-message'
 import { ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION } from '../../../../shared/protocol-version'
+import type { AgentPromptSubmitOutcome } from '../../../../shared/agent-prompt-submission'
 
 const TASK_STATUSES: TaskStatus[] = [
   'pending',
@@ -1308,10 +1309,12 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       })
 
       let injected = false
+      let submitted: AgentPromptSubmitOutcome | undefined
       if (params.inject) {
         try {
-          await runtime.sendTerminalAgentPrompt(to, preamble)
+          const send = await runtime.sendTerminalAgentPrompt(to, preamble)
           injected = true
+          submitted = send.submitted ?? 'unverified'
         } catch (err) {
           db.failDispatch(ctx.id, err instanceof Error ? err.message : String(err))
           throw err
@@ -1320,9 +1323,9 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
 
       // Why: returnPreamble is opt-in because the preamble is several hundred bytes most callers don't need in the response.
       if (params.returnPreamble) {
-        return { dispatch: ctx, injected, preamble }
+        return { dispatch: ctx, injected, ...(submitted ? { submitted } : {}), preamble }
       }
-      return { dispatch: ctx, injected }
+      return { dispatch: ctx, injected, ...(submitted ? { submitted } : {}) }
     }
   }),
 
