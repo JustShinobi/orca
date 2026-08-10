@@ -19,6 +19,10 @@ import {
   type OrchestrationWorkerLaunchReceipt
 } from './orchestration-worker-launch-preferences'
 import { validateFederatedWorkerStartPlacement } from './orchestration-worker-start-validation'
+import {
+  remoteWorkerReadyStage,
+  WORKER_PROMPT_SUBMITTED_STAGE
+} from '../../orchestration/worker-dispatch-stages'
 
 export async function startFederatedWorker(args: {
   params: WorkerStartInput
@@ -169,16 +173,24 @@ export async function startFederatedWorker(args: {
         worktreeId: remote.worktreeId,
         terminalHandle: remote.terminalHandle
       })
+      // Why: an older host has no submit confirmation and reports the old stage,
+      // so an unrecognized stage means unverified — never failed.
+      const remoteSubmitted =
+        remote.stage === WORKER_PROMPT_SUBMITTED_STAGE ? 'confirmed' : 'unverified'
       db.recordWorkerStage({
         dispatchId: started.dispatch.id,
-        stage: 'remote_input_accepted',
+        stage: remoteWorkerReadyStage(remoteSubmitted),
         worktreeId: remote.worktreeId,
         terminalHandle: remote.terminalHandle,
         setupState: remote.setup?.state,
         effects: remote.effects,
         residualResources: remote.residualResources
       })
-      const readyWorker = db.markWorkerDispatchReady(started.dispatch.id)
+      const readyWorker = db.markWorkerDispatchReady(
+        started.dispatch.id,
+        undefined,
+        remoteSubmitted
+      )
       runtime.ensureOrchestrationFederationRelay(runId)
       return {
         runId,
@@ -248,6 +260,8 @@ type RemoteStartReceipt = {
   dispatchId: string
   state: string
   runtimeEpoch: string
+  // Why: absent on an older host that predates submit confirmation.
+  stage?: string
   worktreeId?: string
   terminalHandle?: string
   setup?: { state: string }
