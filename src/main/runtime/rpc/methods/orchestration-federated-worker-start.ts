@@ -23,6 +23,11 @@ import {
   remoteWorkerReadyStage,
   WORKER_PROMPT_SUBMITTED_STAGE
 } from '../../orchestration/worker-dispatch-stages'
+import {
+  federatedUnknownReceipt,
+  isKnownRemoteStartFailure,
+  recoveryFromError
+} from './orchestration-federated-worker-start-receipt'
 
 export async function startFederatedWorker(args: {
   params: WorkerStartInput
@@ -212,7 +217,7 @@ export async function startFederatedWorker(args: {
         remote.failedStage ?? 'remote_attach',
         remote.lastError ?? 'The worker server reported an unknown start outcome.'
       )
-      return federatedUnknownReceipt(worker, task.id, server.name, launch)
+      return federatedUnknownReceipt(worker, task.id, server.name, launch, remote.recovery)
     }
     const worker = db.failWorkerStart(
       started.dispatch.id,
@@ -231,10 +236,12 @@ export async function startFederatedWorker(args: {
       setup: remote.setup,
       launch,
       effects: remote.effects ?? [],
-      residualResources: remote.residualResources ?? []
+      residualResources: remote.residualResources ?? [],
+      ...(remote.recovery ? { recovery: remote.recovery } : {})
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
+    const recovery = recoveryFromError(error)
     if (error instanceof OrchestrationError && isKnownRemoteStartFailure(error.code)) {
       const worker = db.failWorkerStart(started.dispatch.id, 'remote_attach', reason)
       return {
@@ -248,11 +255,12 @@ export async function startFederatedWorker(args: {
         lastError: worker.last_error,
         launch: requestedLaunch,
         effects: [],
-        residualResources: []
+        residualResources: [],
+        ...(recovery ? { recovery } : {})
       }
     }
     const worker = db.markWorkerStartUnknown(started.dispatch.id, 'remote_attach', reason)
-    return federatedUnknownReceipt(worker, task.id, server.name, requestedLaunch)
+    return federatedUnknownReceipt(worker, task.id, server.name, requestedLaunch, recovery)
   }
 }
 
@@ -270,38 +278,6 @@ type RemoteStartReceipt = {
   residualResources?: unknown[]
   failedStage?: string
   lastError?: string
-}
-
-function isKnownRemoteStartFailure(code: string): boolean {
-  return [
-    'invalid_argument',
-    'agent_unconfigured',
-    'worktree_not_found_on_server',
-    'terminal_worktree_mismatch',
-    'capability_unsupported'
-  ].includes(code)
-}
-
-function federatedUnknownReceipt(
-  worker: { dispatch_id: string; state: string; stage: string; last_error: string | null },
-  taskId: string,
-  serverName: string,
-  launch: OrchestrationWorkerLaunchReceipt
-): unknown {
-  return {
-    taskId,
-    dispatchId: worker.dispatch_id,
-    state: 'outcome_unknown',
-    stage: worker.stage,
-    server: { name: serverName },
-    launch,
-    failedStage: worker.stage,
-    lastError: worker.last_error,
-    effects: [],
-    residualResources: [],
-    nextCommands: [
-      `orca orchestration worker-show --dispatch ${worker.dispatch_id} --json`,
-      `orca orchestration worker-abandon --dispatch ${worker.dispatch_id} --json`
-    ]
-  }
+  // Why: absent on an older host that predates dispatch_input recovery classification.
+  recovery?: string
 }
