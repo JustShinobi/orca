@@ -1474,6 +1474,144 @@
       "demotionRule": "Keep experimental or demote if retries can stop before recovery or exhaustion, continue after exhaustion, run in parallel, mutate a superseded pane, hide the Reconnect control, leak a subscription or timer, or fail to paint a new frame after manual reconnect."
     },
     {
+      "id": "remote-runtime.shared-control-session-authority",
+      "title": "Shared-control subscriptions recover from lost encrypted session authority",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "runtime-platform",
+      "layer": "paired-runtime-shared-control-lifecycle",
+      "surfaces": [
+        "headed paired runtime",
+        "headless orca serve",
+        "WebSocket-terminating relay",
+        "passive remote-runtime subscriptions"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["remote-runtime"],
+      "coveredPlatforms": ["macos"],
+      "coveredProviders": ["remote-runtime"],
+      "coverageNotes": "Deterministic fake-timer and encrypted-WebSocket tests cover active cadence, admission saturation, exact socket-generation fencing, subscription replay, server-driven retirement, idle cleanup, and in-flight final-subscription retirement. Byte-identical headed desktop and headless serve journeys use a loopback terminating relay that keeps answering control pings after losing the server-facing encrypted session, then require a newer authenticated shared-control generation, host worktree authority, and the paired client's rendered sidebar to converge. Linux, Windows, production relay, mixed-version, and folder-workspace live evidence remain uncollected.",
+      "motivatingLinks": [
+        "https://github.com/stablyai/orca/pull/10235",
+        "https://github.com/stablyai/orca/issues/7718"
+      ],
+      "invariant": "A shared-control connection with passive subscriptions must not treat RFC 6455 pong traffic from a terminating relay as proof that the server still owns its encrypted session or subscription registry. While ready and subscribed, one bounded encrypted session probe per connection must detect lost authority, close only the probed socket generation, reconnect, and replay every live logical subscription. Lifecycle reconciliation cannot postpone an armed probe deadline. No probe timer, in-flight probe RPC, retained admission, or recovery may survive the last subscription, intentional close, socket replacement, or idle one-shot request.",
+      "oracle": "Use fake timers to require zero retained probe timers without subscriptions, exactly one timer while ready and subscribed, one successful re-arm, and nine probes during 990 milliseconds of 90-millisecond lifecycle reconciliation against a 100-millisecond cadence. Require no re-arm or forced recovery when the last subscription retires during an in-flight success or failure. Saturate all 256 local request admissions and require a probe to re-arm without an encrypted send, socket close, or pending-RPC rejection. Hold a real encrypted `status.get` probe open, deliver a server-driven final `{type:end}`, and require immediate probe abort, request-id retirement, timeout/listener cleanup, and zero retained admission while the socket stays ready. In both a visible isolated desktop host and a separate headless `orca serve`, forward the initial encrypted session through a terminating relay, sever only its server-facing socket, retain the client-facing socket and automatic pongs, and add a real host repo/worktree. Require the host inventory to contain the worktree while the paired client's store and sidebar are initially absent, require at least one control ping during that false-liveness window, then require the shared-control `lastConnectedAt` generation to advance plus the exact worktree in both client state and rendered DOM.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/shared/remote-runtime-shared-control-boundary.test.ts src/shared/remote-runtime-shared-control-connection.test.ts src/shared/remote-runtime-shared-control-keepalive-refresh.test.ts src/shared/remote-runtime-shared-control-reconnect.test.ts src/shared/remote-runtime-shared-control-retired-request-ids.test.ts src/shared/remote-runtime-shared-control-session-probe.test.ts src/shared/remote-runtime-shared-control-socket-generation.test.ts src/shared/remote-runtime-shared-control-subscription-close.test.ts src/shared/remote-runtime-shared-control-subscriptions.test.ts --reporter=dot",
+        "pnpm exec electron-vite build --mode e2e",
+        "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/pr10235-stale-subscription-restart.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
+        "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/pr10235-stale-subscription-restart.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1"
+      ],
+      "testFiles": [
+        "src/shared/remote-runtime-shared-control-boundary.test.ts",
+        "src/shared/remote-runtime-shared-control-keepalive-refresh.test.ts",
+        "src/shared/remote-runtime-shared-control-reconnect.test.ts",
+        "src/shared/remote-runtime-shared-control-retired-request-ids.test.ts",
+        "src/shared/remote-runtime-shared-control-session-probe.test.ts",
+        "src/shared/remote-runtime-shared-control-connection.test.ts",
+        "src/shared/remote-runtime-shared-control-socket-generation.test.ts",
+        "src/shared/remote-runtime-shared-control-subscription-close.test.ts",
+        "src/shared/remote-runtime-shared-control-subscriptions.test.ts",
+        "tests/e2e/pr10235-stale-subscription-restart.spec.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/shared/remote-runtime-shared-control-session-probe.test.ts",
+          "assertions": [
+            "does not retain a timer without an active subscription",
+            "probes while ready and subscribed",
+            "keeps a hard probe cadence through continuous lifecycle reconciliation",
+            "does not re-arm after the last subscription closes during a probe",
+            "does not recover an idle connection when its final probe fails"
+          ]
+        },
+        {
+          "file": "src/shared/remote-runtime-shared-control-connection.test.ts",
+          "assertions": [
+            "detects a dead E2EE session via the session probe when the relay still answers pings",
+            "reschedules a locally admission-blocked probe without closing a healthy socket",
+            "clears the session probe when the server ends the final subscription",
+            "retires an in-flight probe when the server ends the final subscription",
+            "keeps a responsive connection on one socket while session probes succeed",
+            "does not run session probes when no subscriptions are active"
+          ]
+        },
+        {
+          "file": "src/shared/remote-runtime-shared-control-socket-generation.test.ts",
+          "assertions": [
+            "ignores stale close callbacks and accepts one close for the current socket"
+          ]
+        },
+        {
+          "file": "tests/e2e/pr10235-stale-subscription-restart.spec.ts",
+          "assertions": [
+            "self-heals a headed server worktree subscription behind a zombie relay",
+            "self-heals a headless serve worktree subscription behind a zombie relay"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-07-31",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/remote-runtime-shared-control-boundary.test.ts src/shared/remote-runtime-shared-control-connection.test.ts src/shared/remote-runtime-shared-control-keepalive-refresh.test.ts src/shared/remote-runtime-shared-control-reconnect.test.ts src/shared/remote-runtime-shared-control-retired-request-ids.test.ts src/shared/remote-runtime-shared-control-session-probe.test.ts src/shared/remote-runtime-shared-control-socket-generation.test.ts src/shared/remote-runtime-shared-control-subscription-close.test.ts src/shared/remote-runtime-shared-control-subscriptions.test.ts --reporter=dot",
+          "result": "passed",
+          "durationSeconds": 4,
+          "summary": "Nine shared-control files and 57 tests passed with encrypted-session failure recovery, hard non-sliding cadence under reconciliation churn, immediate in-flight probe cancellation on final subscription end, 256-request admission saturation, exact socket-generation fencing, responsive-session stability, and zero idle re-arm or recovery."
+        },
+        {
+          "date": "2026-07-31",
+          "runner": "local",
+          "platform": "macos",
+          "command": "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/pr10235-stale-subscription-restart.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
+          "result": "passed",
+          "durationSeconds": 33,
+          "summary": "A visible isolated Orca host and separate paired desktop client recovered one zombified encrypted session after two relay-served control pings; the authenticated shared-control generation advanced and delivered the new host worktree to client state and the rendered sidebar."
+        },
+        {
+          "date": "2026-07-31",
+          "runner": "local",
+          "platform": "macos",
+          "command": "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/pr10235-stale-subscription-restart.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
+          "result": "passed",
+          "durationSeconds": 29,
+          "summary": "An isolated headless `orca serve` and separate paired desktop client passed the same relay-pong, host-inventory, authenticated-generation, client-state, and rendered-sidebar oracle."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 150,
+        "scope": "focused shared-control contracts plus one isolated headed or headless paired-runtime journey"
+      },
+      "flakeHistory": {
+        "status": "unknown",
+        "evidence": "Deterministic contracts, earlier fixture-isolation repeats, and the current causal-generation headed/headless macOS journeys pass. CI and cross-platform soak history are not yet available."
+      },
+      "redGreenEvidence": {
+        "status": "complete",
+        "evidence": "The byte-identical headed and headless oracle stayed stale for 40 seconds on pinned latest main and on the candidate reverted, despite at least three relay-served control pings, authoritative host inventory, and possible unrelated connection churn. The revised factory target advanced the authenticated shared-control generation and rendered the new worktree without reload. Earlier factory revisions allowed continuous reconciliation to postpone the probe forever and retained an in-flight probe request after final server-driven retirement; the current lifecycle tests fail those revisions and pass with non-sliding deadlines, abort-owned request cleanup, admission-safe rescheduling, exact generation fencing, and in-flight retirement guards."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "Each ready shared-control connection retains at most one unrefed timer and one in-flight probe, emitting at most one encrypted status request every 15 seconds regardless of logical subscription count. Reconciliation cannot postpone an armed deadline. The probe timeout is 10 seconds. Closing the final subscription, replacing the socket, or intentionally closing aborts the actual probe RPC and retains zero timers, admission records, or cancellation listeners; there are no subprocesses, provider scans, or per-subscription probes."
+      },
+      "promotionCriteria": [
+        "Collect at least 100 consecutive CI or soak passes or 14 days without an unexplained flake.",
+        "Collect live Linux and Windows headed/headless paired-runtime evidence.",
+        "Run the oracle through a production-like terminating relay and add a live folder-workspace subscription journey.",
+        "Add a process-replacement journey that preserves pairing material while restarting `orca serve` and rebinding its runtime generation."
+      ],
+      "knownGaps": [
+        "Live evidence currently uses a loopback terminating relay on macOS rather than production relay infrastructure.",
+        "The relay asserts received control pings and uses `ws` default automatic pong handling; it does not separately instrument the outbound pong write.",
+        "The live fault severs the host-facing encrypted session at the ownership boundary; it does not literally replace an `orca serve` process, rebind its endpoint, or rotate the runtime generation.",
+        "Linux, Windows, mixed-version, sleep/wake, and multi-client fanout remain untested.",
+        "The live worktree assertion uses a Git repository; folder workspaces share the transport but lack an explicit live journey."
+      ],
+      "demotionRule": "Demote if relay-served pongs or lifecycle churn can suppress encrypted-session probing, recovery closes a replacement generation, active subscriptions fail to replay, final retirement retains a timer or in-flight request, or headed/headless behavior diverges."
+    },
+    {
       "id": "editor.live-log-append-stability",
       "title": "Long live session logs retain their Monaco viewport while appending",
       "maturity": "experimental",

@@ -8,6 +8,10 @@ export class SharedControlSocketGeneration {
     return generation === this.current
   }
 
+  currentGeneration(): number {
+    return this.current
+  }
+
   begin(): number {
     this.current += 1
     return this.current

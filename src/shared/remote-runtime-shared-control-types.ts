@@ -1,6 +1,7 @@
 import type { RuntimeRpcResponse } from './runtime-rpc-envelope'
 import type { RemoteRuntimeClientError } from './remote-runtime-client-error'
 import type { RemoteRuntimePreparedRequest } from './remote-runtime-prepared-request-admission'
+import type { RemoteRuntimeSocketLivenessOptions } from './remote-runtime-socket-liveness'
 
 export type SharedControlConnectionState =
   | 'closed'
@@ -8,12 +9,21 @@ export type SharedControlConnectionState =
   | 'awaiting_authenticated'
   | 'ready'
 
+export type RemoteRuntimeSharedControlConnectionOptions = {
+  environmentId?: string
+  reconnectStableResetMs?: number
+  liveness?: RemoteRuntimeSocketLivenessOptions
+  sessionProbeIntervalMs?: number
+  sessionProbeTimeoutMs?: number
+}
+
 export type SharedControlPendingRequest<TResult> = {
   method: string
   resolve: (response: RuntimeRpcResponse<TResult>) => void
   reject: (error: Error) => void
   timeout: ReturnType<typeof setTimeout>
   preparedRequest?: RemoteRuntimePreparedRequest | null
+  releaseCancellation?: () => void
   // Why: keepalives on the shared socket are armed for an unrelated long-poll,
   // not this request. Only requests that opt in (long-polls issued via the
   // short-RPC path) may have their deadline refreshed by a keepalive; ordinary

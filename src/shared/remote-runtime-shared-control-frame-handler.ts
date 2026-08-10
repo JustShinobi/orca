@@ -30,6 +30,7 @@ export function handleSharedControlTextFrame(args: {
   sendEncrypted: (payload: unknown) => boolean
   markReady: () => void
   replaySubscriptions: () => void
+  reconcileSubscriptionLifecycle: () => void
 }): void {
   if (args.state === 'awaiting_ready') {
     const error = parseReadyFrame(args.frame)
@@ -75,6 +76,7 @@ export function handleSharedControlTextFrame(args: {
     subscriptions: args.subscriptions,
     retiredRequestIds: args.retiredRequestIds,
     deviceToken: args.deviceToken,
-    send: args.sendEncrypted
+    send: args.sendEncrypted,
+    reconcileSubscriptionLifecycle: args.reconcileSubscriptionLifecycle
   })
 }
