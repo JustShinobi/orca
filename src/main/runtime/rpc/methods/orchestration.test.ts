@@ -2090,6 +2090,40 @@ describe('orchestration RPC methods', () => {
       expect(rawSend).not.toHaveBeenCalled()
     })
 
+    it('reports the submit outcome from dispatch --inject', async () => {
+      setup()
+      provideInjectIdentity()
+      const task = db.createTask({ spec: 'work' })
+      vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(true)
+      vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
+        handle: 'term_a',
+        accepted: true,
+        bytesWritten: 1,
+        submitted: 'confirmed'
+      })
+
+      const result = (await call('orchestration.dispatch', {
+        task: task.id,
+        to: 'term_a',
+        inject: true
+      })) as { injected: boolean; submitted?: string }
+
+      expect(result).toMatchObject({ injected: true, submitted: 'confirmed' })
+    })
+
+    it('omits the submit outcome when the dispatch does not inject', async () => {
+      setup()
+      const task = db.createTask({ spec: 'work' })
+
+      const result = (await call('orchestration.dispatch', {
+        task: task.id,
+        to: 'term_a'
+      })) as Record<string, unknown>
+
+      expect(result.injected).toBe(false)
+      expect('submitted' in result).toBe(false)
+    })
+
     it('rejects inject to terminal without recognized agent', async () => {
       setup()
       const task = db.createTask({ spec: 'work' })
