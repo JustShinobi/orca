@@ -19,7 +19,9 @@ describe('agent prompt submission outcome', () => {
   })
 
   it('classifies every other dispatch failure as nothing written', () => {
-    expect(classifyDispatchInputRecovery(new Error('terminal_not_writable'))).toBe('nothing_written')
+    expect(classifyDispatchInputRecovery(new Error('terminal_not_writable'))).toBe(
+      'nothing_written'
+    )
     expect(classifyDispatchInputRecovery('terminal_gone')).toBe('nothing_written')
   })
 
