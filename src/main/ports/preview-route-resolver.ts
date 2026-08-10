@@ -12,6 +12,10 @@ import {
 } from './worktree-preview-routes'
 
 const DEFAULT_ROUTE_CACHE_TTL_MS = 2_000
+/** Why: a flood of misses (auth `open`, unknown labels) would otherwise chain
+ *  back-to-back fresh scans against /proc or lsof; a fresh request within this
+ *  window reuses the just-built index instead. */
+const DEFAULT_FRESH_MIN_INTERVAL_MS = 500
 
 export type PreviewRouteTarget = {
   port: number
@@ -36,15 +40,18 @@ export type PreviewRouteResolver = (options?: { fresh?: boolean }) => Promise<Pr
 export function createPreviewRouteResolver(options: {
   descriptors: () => Promise<PreviewWorktreeDescriptor[]>
   ttlMs?: number
+  freshMinIntervalMs?: number
   now?: () => number
 }): PreviewRouteResolver {
   const ttlMs = options.ttlMs ?? DEFAULT_ROUTE_CACHE_TTL_MS
+  const freshMinIntervalMs = options.freshMinIntervalMs ?? DEFAULT_FRESH_MIN_INTERVAL_MS
   const now = options.now ?? Date.now
   let cached: { index: PreviewRouteIndex; at: number } | null = null
   let inFlight: Promise<PreviewRouteIndex> | null = null
 
   return async ({ fresh = false } = {}) => {
-    if (!fresh && cached && now() - cached.at < ttlMs) {
+    const maxAgeMs = fresh ? freshMinIntervalMs : ttlMs
+    if (cached && now() - cached.at < maxAgeMs) {
       return cached.index
     }
     if (inFlight) {
