@@ -17366,7 +17366,11 @@ export class OrcaRuntimeService {
       // historical blind write and let the PTY write itself reject a dead terminal.
       return null
     }
-    if (!status.isRunningAgent && status.status === null) {
+    // Why: an absent status is a missing signal regardless of isRunningAgent —
+    // e.g. a detected Cursor Agent pane whose status Orca cannot read must
+    // degrade to a single blind write, not retry against a value that can
+    // never confirm.
+    if (status.status === null) {
       return null
     }
     return {
