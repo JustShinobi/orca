@@ -54,6 +54,28 @@ describe('OrchestrationDb worker Dispatch state', () => {
     ])
   })
 
+  it('records a confirmed submit under its own stage', () => {
+    const d = createDb()
+    const task = d.createTask({ spec: 'confirmed submit' })
+    const started = d.createStartingWorkerDispatch({
+      taskId: task.id,
+      startOptions: { topology: 'current', agent: 'codex' }
+    })
+    d.prepareStartingWorkerAuthority({
+      dispatchId: started.dispatch.id,
+      handle: 'term_worker',
+      paneKey: 'tab_worker:leaf_worker',
+      processIncarnation: 'runtime:pty:1',
+      worktreeId: 'repo::worktree',
+      setupState: 'not_applicable',
+      effects: []
+    })
+    expect(d.markWorkerDispatchReady(started.dispatch.id, undefined, 'confirmed')).toMatchObject({
+      state: 'ready',
+      stage: 'prompt_submitted'
+    })
+  })
+
   it('requeues an active Task before settling a worker whose terminal is missing', () => {
     const d = createDb()
     const task = d.createTask({ spec: 'recover missing worker' })
