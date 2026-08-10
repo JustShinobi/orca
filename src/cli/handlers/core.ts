@@ -42,7 +42,14 @@ async function runClaudeAgentTeams(env: Record<string, string>, args: string[]):
   })
 }
 
-function getOptionalServePort(flags: Map<string, string | boolean>, flag = 'port'): string | null {
+function getOptionalServePort(
+  flags: Map<string, string | boolean>,
+  flag = 'port',
+  // Why: `--port 0` means "pick an ephemeral port", which serve reports back.
+  // The preview listener is the fixed target of an external reverse-proxy
+  // route, so a port it cannot predict is a misconfiguration, not a request.
+  minimum = 0
+): string | null {
   if (!flags.has(flag)) {
     return null
   }
@@ -51,7 +58,7 @@ function getOptionalServePort(flags: Map<string, string | boolean>, flag = 'port
     throw new RuntimeClientError('invalid_argument', `Missing value for --${flag}.`)
   }
   const port = Number(rawPort)
-  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+  if (!Number.isInteger(port) || port < minimum || port > 65535) {
     throw new RuntimeClientError('invalid_argument', `Invalid --${flag} value: ${rawPort}`)
   }
   return rawPort
@@ -75,7 +82,7 @@ function getServePreviewFlags(flags: Map<string, string | boolean>): {
   previewAuth?: string | null
   previewToken?: string | null
 } {
-  const previewPort = getOptionalServePort(flags, 'preview-port')
+  const previewPort = getOptionalServePort(flags, 'preview-port', 1)
   const previewBind = getOptionalStringFlag(flags, 'preview-bind')
   const previewDomain = getOptionalStringFlag(flags, 'preview-domain')
   const previewAuth = getOptionalStringFlag(flags, 'preview-auth')

@@ -35,7 +35,6 @@ import { terminalLayoutEqual } from '@/lib/terminal-layout-equality'
 import { normalizeTerminalLayoutPtyOwnership } from '@/components/terminal-pane/terminal-layout-pty-ownership'
 import { isClientAuthoritativeAgentStatusPane } from '@/components/terminal-pane/renderer-owned-agent-status-registry'
 import { getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
-import { getReachableRuntimeSessionMirrorTargets } from '@/lib/runtime-session-mirror-targets'
 import {
   createWebRuntimeSessionTerminal,
   HOST_TERMINAL_SURFACE_SEPARATOR,
@@ -84,6 +83,7 @@ import {
   resolveWebAgentSessionHandoff
 } from './web-agent-session-handoff'
 import { getRuntimeEnvironmentRevision } from './runtime-environment-revision'
+import { useRuntimeSessionMirrorEnvironmentKey } from './use-runtime-session-mirror-environment-key'
 
 const WEB_SESSION_GROUP_PREFIX = 'web-session-tabs:'
 
@@ -99,6 +99,17 @@ type SessionTabsListAllResult = {
 type SnapshotFreshness = {
   publicationEpoch: string
   snapshotVersion: number
+}
+
+export function shouldRefreshRuntimeStatusAfterSubscriptionReplay(
+  response: RuntimeRpcResponse<unknown>,
+  currentRuntimeId: string | null | undefined
+): boolean {
+  return (
+    response.ok &&
+    isRuntimeSubscriptionReplayResponse(response) &&
+    response._meta.runtimeId !== currentRuntimeId
+  )
 }
 
 const latestSessionTabsSnapshotByWorktree = new Map<string, SnapshotFreshness>()
@@ -2704,14 +2715,7 @@ export function applyWebSessionTabsStorePatch(
 
 export function useWebSessionTabsSync(): void {
   const activeWorktreeId = useAppStore((state) => state.activeWorktreeId)
-  const runtimeSessionMirrorEnvironmentKey = useAppStore((state) =>
-    getReachableRuntimeSessionMirrorTargets(state)
-      .map(
-        ({ environmentId, runtimeId, connectionGeneration, pairingRevision }) =>
-          `${environmentId}\u0001${runtimeId}\u0001${connectionGeneration}\u0001${pairingRevision}`
-      )
-      .join('\u0000')
-  )
+  const runtimeSessionMirrorEnvironmentKey = useRuntimeSessionMirrorEnvironmentKey()
   const activeWorktreeRuntimeEnvironmentId = useAppStore((state) =>
     getExplicitRuntimeEnvironmentIdForWorktree(state, state.activeWorktreeId)
   )
@@ -2846,6 +2850,16 @@ export function useWebSessionTabsSync(): void {
               }
               const event = response.result as SessionTabsStreamEvent
               const replayed = isRuntimeSubscriptionReplayResponse(response)
+              const currentRuntimeId = useAppStore
+                .getState()
+                .runtimeStatusByEnvironmentId.get(environmentId)?.status?.runtimeId
+              if (shouldRefreshRuntimeStatusAfterSubscriptionReplay(response, currentRuntimeId)) {
+                // Why: subscription replay may be the first traffic from a
+                // replacement serve process. Refresh the full status so the
+                // renderer advances connection generation and invalidates
+                // runtime-scoped capability/session caches.
+                void useAppStore.getState().refreshRuntimeEnvironmentStatus(environmentId)
+              }
               if (event.type === 'snapshots') {
                 void Promise.all(
                   event.snapshots.map((snapshot) =>

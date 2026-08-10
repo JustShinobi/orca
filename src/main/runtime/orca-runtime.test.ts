@@ -61,14 +61,16 @@ import type { MessagePriority, MessageRow, MessageType } from './orchestration/t
 import {
   AUTHORITATIVE_TERMINAL_SNAPSHOT_TIMEOUT_MS,
   appendNormalizedToTailBuffer,
-  appendRecentPtyPathCandidates,
   buildPreview,
   OrcaRuntimeService,
-  recentTerminalPathCandidatesIncludePath,
-  recentTerminalOutputIncludesPath,
   resolveWorktreeScanCacheTtlMs,
   type RuntimeTerminalAgentStatusEvent
 } from './orca-runtime'
+import {
+  appendRecentPtyPathCandidates,
+  recentTerminalPathCandidatesIncludePath,
+  recentTerminalOutputIncludesPath
+} from './terminal-output-path-candidates'
 import { RecentPtyOutputBuffer } from './recent-pty-output-buffer'
 import { HeadlessEmulator } from '../daemon/headless-emulator'
 import {
@@ -91,6 +93,7 @@ import {
   AGENT_PROMPT_BRACKETED_PASTE_START,
   buildAgentPromptPasteBytes
 } from '../../shared/agent-prompt-injection'
+import { AGENT_PROMPT_BUFFERED_NOT_SUBMITTED } from '../../shared/agent-prompt-submission'
 import { CLIPBOARD_TEXT_MEASURE_YIELD_CODE_UNITS } from '../../shared/clipboard-text'
 import { projectHostSetupProjectionFromRepos } from '../../shared/project-host-setup-projection'
 import {
@@ -7152,6 +7155,7 @@ describe('OrcaRuntimeService', () => {
     }
     const runtime = new OrcaRuntimeService(runtimeStore as never)
     const wslGitOptions = { cwd: TEST_REPO_PATH, wslDistro: 'Ubuntu' }
+    let driftCounts = '1\t2\n'
     const asyncGitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockImplementation(async (args) => {
       if (args[0] === 'symbolic-ref') {
         return { stdout: 'refs/remotes/origin/main\n', stderr: '' }
@@ -7168,19 +7172,14 @@ describe('OrcaRuntimeService', () => {
       if (args[0] === 'fetch') {
         return { stdout: '', stderr: '' }
       }
+      if (args[0] === 'rev-list') {
+        return { stdout: driftCounts, stderr: '' }
+      }
+      if (args[0] === 'log') {
+        return { stdout: 'base commit 2\nbase commit 1\n', stderr: '' }
+      }
       throw new Error(`unexpected git call: ${args.join(' ')}`)
     })
-    const syncGitSpy = vi
-      .spyOn(gitRunner, 'gitExecFileSync')
-      .mockImplementation((args: string[]) => {
-        if (args[0] === 'rev-list') {
-          return '1\t2\n'
-        }
-        if (args[0] === 'log') {
-          return 'base commit 2\nbase commit 1\n'
-        }
-        throw new Error(`unexpected sync git call: ${args.join(' ')}`)
-      })
 
     try {
       const result = await runtime.probeWorktreeDrift(`id:${TEST_WORKTREE_ID}`)
@@ -7203,17 +7202,30 @@ describe('OrcaRuntimeService', () => {
         ...wslGitOptions,
         timeout: 60_000
       })
-      expect(syncGitSpy).toHaveBeenCalledWith(
+      expect(asyncGitSpy).toHaveBeenCalledWith(
         ['rev-list', '--left-right', '--count', 'HEAD...origin/main'],
-        { cwd: TEST_WORKTREE_PATH, wslDistro: 'Ubuntu' }
+        { cwd: TEST_WORKTREE_PATH, wslDistro: 'Ubuntu', timeout: 15_000 }
       )
-      expect(syncGitSpy).toHaveBeenCalledWith(
+      expect(asyncGitSpy).toHaveBeenCalledWith(
         ['log', '--format=%s', '-n', '5', 'HEAD..origin/main'],
-        { cwd: TEST_WORKTREE_PATH, wslDistro: 'Ubuntu' }
+        { cwd: TEST_WORKTREE_PATH, wslDistro: 'Ubuntu', timeout: 15_000 }
       )
+
+      driftCounts = '3\t0\n'
+      asyncGitSpy.mockClear()
+
+      await expect(runtime.probeWorktreeDrift(`id:${TEST_WORKTREE_ID}`)).resolves.toEqual({
+        base: 'origin/main',
+        behind: 0,
+        recentSubjects: []
+      })
+      expect(asyncGitSpy).toHaveBeenCalledWith(
+        ['rev-list', '--left-right', '--count', 'HEAD...origin/main'],
+        { cwd: TEST_WORKTREE_PATH, wslDistro: 'Ubuntu', timeout: 15_000 }
+      )
+      expect(asyncGitSpy.mock.calls.some(([args]) => args[0] === 'log')).toBe(false)
     } finally {
       asyncGitSpy.mockRestore()
-      syncGitSpy.mockRestore()
     }
   })
 
@@ -15957,13 +15969,165 @@ describe('OrcaRuntimeService', () => {
       const prompt = 'x'.repeat(TERMINAL_INPUT_CHUNK_MAX_BYTES + 1)
 
       const sendPromise = runtime.sendTerminalAgentPrompt(handle, prompt)
-      const sendRejection = expect(sendPromise).rejects.toThrow('terminal_not_writable')
+      const rejection = sendPromise.catch((error: unknown) => error)
       await vi.runAllTimersAsync()
+      const error = await rejection
 
-      await sendRejection
+      // Why: earlier chunk bytes already landed, so the body is buffered — the
+      // failure must carry the marker exactly once, not be a bare passthrough.
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe(
+        `terminal_not_writable (${AGENT_PROMPT_BUFFERED_NOT_SUBMITTED})`
+      )
       expect(writes[0]).toContain(AGENT_PROMPT_BRACKETED_PASTE_START)
       expect(writes.at(-1)).toBe(AGENT_PROMPT_BRACKETED_PASTE_END)
       expect(writes).not.toContain('\r')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not wrap terminal_not_writable when the first paste chunk write fails', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: () => false,
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'do the thing')
+      const rejection = sendPromise.catch((error: unknown) => error)
+      await vi.runAllTimersAsync()
+      const error = await rejection
+
+      // Why: nothing reached the PTY, so this is not a buffered body — the
+      // recovery marker must not appear anywhere in the message.
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe('terminal_not_writable')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reports an unverified submit when the agent has no readable status', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'do the thing')
+      await vi.runAllTimersAsync()
+
+      await expect(sendPromise).resolves.toMatchObject({ accepted: true, submitted: 'unverified' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('fails as buffered_not_submitted when a readable agent never leaves idle', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+      vi.spyOn(runtime, 'getTerminalAgentStatus').mockResolvedValue({
+        handle,
+        isRunningAgent: true,
+        status: 'idle'
+      })
+
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'do the thing')
+      const rejection = sendPromise.catch((error: unknown) => error)
+      await vi.runAllTimersAsync()
+      const error = await rejection
+
+      // Why: submitAgentPromptWithConfirmation's own throw already carries the
+      // bare marker — the outer wrap must not double it up.
+      expect(error).toBeInstanceOf(Error)
+      const message = (error as Error).message
+      const markerOccurrences = message.split(AGENT_PROMPT_BUFFERED_NOT_SUBMITTED).length - 1
+      expect(markerOccurrences).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reports an unverified submit when the agent is detected but its status is unreadable', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      const writes: string[] = []
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+      // Why: a detected agent (e.g. Cursor Agent) whose status Orca cannot read —
+      // isRunningAgent true, status null — must degrade to a single blind write,
+      // not retry against a status that can never confirm.
+      vi.spyOn(runtime, 'getTerminalAgentStatus').mockResolvedValue({
+        handle,
+        isRunningAgent: true,
+        status: null
+      })
+
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'do the thing')
+      await vi.runAllTimersAsync()
+
+      await expect(sendPromise).resolves.toMatchObject({ accepted: true, submitted: 'unverified' })
+      expect(writes.filter((write) => write === '\r')).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('confirms the submit when the agent starts working', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      const writes: string[] = []
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+      let reads = 0
+      vi.spyOn(runtime, 'getTerminalAgentStatus').mockImplementation(async () => ({
+        handle,
+        isRunningAgent: true,
+        status: reads++ === 0 ? ('idle' as const) : ('working' as const)
+      }))
+
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'do the thing')
+      await vi.runAllTimersAsync()
+
+      await expect(sendPromise).resolves.toMatchObject({ submitted: 'confirmed' })
+      expect(writes.filter((write) => write === '\r')).toHaveLength(1)
     } finally {
       vi.useRealTimers()
     }
@@ -30694,6 +30858,88 @@ describe('OrcaRuntimeService', () => {
     expect(kill).toHaveBeenCalledWith('pty-b')
     expect(getSession().tabsByWorktree[TEST_WORKTREE_ID]).toEqual([])
     expect(getSession().terminalLayoutsByTabId['host-tab']).toBeUndefined()
+  })
+
+  it('closes headless terminal parents whose persisted record is missing instead of resurrecting them', async () => {
+    const layout = makeHeadlessTerminalLayout({
+      [HEADLESS_LEAF_ID]: 'pty-a',
+      [HEADLESS_SECOND_LEAF_ID]: 'pty-b'
+    })
+    const { runtimeStore, getSession, setSession } = makeRuntimeStoreWithWorkspaceSession(
+      makeWorkspaceSessionWithHeadlessTerminal({
+        tabsByWorktree: {
+          [TEST_WORKTREE_ID]: [
+            {
+              id: 'host-tab',
+              ptyId: 'pty-a',
+              worktreeId: TEST_WORKTREE_ID,
+              title: 'Persisted Terminal',
+              customTitle: null,
+              color: null,
+              sortOrder: 0,
+              createdAt: 1
+            }
+          ]
+        },
+        terminalLayoutsByTabId: { 'host-tab': layout }
+      })
+    )
+    const kill = vi.fn(() => true)
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    runtime.setPtyController({
+      write: () => true,
+      kill,
+      getForegroundProcess: async () => null,
+      listProcesses: async () => []
+    })
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'host-tab',
+          worktreeId: TEST_WORKTREE_ID,
+          title: 'Persisted Terminal',
+          activeLeafId: HEADLESS_LEAF_ID,
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'host-tab',
+          worktreeId: TEST_WORKTREE_ID,
+          leafId: HEADLESS_LEAF_ID,
+          paneRuntimeId: 1,
+          ptyId: 'pty-a',
+          paneTitle: 'A'
+        },
+        {
+          tabId: 'host-tab',
+          worktreeId: TEST_WORKTREE_ID,
+          leafId: HEADLESS_SECOND_LEAF_ID,
+          paneRuntimeId: 2,
+          ptyId: 'pty-b',
+          paneTitle: 'B'
+        }
+      ]
+    })
+
+    // Why: warm the live snapshot, then drop the persisted row out-of-band to
+    // reproduce the persisted/live-state drift (#10747, #12920) — a
+    // never-persisted background tab or a close that de-persisted then failed.
+    await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    setSession({
+      ...getSession(),
+      tabsByWorktree: { [TEST_WORKTREE_ID]: [] },
+      terminalLayoutsByTabId: {}
+    })
+
+    await runtime.closeMobileSessionTab(`id:${TEST_WORKTREE_ID}`, 'host-tab')
+
+    expect(kill).toHaveBeenCalledWith('pty-a')
+    expect(kill).toHaveBeenCalledWith('pty-b')
+    const relisted = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    expect(
+      relisted.tabs.filter((tab) => tab.type === 'terminal' && tab.parentTabId === 'host-tab')
+    ).toEqual([])
   })
 
   it('closes persisted headless terminal parents before any prior list call', async () => {

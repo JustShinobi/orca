@@ -1,4 +1,6 @@
 import http, { type Server } from 'node:http'
+import net from 'node:net'
+import type { Duplex } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PreviewRouteEntry, PreviewRouteIndex } from './preview-route-resolver'
 import { parsePreviewDomain } from './worktree-preview-routes'
@@ -7,11 +9,17 @@ import { WorktreePreviewProxy, type WorktreePreviewProxyOptions } from './worktr
 const origin = parsePreviewDomain('http://preview.test')
 
 type Harness = {
+  port: number
   request: (options: {
     host: string
     path?: string
     headers?: Record<string, string>
   }) => Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }>
+  upgrade: (options: {
+    host: string
+    path?: string
+    headers?: Record<string, string>
+  }) => Promise<string>
 }
 
 const cleanups: (() => Promise<void> | void)[] = []
@@ -35,6 +43,33 @@ async function startUpstream(
   const address = server.address()
   if (!address || typeof address === 'string') {
     throw new Error('upstream failed to bind')
+  }
+  return address.port
+}
+
+async function startUpgradeUpstream(
+  onUpgrade: (request: http.IncomingMessage) => void
+): Promise<number> {
+  const server: Server = http.createServer()
+  const sockets = new Set<Duplex>()
+  server.on('upgrade', (request, socket) => {
+    sockets.add(socket)
+    socket.once('close', () => sockets.delete(socket))
+    onUpgrade(request)
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\nconnection: upgrade\r\nupgrade: websocket\r\n\r\n'
+    )
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  cleanups.push(() => {
+    for (const socket of sockets) {
+      socket.destroy()
+    }
+    return new Promise<void>((resolve) => server.close(() => resolve()))
+  })
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    throw new Error('upgrade upstream failed to bind')
   }
   return address.port
 }
@@ -66,6 +101,7 @@ async function startProxy(
   const { port } = await proxy.start()
   cleanups.push(() => proxy.stop())
   return {
+    port,
     request: ({ host, path = '/', headers = {} }) =>
       new Promise((resolve, reject) => {
         const request = http.request(
@@ -82,6 +118,34 @@ async function startProxy(
         )
         request.once('error', reject)
         request.end()
+      }),
+    upgrade: ({ host, path = '/socket', headers = {} }) =>
+      new Promise((resolve, reject) => {
+        const socket = net.connect(port, '127.0.0.1', () => {
+          const lines = [
+            `GET ${path} HTTP/1.1`,
+            `host: ${host}`,
+            'connection: upgrade',
+            'upgrade: websocket',
+            ...Object.entries(headers).map(([name, value]) => `${name}: ${value}`),
+            '',
+            ''
+          ]
+          socket.write(lines.join('\r\n'))
+        })
+        let raw = ''
+        socket.setTimeout(2_000, () => {
+          socket.destroy()
+          reject(new Error('upgrade response timed out'))
+        })
+        socket.on('data', (chunk: Buffer) => {
+          raw += chunk.toString()
+          if (raw.includes('\r\n\r\n')) {
+            socket.destroy()
+            resolve(raw)
+          }
+        })
+        socket.once('error', reject)
       })
   }
 }
@@ -162,6 +226,56 @@ describe('WorktreePreviewProxy routing', () => {
     expect(response.status).toBe(200)
     expect(resolveRoutes).toHaveBeenCalledWith({ fresh: true })
   })
+
+  it('tears down the upstream request when the client disconnects', async () => {
+    let markAccepted: (() => void) | null = null
+    const accepted = new Promise<void>((resolve) => {
+      markAccepted = resolve
+    })
+    let upstreamClosed = false
+    const upstreamPort = await startUpstream((request) => {
+      markAccepted?.()
+      request.once('aborted', () => {
+        upstreamClosed = true
+      })
+    })
+    const harness = await startProxy(
+      new Map([['feat', routeEntry({ ports: [{ port: upstreamPort, connectHost: 'localhost' }] })]])
+    )
+    const client = http.request({
+      host: '127.0.0.1',
+      port: harness.port,
+      headers: { host: `feat--${upstreamPort}.preview.test` }
+    })
+    client.on('error', () => {})
+    client.end()
+    await accepted
+
+    client.destroy()
+
+    await vi.waitFor(() => expect(upstreamClosed).toBe(true))
+  })
+
+  it('returns 502 when an upstream accepts but never responds', async () => {
+    let markAccepted: (() => void) | null = null
+    const accepted = new Promise<void>((resolve) => {
+      markAccepted = resolve
+    })
+    const upstreamPort = await startUpstream(() => markAccepted?.())
+    const harness = await startProxy(
+      new Map([['feat', routeEntry({ ports: [{ port: upstreamPort, connectHost: 'localhost' }] })]])
+    )
+    vi.useFakeTimers()
+    try {
+      const response = harness.request({ host: `feat--${upstreamPort}.preview.test` })
+      await accepted
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(await response).toMatchObject({ status: 502 })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('WorktreePreviewProxy token auth', () => {
@@ -202,6 +316,17 @@ describe('WorktreePreviewProxy token auth', () => {
     expect(cookie).toContain('HttpOnly')
   })
 
+  it('pins the exchange redirect to root when the path smuggles a protocol-relative host', async () => {
+    const harness = await startTokenProxy(await startUpstream())
+    // WHATWG URL folds `\` into `/`, which would otherwise emit `Location: //evil.example`.
+    const response = await harness.request({
+      host: 'feat--3000.preview.test',
+      path: '/\\evil.example?orca-preview-token=secret'
+    })
+    expect(response.status).toBe(302)
+    expect(response.headers.location).toBe('/')
+  })
+
   it('accepts the cookie on subsequent requests', async () => {
     const upstreamPort = await startUpstream()
     const harness = await startTokenProxy(upstreamPort)
@@ -210,5 +335,74 @@ describe('WorktreePreviewProxy token auth', () => {
       headers: { cookie: 'orca_preview_token=secret' }
     })
     expect(response.status).toBe(200)
+  })
+
+  it('never hands its own auth cookie to the workspace dev server', async () => {
+    let seenCookie: string | undefined = 'unset'
+    const upstreamPort = await startUpstream((request, response) => {
+      seenCookie = request.headers.cookie
+      response.writeHead(200)
+      response.end('ok')
+    })
+    const harness = await startTokenProxy(upstreamPort)
+
+    const response = await harness.request({
+      host: `feat--${upstreamPort}.preview.test`,
+      headers: { cookie: 'orca_preview_token=secret; app_session=keep-me' }
+    })
+
+    expect(response.status).toBe(200)
+    // The dev server keeps its own cookies and never learns the proxy's token,
+    // which gates every other workspace behind the same listener.
+    expect(seenCookie).toBe('app_session=keep-me')
+    expect(seenCookie).not.toContain('secret')
+  })
+
+  it('drops the cookie header entirely when the proxy token was its only value', async () => {
+    let hadCookieHeader = true
+    const upstreamPort = await startUpstream((request, response) => {
+      hadCookieHeader = 'cookie' in request.headers
+      response.writeHead(200)
+      response.end('ok')
+    })
+    const harness = await startTokenProxy(upstreamPort)
+
+    await harness.request({
+      host: `feat--${upstreamPort}.preview.test`,
+      headers: { cookie: 'orca_preview_token=secret' }
+    })
+
+    expect(hadCookieHeader).toBe(false)
+  })
+
+  it('forwards an authorized WebSocket upgrade without its auth cookie', async () => {
+    let seenCookie: string | undefined
+    const upstreamPort = await startUpgradeUpstream((request) => {
+      seenCookie = request.headers.cookie
+    })
+    const harness = await startTokenProxy(upstreamPort)
+
+    const response = await harness.upgrade({
+      host: `feat--${upstreamPort}.preview.test`,
+      headers: { cookie: 'orca_preview_token=secret; app_session=keep-me' }
+    })
+
+    expect(response).toMatch(/^HTTP\/1\.1 101 Switching Protocols/)
+    expect(seenCookie).toBe('app_session=keep-me')
+  })
+
+  it('rejects a WebSocket upgrade without the auth cookie', async () => {
+    let reachedUpstream = false
+    const upstreamPort = await startUpgradeUpstream(() => {
+      reachedUpstream = true
+    })
+    const harness = await startTokenProxy(upstreamPort)
+
+    const response = await harness.upgrade({
+      host: `feat--${upstreamPort}.preview.test`
+    })
+
+    expect(response).toMatch(/^HTTP\/1\.1 401 Unauthorized/)
+    expect(reachedUpstream).toBe(false)
   })
 })

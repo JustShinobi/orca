@@ -93,6 +93,10 @@ import { normalizeTerminalCustomThemes } from '../../../shared/terminal-custom-t
 import { normalizeUiLanguage } from '../../../shared/ui-language'
 import { normalizeUsagePercentageDisplay } from '../../../shared/usage-percentage-display'
 import { normalizeStatusBarUsageMode } from '../../../shared/status-bar-usage-mode'
+import {
+  computerAwakeSettingsForMode,
+  normalizeComputerAwakeMode
+} from '../../../shared/computer-awake-mode'
 import type { RateLimitState } from '../../../shared/rate-limit-types'
 import type { RuntimeStatus, RuntimeSyncWindowGraph } from '../../../shared/runtime-types'
 import { assertFileMutationOwnershipCapability } from '../../../shared/file-mutation-ownership'
@@ -290,6 +294,7 @@ type WebGitHubRouteKey =
   | 'prCheckDetails'
   | 'rerunPRChecks'
   | 'prComments'
+  | 'setPRCommentReaction'
   | 'resolveReviewThread'
   | 'setPRFileViewed'
   | 'updatePRTitle'
@@ -338,6 +343,7 @@ type WebGitHubRuntimeMethod =
   | 'github.prCheckDetails'
   | 'github.rerunPRChecks'
   | 'github.prComments'
+  | 'github.setPRCommentReaction'
   | 'github.resolveReviewThread'
   | 'github.setPRFileViewed'
   | 'github.updatePRTitle'
@@ -439,6 +445,7 @@ export const GITHUB_WEB_RPC_METHODS = {
   prCheckDetails: 'github.prCheckDetails',
   rerunPRChecks: 'github.rerunPRChecks',
   prComments: 'github.prComments',
+  setPRCommentReaction: 'github.setPRCommentReaction',
   resolveReviewThread: 'github.resolveReviewThread',
   setPRFileViewed: 'github.setPRFileViewed',
   updatePRTitle: 'github.updatePRTitle',
@@ -697,6 +704,24 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       set: async (updates) => {
         const sanitizedUpdates = { ...updates }
         delete sanitizedUpdates.activeRuntimeEnvironmentId
+        if ('computerAwakeMode' in sanitizedUpdates) {
+          Object.assign(
+            sanitizedUpdates,
+            computerAwakeSettingsForMode(
+              normalizeComputerAwakeMode(
+                sanitizedUpdates.computerAwakeMode,
+                sanitizedUpdates.keepComputerAwakeWhileAgentsRun
+              )
+            )
+          )
+        } else if ('keepComputerAwakeWhileAgentsRun' in sanitizedUpdates) {
+          Object.assign(
+            sanitizedUpdates,
+            computerAwakeSettingsForMode(
+              sanitizedUpdates.keepComputerAwakeWhileAgentsRun ? 'auto' : 'off'
+            )
+          )
+        }
         if ('autoRenameBranchFromWorkDefaultedOn' in sanitizedUpdates) {
           sanitizedUpdates.autoRenameBranchFromWorkDefaultedOn = true
         }
@@ -721,6 +746,19 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       listFonts: () => Promise.resolve([]),
       onChanged: () => noopUnsubscribe
     } satisfies Partial<WebSettingsApi> as unknown as WebSettingsApi,
+    agentAwake: {
+      getStatus: async () => {
+        const settings = getStoredSettings()
+        return {
+          mode: normalizeComputerAwakeMode(
+            settings.computerAwakeMode,
+            settings.keepComputerAwakeWhileAgentsRun
+          ),
+          active: false
+        }
+      },
+      onChanged: () => noopUnsubscribe
+    },
     keybindings: createWebKeybindingsApi(),
     ui: createWebUiApi(),
     crashReports: {
@@ -1528,7 +1566,22 @@ function createRuntimeEnvironmentsApi(): NonNullable<Partial<PreloadApi>['runtim
     subscribe: async ({ selector, method, params, timeoutMs }, callbacks) => {
       const environment = resolveEnvironment(selector)
       const client = getClientForEnvironment(environment)
-      const subscription = await client.subscribe(method, params, callbacks, { timeoutMs })
+      const subscription = await client.subscribe(
+        method,
+        params,
+        {
+          ...callbacks,
+          onResponse: (response) => {
+            // Why: subscriptions can be the first successful traffic after a
+            // transparent serve replacement. Persist its new runtime identity
+            // just like unary calls so later status/catalog reads do not keep
+            // reporting the retired runtime.
+            updateEnvironmentFromResponse(environment, response)
+            callbacks.onResponse(response)
+          }
+        },
+        { timeoutMs }
+      )
       if (manuallyDisconnectedEnvironmentIds.has(environment.id)) {
         subscription.unsubscribe()
         throw new Error('runtime_manually_disconnected')
@@ -2405,6 +2458,11 @@ function createGitHubApi(): WebGitHubApi {
       route<WebGitHubResult<'rerunPRChecks'>>(GITHUB_WEB_RPC_METHODS.rerunPRChecks, args),
     prComments: (args) =>
       route<WebGitHubResult<'prComments'>>(GITHUB_WEB_RPC_METHODS.prComments, args),
+    setPRCommentReaction: (args) =>
+      route<WebGitHubResult<'setPRCommentReaction'>>(
+        GITHUB_WEB_RPC_METHODS.setPRCommentReaction,
+        args
+      ),
     resolveReviewThread: (args) =>
       route<WebGitHubResult<'resolveReviewThread'>>(
         GITHUB_WEB_RPC_METHODS.resolveReviewThread,
@@ -3669,6 +3727,9 @@ function updateEnvironmentFromResponse(
     return
   }
   const runtimeId = response.ok ? response._meta.runtimeId : (response._meta?.runtimeId ?? null)
+  if (runtimeId === activeEnvironment.runtimeId) {
+    return
+  }
   activeEnvironment = updateStoredEnvironmentRuntimeId(environment, runtimeId)
 }
 

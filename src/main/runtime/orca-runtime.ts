@@ -93,6 +93,15 @@ import {
   AGENT_PROMPT_SUBMIT_DELAY_MS,
   buildAgentPromptPasteBytes
 } from '../../shared/agent-prompt-injection'
+import {
+  submitAgentPromptWithConfirmation,
+  type AgentPromptReadiness
+} from './agent-prompt-submit-confirmation'
+import {
+  AGENT_PROMPT_BUFFERED_NOT_SUBMITTED,
+  buildBufferedNotSubmittedError,
+  type AgentPromptSubmitOutcome
+} from '../../shared/agent-prompt-submission'
 import { gitExecFileAsync, gitSpawn, nonInteractiveGitEnv } from '../git/runner'
 import { runWithGitReadCacheInvalidation } from '../git/status'
 import {
@@ -105,7 +114,7 @@ import { getGitCloneFailureMessage } from '../../shared/git-clone-failure-messag
 import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir, hostname, userInfo } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { resolveWorktreeCreateBase } from '../worktree-create-base'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree-base-ref'
@@ -228,6 +237,7 @@ import type {
   GitHubPullRequestStateUpdate,
   GitHubPRFile,
   GitHubPRReviewCommentInput,
+  GitHubReactionContent,
   GitLabIssueUpdate,
   GitLabMRInlineCommentInput,
   GitLabProjectRef,
@@ -597,6 +607,7 @@ import {
   getPRCheckDetails,
   rerunPRChecks,
   getPRComments,
+  setPRCommentReaction,
   getIssue,
   resolveReviewThread,
   setPRFileViewed,
@@ -676,7 +687,6 @@ import type {
   HostedReviewInfo
 } from '../../shared/hosted-review'
 import { getHostedReviewForBranch as getHostedReviewForBranchFromRepo } from '../source-control/hosted-review'
-import type { ForgeProviderId } from '../source-control/forge-provider'
 import {
   createHostedReview as createHostedReviewFromRepo,
   getHostedReviewCreationEligibility as getHostedReviewCreationEligibilityFromRepo
@@ -988,6 +998,24 @@ import {
   type MobileSessionTabsNotifyCoalescer
 } from './mobile-session-tabs-notify-coalescer'
 import { TerminalFocusNavigationCoalescer } from './terminal-focus-navigation-coalescer'
+import {
+  appendRecentPtyPathCandidates,
+  recentTerminalOutputIncludesPath,
+  recentTerminalPathCandidatesIncludePath
+} from './terminal-output-path-candidates'
+import {
+  getSelectedReviewBranch,
+  getSelectedReviewLookupHints,
+  isAllowedPushTargetRemoteConflict,
+  isMatchingSelectedGitHubPr,
+  type SelectedReviewBranchInput
+} from './selected-review-branch'
+import {
+  getRuntimeFolderWorkspaceInstanceId,
+  getRuntimeFolderWorkspaceRootId,
+  isRuntimeFolderWorkspaceIdForRepo,
+  mergeRuntimeFolderWorkspace
+} from './runtime-folder-workspace'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import {
   assertFolderWorkspacePathUsable,
@@ -1000,9 +1028,8 @@ import {
   getSshGitProviderGeneration,
   requireSshGitProvider
 } from '../providers/ssh-git-dispatch'
-import { detectRepoIconAndUpstream } from '../repo-icon-autodetect'
+import { detectGitHubAvatarIcon, detectRepoIconAndUpstream } from '../repo-icon-autodetect'
 import { enrichMissingRepoGitRemoteIdentities } from '../repo-git-remote-identity-enrichment'
-import { githubAvatarIcon } from '../../shared/repo-icon'
 import type { ClaudeAccountAddTarget, ClaudeAccountService } from '../claude-accounts/service'
 import type {
   CodexAccountAddTarget,
@@ -1787,9 +1814,6 @@ const BRACKETED_PASTE_QUIET_MS = 1500
 const DRAFT_PASTE_READY_TIMEOUT_MS = 8000
 const MOBILE_TERMINAL_SURFACE_TIMEOUT_MS = 10_000
 const MOBILE_TERMINAL_READY_FALLBACK_MS = 1000
-const RECENT_PTY_PATH_CANDIDATE_LIMIT = 1024
-const RECENT_PTY_PATH_CANDIDATE_MAX_BYTES = 4 * 1024
-const RECENT_PTY_PATH_CANDIDATE_TOTAL_BYTES = 64 * 1024
 const SSH_PANE_RECOVERY_GRACE_MS = 30_000
 // Why: long enough that a keystroke burst to a proven-dead leaf probes once,
 // short enough that a recreated session id regains writability quickly even if
@@ -2126,10 +2150,6 @@ function getRuntimeWorktreeRemovalOptionsKey(
   return `${force ? 'force' : 'normal'}:${runHooks ? 'run-hooks' : 'skip-hooks'}:${ptyKey}`
 }
 
-function getRuntimeFolderWorkspaceRootId(repo: Repo): string {
-  return `${repo.id}::${repo.path}`
-}
-
 // Null executionHostId means host-unaware: path-only callers match any repo, and the first runtime
 // host can adopt a legacy (unstamped) repo. But an unstamped repo with a connectionId is an SSH repo
 // (resolves to ssh:<id>), so it must not be adopted/matched by a runtime host at the same path.
@@ -2159,69 +2179,9 @@ function assertProjectHostSetupHostIsSupported(hostId: ExecutionHostId | null | 
   )
 }
 
-function getRuntimeFolderWorkspaceInstanceId(repo: Repo, instanceId: string): string {
-  return `${getRuntimeFolderWorkspaceRootId(repo)}${FOLDER_WORKSPACE_INSTANCE_SEPARATOR}${instanceId}`
-}
-
 function getRuntimeFolderWorkspaceInstanceIdentity(repo: Repo, worktreeId: string): string {
   const prefix = `${getRuntimeFolderWorkspaceRootId(repo)}${FOLDER_WORKSPACE_INSTANCE_SEPARATOR}`
   return worktreeId.startsWith(prefix) ? worktreeId.slice(prefix.length) : randomUUID()
-}
-
-function isRuntimeFolderWorkspaceIdForRepo(repo: Repo, worktreeId: string): boolean {
-  const rootId = getRuntimeFolderWorkspaceRootId(repo)
-  return (
-    worktreeId === rootId ||
-    worktreeId.startsWith(`${rootId}${FOLDER_WORKSPACE_INSTANCE_SEPARATOR}`)
-  )
-}
-
-function mergeRuntimeFolderWorkspace(repo: Repo, worktreeId: string, meta: WorktreeMeta): Worktree {
-  return {
-    id: worktreeId,
-    ...(meta.instanceId !== undefined ? { instanceId: meta.instanceId } : {}),
-    repoId: repo.id,
-    ...(meta.projectId !== undefined ? { projectId: meta.projectId } : {}),
-    ...(meta.hostId !== undefined ? { hostId: meta.hostId } : {}),
-    ...(meta.projectHostSetupId !== undefined
-      ? { projectHostSetupId: meta.projectHostSetupId }
-      : {}),
-    path: repo.path,
-    head: '',
-    branch: '',
-    isBare: false,
-    isMainWorktree: worktreeId === getRuntimeFolderWorkspaceRootId(repo),
-    displayName: meta.displayName || repo.displayName,
-    comment: meta.comment || '',
-    linkedIssue: meta.linkedIssue ?? null,
-    linkedPR: meta.linkedPR ?? null,
-    linkedLinearIssue: meta.linkedLinearIssue ?? null,
-    linkedLinearIssueWorkspaceId: meta.linkedLinearIssueWorkspaceId ?? null,
-    linkedLinearIssueOrganizationUrlKey: meta.linkedLinearIssueOrganizationUrlKey ?? null,
-    linkedGitLabMR: meta.linkedGitLabMR ?? null,
-    linkedGitLabIssue: meta.linkedGitLabIssue ?? null,
-    linkedBitbucketPR: meta.linkedBitbucketPR ?? null,
-    linkedAzureDevOpsPR: meta.linkedAzureDevOpsPR ?? null,
-    linkedGiteaPR: meta.linkedGiteaPR ?? null,
-    linkedWorkItem: meta.linkedWorkItem ?? null,
-    linkedTaskSourceContext: meta.linkedTaskSourceContext ?? null,
-    isArchived: meta.isArchived ?? false,
-    isUnread: meta.isUnread ?? false,
-    isPinned: meta.isPinned ?? false,
-    sortOrder: meta.sortOrder ?? 0,
-    ...(meta.manualOrder !== undefined ? { manualOrder: meta.manualOrder } : {}),
-    lastActivityAt: meta.lastActivityAt ?? 0,
-    ...(meta.createdAt !== undefined ? { createdAt: meta.createdAt } : {}),
-    ...(meta.createdWithAgent !== undefined ? { createdWithAgent: meta.createdWithAgent } : {}),
-    ...(meta.automationProvenance !== undefined
-      ? { automationProvenance: meta.automationProvenance }
-      : {}),
-    ...(meta.cliProvenance !== undefined ? { cliProvenance: meta.cliProvenance } : {}),
-    ...(meta.priorWorktreeIds !== undefined ? { priorWorktreeIds: meta.priorWorktreeIds } : {}),
-    workspaceStatus: meta.workspaceStatus ?? DEFAULT_WORKSPACE_STATUS_ID,
-    diffComments: meta.diffComments,
-    mobileDiffReview: meta.mobileDiffReview
-  }
 }
 
 function listRuntimeFolderWorkspaces(
@@ -2382,94 +2342,6 @@ function getLocalGitHubPrForBranch(
         localGitExecOptions: gitOptions
       })
     : getPRForBranch(repoPath, branchName)
-}
-
-type SelectedReviewBranchInput = {
-  branchNameOverride?: string
-  linkedPR?: number | null
-  linkedGitLabMR?: number | null
-  linkedBitbucketPR?: number | null
-  linkedAzureDevOpsPR?: number | null
-  linkedGiteaPR?: number | null
-  pushTarget?: GitPushTarget
-}
-
-type SelectedReviewBranch = {
-  provider: ForgeProviderId
-  number: number
-}
-
-function getSelectedReviewBranch(args: SelectedReviewBranchInput): SelectedReviewBranch | null {
-  if (typeof args.linkedPR === 'number') {
-    return { provider: 'github', number: args.linkedPR }
-  }
-  if (typeof args.linkedGitLabMR === 'number') {
-    return { provider: 'gitlab', number: args.linkedGitLabMR }
-  }
-  if (typeof args.linkedBitbucketPR === 'number') {
-    return { provider: 'bitbucket', number: args.linkedBitbucketPR }
-  }
-  if (typeof args.linkedAzureDevOpsPR === 'number') {
-    return { provider: 'azure-devops', number: args.linkedAzureDevOpsPR }
-  }
-  if (typeof args.linkedGiteaPR === 'number') {
-    return { provider: 'gitea', number: args.linkedGiteaPR }
-  }
-  return null
-}
-
-function isSelectedGitHubPrBranchOverride(
-  args: SelectedReviewBranchInput,
-  branchName: string
-): boolean {
-  return typeof args.linkedPR === 'number' && args.branchNameOverride === branchName
-}
-
-function isSelectedReviewBranchOverride(
-  args: SelectedReviewBranchInput,
-  branchName: string
-): boolean {
-  return getSelectedReviewBranch(args) !== null && args.branchNameOverride === branchName
-}
-
-function isMatchingSelectedGitHubPr(
-  existingPR: Awaited<ReturnType<typeof getPRForBranch>>,
-  args: SelectedReviewBranchInput,
-  branchName: string
-): boolean {
-  return Boolean(
-    existingPR &&
-    isSelectedGitHubPrBranchOverride(args, branchName) &&
-    existingPR.number === args.linkedPR
-  )
-}
-
-function isAllowedPushTargetRemoteConflict(
-  conflictKind: 'local' | 'remote' | null,
-  branchName: string,
-  args: SelectedReviewBranchInput
-): boolean {
-  return (
-    conflictKind === 'remote' &&
-    isSelectedReviewBranchOverride(args, branchName) &&
-    args.pushTarget?.branchName === branchName
-  )
-}
-
-function getSelectedReviewLookupHints(args: SelectedReviewBranchInput): {
-  linkedGitHubPR?: number | null
-  linkedGitLabMR?: number | null
-  linkedBitbucketPR?: number | null
-  linkedAzureDevOpsPR?: number | null
-  linkedGiteaPR?: number | null
-} {
-  return {
-    linkedGitHubPR: args.linkedPR ?? null,
-    linkedGitLabMR: args.linkedGitLabMR ?? null,
-    linkedBitbucketPR: args.linkedBitbucketPR ?? null,
-    linkedAzureDevOpsPR: args.linkedAzureDevOpsPR ?? null,
-    linkedGiteaPR: args.linkedGiteaPR ?? null
-  }
 }
 
 async function getSelectedHostedReviewForBranch(
@@ -7372,11 +7244,7 @@ export class OrcaRuntimeService {
     }
   }
 
-  private removePersistedHeadlessTerminalTab(
-    worktreeId: string,
-    parentTabId: string,
-    options: { allowMissing?: boolean } = {}
-  ): string[] {
+  private removePersistedHeadlessTerminalTab(worktreeId: string, parentTabId: string): string[] {
     const session = this.getWorkspaceSessionForWorktree(worktreeId)
     if (!session || !this.store?.setWorkspaceSession) {
       throw new Error('workspace_session_unavailable')
@@ -7386,10 +7254,12 @@ export class OrcaRuntimeService {
       throw new Error('terminal_tab_pinned')
     }
     if (!result.closed) {
-      if (options.allowMissing) {
-        return []
-      }
-      throw new Error('tab_not_found')
+      // Why: the caller resolved the tab from the live snapshot, so a missing
+      // persisted row is always drift (never-persisted background tab, or an
+      // earlier close that de-persisted then failed). Aborting here would skip
+      // the PTY kill and snapshot prune below and the republished snapshot
+      // would resurrect the tab on every client forever (#10747, #12920).
+      return []
     }
     this.setWorkspaceSessionForWorktree(
       worktreeId,
@@ -8013,10 +7883,7 @@ export class OrcaRuntimeService {
           this.isRuntimeOwnedHeadlessMobileTab(worktreeId, remainingTab)
         ) {
           // Why: after relay recovery the renderer can acknowledge a tab it no longer mirrors; the HUB must still retire its SSH-owned surface.
-          this.closeHeadlessMobileTerminalTab(worktreeId, remainingSnapshot, remainingTab, {
-            // Why: the renderer may already have durably removed the tab before acknowledging.
-            allowMissingPersistedTab: true
-          })
+          this.closeHeadlessMobileTerminalTab(worktreeId, remainingSnapshot, remainingTab)
           this.notifyRendererOfHeadlessTerminalClose(tab.parentTabId)
           this.store?.flushOrThrow?.()
         }
@@ -8190,13 +8057,11 @@ export class OrcaRuntimeService {
     worktreeId: string,
     snapshot: RuntimeMobileSessionTabsSnapshot,
     tab: RuntimeMobileSessionTerminalTab,
-    options: { allowMissingPersistedTab?: boolean; killPtys?: boolean } = {}
+    options: { killPtys?: boolean } = {}
   ): void {
     const closedParentTabId = tab.parentTabId
     this.clearRuntimeSessionOwnershipForMobileTab(worktreeId, snapshot, closedParentTabId)
-    const projectedPtyIds = this.removePersistedHeadlessTerminalTab(worktreeId, closedParentTabId, {
-      allowMissing: options.allowMissingPersistedTab
-    })
+    const projectedPtyIds = this.removePersistedHeadlessTerminalTab(worktreeId, closedParentTabId)
     // Why: local provider ids can be reused after restart, so a dormant
     // persisted id is not kill authority. SSH relay ids remain durable exact
     // identities even before pane metadata reconnects.
@@ -16820,15 +16685,20 @@ export class OrcaRuntimeService {
     } = {}
   ): Promise<RuntimeTerminalSend> {
     const payload = buildAgentPromptPasteBytes(prompt)
-    const bytesWritten = Buffer.byteLength(`${payload}${AGENT_PROMPT_SUBMIT}`, 'utf8')
+    const payloadBytes = Buffer.byteLength(payload, 'utf8')
     const pty = this.getLivePtyForHandle(handle)
     if (pty) {
       if (!pty.pty.connected) {
         throw new Error('terminal_not_writable')
       }
       await assertTerminalInputWithinLimitWithYield(payload)
-      await this.writeTerminalAgentPrompt(pty.pty.ptyId, payload, options)
-      return { handle, accepted: true, bytesWritten }
+      const submit = await this.writeTerminalAgentPrompt(handle, pty.pty.ptyId, payload, options)
+      return {
+        handle,
+        accepted: true,
+        bytesWritten: payloadBytes + submit.submitBytes,
+        submitted: submit.outcome
+      }
     }
 
     const { leaf } = this.getLiveLeafForHandle(handle)
@@ -16841,8 +16711,13 @@ export class OrcaRuntimeService {
     if (await this.isLeafPtyProvenAbsent(leaf.ptyId)) {
       throw new Error('terminal_not_writable')
     }
-    await this.writeTerminalAgentPrompt(leaf.ptyId, payload, options)
-    return { handle, accepted: true, bytesWritten }
+    const submit = await this.writeTerminalAgentPrompt(handle, leaf.ptyId, payload, options)
+    return {
+      handle,
+      accepted: true,
+      bytesWritten: payloadBytes + submit.submitBytes,
+      submitted: submit.outcome
+    }
   }
 
   async getTerminalAgentStatus(handle: string): Promise<RuntimeTerminalAgentStatus> {
@@ -17379,13 +17254,14 @@ export class OrcaRuntimeService {
   }
 
   private async writeTerminalAgentPrompt(
+    handle: string,
     ptyId: string,
     pastePayload: string,
     options: {
       beforeWrite?: (ptyId: string) => void | Promise<void>
       suffixFailureError?: string
     } = {}
-  ): Promise<void> {
+  ): Promise<{ outcome: AgentPromptSubmitOutcome; submitBytes: number }> {
     let wrotePasteBytes = false
     let completedPaste = false
     try {
@@ -17408,21 +17284,63 @@ export class OrcaRuntimeService {
       if (wrotePasteBytes && !completedPaste) {
         this.ptyController?.write(ptyId, AGENT_PROMPT_BRACKETED_PASTE_END)
       }
-      throw error
+      // Why: a partial body already sits in the composer, so recovery is a lone
+      // Enter — re-running the dispatch would duplicate the prompt.
+      throw wrotePasteBytes
+        ? buildBufferedNotSubmittedError(error instanceof Error ? error.message : String(error))
+        : error
     }
 
     await new Promise((resolve) => setTimeout(resolve, AGENT_PROMPT_SUBMIT_DELAY_MS))
+    let submitBytes = 0
     try {
-      await options.beforeWrite?.(ptyId)
+      const outcome = await submitAgentPromptWithConfirmation({
+        wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        readReadiness: () => this.readAgentPromptReadiness(handle),
+        writeSubmit: async () => {
+          try {
+            await options.beforeWrite?.(ptyId)
+          } catch (error) {
+            throw options.suffixFailureError ? new Error(options.suffixFailureError) : error
+          }
+          const wrote = this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT) ?? false
+          if (!wrote) {
+            throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
+          }
+          submitBytes = Buffer.byteLength(AGENT_PROMPT_SUBMIT, 'utf8')
+        }
+      })
+      return { outcome, submitBytes }
     } catch (error) {
-      if (options.suffixFailureError) {
-        throw new Error(options.suffixFailureError)
-      }
-      throw error
+      // Why: submitAgentPromptWithConfirmation already throws the bare marker
+      // string on timeout — do not double-wrap it.
+      const message = error instanceof Error ? error.message : String(error)
+      throw message.includes(AGENT_PROMPT_BUFFERED_NOT_SUBMITTED)
+        ? error
+        : buildBufferedNotSubmittedError(message)
     }
-    const suffixWrote = this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT) ?? false
-    if (!suffixWrote) {
-      throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
+  }
+
+  private async readAgentPromptReadiness(handle: string): Promise<AgentPromptReadiness | null> {
+    let status: RuntimeTerminalAgentStatus
+    try {
+      status = await this.getTerminalAgentStatus(handle)
+    } catch {
+      // Why: an unreadable status is not proof of unreadiness; degrade to the
+      // historical blind write and let the PTY write itself reject a dead terminal.
+      return null
+    }
+    // Why: an absent status is a missing signal regardless of isRunningAgent —
+    // e.g. a detected Cursor Agent pane whose status Orca cannot read must
+    // degrade to a single blind write, not retry against a value that can
+    // never confirm.
+    if (status.status === null) {
+      return null
+    }
+    return {
+      isRunningAgent: status.isRunningAgent,
+      status: status.status,
+      explicitUpdatedAt: this.getFreshExplicitAgentStatusForHandle(handle)?.updatedAt ?? null
     }
   }
 
@@ -19541,10 +19459,25 @@ export class OrcaRuntimeService {
         } catch {
           continue
         }
+        const repoIcon =
+          upstream && repo.repoIcon?.type === 'image' && repo.repoIcon.source === 'github'
+            ? await detectGitHubAvatarIcon(repo.path, null, upstream)
+            : null
+        // Why: settings can change the repo while the probes above are pending, so
+        // re-read it — a stale snapshot must not clobber a user-chosen icon or an
+        // upstream another path already resolved.
+        const current = store.getRepos().find((candidate) => candidate.id === repo.id)
+        if (!current || current.upstream !== undefined) {
+          continue
+        }
         const updates: Partial<Repo> = { upstream: upstream ?? null }
         // Only migrate the auto-detected origin avatar; never touch a chosen icon.
-        if (upstream && repo.repoIcon?.type === 'image' && repo.repoIcon.source === 'github') {
-          updates.repoIcon = githubAvatarIcon(upstream)
+        if (
+          repoIcon &&
+          current.repoIcon?.type === 'image' &&
+          current.repoIcon.source === 'github'
+        ) {
+          updates.repoIcon = repoIcon
         }
         store.updateRepo(repo.id, updates)
         changed = true
@@ -20276,6 +20209,25 @@ export class OrcaRuntimeService {
       prNumber,
       { ...options, prRepo: prRepo ?? null },
       repo.connectionId ?? null,
+      ...this.getLocalGitExecutionOptionArgs(repo)
+    )
+  }
+
+  async setRepoPRCommentReaction(
+    repoSelector: string,
+    reactionSubjectId: string,
+    content: GitHubReactionContent,
+    reacted: boolean,
+    prRepo?: GitHubOwnerRepo | null
+  ): Promise<Awaited<ReturnType<typeof setPRCommentReaction>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return setPRCommentReaction(
+      repo.path,
+      reactionSubjectId,
+      content,
+      reacted,
+      repo.connectionId ?? null,
+      prRepo ?? null,
       ...this.getLocalGitExecutionOptionArgs(repo)
     )
   }
@@ -21175,7 +21127,9 @@ export class OrcaRuntimeService {
         {
           worktreeId: worktree.id,
           repoId: worktree.repoId,
-          projectName: repo.displayName,
+          // Why: an empty project name slugifies to the generic "workspace",
+          // so every unnamed repo's primary worktree would share one label.
+          projectName: repo.displayName || basename(repo.path),
           worktreeName: worktree.displayName,
           worktreePath: worktree.git.path
         }
@@ -23737,17 +23691,21 @@ export class OrcaRuntimeService {
     // Why: fetch failures are non-fatal; we proceed with whatever the
     // last-known remote ref points at. `fetchRemoteWithCache` never throws.
     await this.fetchRemoteWithCache(repo.path, remote, localWorktreeGitOptions)
-    const drift = getRemoteDrift(wt.path, 'HEAD', base, localGitExecOptions)
+    const drift = await getRemoteDrift(wt.path, 'HEAD', base, localGitExecOptions)
     if (!drift) {
       return null
     }
-    const recentSubjects = getRecentDriftSubjects(
-      wt.path,
-      'HEAD',
-      base,
-      DRIFT_PROBE_SUBJECT_LIMIT,
-      localGitExecOptions
-    )
+    // Why: behind=0 proves HEAD..base is empty, so git log cannot add subjects.
+    const recentSubjects =
+      drift.behind > 0
+        ? await getRecentDriftSubjects(
+            wt.path,
+            'HEAD',
+            base,
+            DRIFT_PROBE_SUBJECT_LIMIT,
+            localGitExecOptions
+          )
+        : []
     return { base, behind: drift.behind, recentSubjects }
   }
 
@@ -35447,269 +35405,6 @@ function withTimeoutResult<T>(
       ok: false
     }
   )
-}
-
-export function appendRecentPtyPathCandidates(
-  previous: string[] | undefined,
-  data: string
-): string[] {
-  const extractedCandidates = extractTerminalOutputPathCandidates(data)
-  if (extractedCandidates.length === 0) {
-    // Why: pathless output is the hot path; reuse immutable history so each chunk doesn't clone and byte-scan up to 1,024 old candidates.
-    return previous ?? []
-  }
-  const next = previous ? previous.slice() : []
-  for (const candidate of extractedCandidates) {
-    if (Buffer.byteLength(candidate, 'utf8') > RECENT_PTY_PATH_CANDIDATE_MAX_BYTES) {
-      continue
-    }
-    next.push(candidate)
-  }
-  return pruneRecentPtyPathCandidates(next)
-}
-
-export function recentTerminalPathCandidatesIncludePath(
-  recentCandidates: readonly string[],
-  pathText: string,
-  absolutePath: string
-): boolean {
-  const candidates = new Set(
-    [
-      pathText,
-      absolutePath,
-      ...wslTerminalOutputAliases(pathText),
-      ...wslTerminalOutputAliases(absolutePath)
-    ]
-      .map((candidate) => candidate.trim())
-      .filter((candidate) => candidate.length > 0)
-  )
-  for (const recent of recentCandidates) {
-    if (candidates.has(recent)) {
-      return true
-    }
-  }
-  return false
-}
-
-function pruneRecentPtyPathCandidates(candidates: string[]): string[] {
-  const countBounded =
-    candidates.length > RECENT_PTY_PATH_CANDIDATE_LIMIT
-      ? candidates.slice(-RECENT_PTY_PATH_CANDIDATE_LIMIT)
-      : candidates
-  let totalBytes = 0
-  let startIndex = countBounded.length
-  for (let index = countBounded.length - 1; index >= 0; index -= 1) {
-    const nextTotal = totalBytes + Buffer.byteLength(countBounded[index]!, 'utf8')
-    if (nextTotal > RECENT_PTY_PATH_CANDIDATE_TOTAL_BYTES) {
-      break
-    }
-    totalBytes = nextTotal
-    startIndex = index
-  }
-  return startIndex === 0 ? countBounded : countBounded.slice(startIndex)
-}
-
-export function recentTerminalOutputIncludesPath(
-  recentOutput: string,
-  pathText: string,
-  absolutePath: string
-): boolean {
-  const candidates = new Set(
-    [pathText, absolutePath]
-      .map((candidate) => candidate.trim())
-      .filter((candidate) => candidate.length > 0)
-  )
-  if (candidates.size === 0) {
-    return false
-  }
-  for (const candidate of candidates) {
-    if (outputContainsPathCandidate(recentOutput, candidate)) {
-      return true
-    }
-  }
-  const decodedOutput = decodeTerminalOutputPercentEscapes(recentOutput)
-  if (decodedOutput !== recentOutput) {
-    for (const candidate of candidates) {
-      if (outputContainsPathCandidate(decodedOutput, candidate)) {
-        return true
-      }
-    }
-  }
-  return false
-}
-
-function outputContainsPathCandidate(output: string, candidate: string): boolean {
-  let start = output.indexOf(candidate)
-  while (start !== -1) {
-    const end = start + candidate.length
-    if (isPathCandidateStartBoundary(output, start) && isPathCandidateEndBoundary(output, end)) {
-      return true
-    }
-    start = output.indexOf(candidate, start + 1)
-  }
-  return false
-}
-
-function isPathCandidateStartBoundary(output: string, start: number): boolean {
-  if (start === 0) {
-    return true
-  }
-  if (output.slice(0, start).endsWith('file://')) {
-    return true
-  }
-  if (
-    /^[A-Za-z]:[\\/]/.test(output.slice(start)) &&
-    /file:\/\/(?:localhost|127\.0\.0\.1|\[?::1\]?)?\/$/i.test(output.slice(0, start))
-  ) {
-    return true
-  }
-  if (/file:\/\/(?:localhost|127\.0\.0\.1|\[?::1\]?)$/i.test(output.slice(0, start))) {
-    return true
-  }
-  return !isPathCandidateContinuationChar(output[start - 1]!)
-}
-
-function isPathCandidateEndBoundary(output: string, end: number): boolean {
-  const next = output[end]
-  if (!next) {
-    return true
-  }
-  if (next === ':' && /^\d+(?::\d+)?(?:\D|$)/.test(output.slice(end + 1))) {
-    return true
-  }
-  return !isPathCandidateContinuationChar(next)
-}
-
-function isPathCandidateContinuationChar(char: string): boolean {
-  return /[A-Za-z0-9._~/%+@\\()[\]-]/.test(char)
-}
-
-function decodeTerminalOutputPercentEscapes(value: string): string {
-  return value.replace(/(?:%[0-9a-f]{2})+/gi, (match) => {
-    try {
-      return decodeURIComponent(match)
-    } catch {
-      return match
-    }
-  })
-}
-
-// Why: the extension regex backtracks quadratically on the PTY hot path; candidates can't cross a newline, so scan per line and skip over-long lines (dropped anyway).
-function extractTerminalOutputPathCandidates(data: string): string[] {
-  const candidates: string[] = []
-  const add = (value: string): void => {
-    const candidate = trimTerminalOutputPathCandidate(value)
-    if (candidate.length > 0) {
-      candidates.push(candidate)
-      const drivePath = normalizeTerminalOutputFileUriDrivePath(candidate)
-      if (drivePath) {
-        candidates.push(drivePath)
-      }
-    }
-  }
-  for (const line of data.split(/[\r\n]+/)) {
-    if (line.length === 0 || line.length > RECENT_PTY_PATH_CANDIDATE_MAX_BYTES) {
-      continue
-    }
-    collectTerminalOutputLinePathCandidates(line, add)
-  }
-  return candidates
-}
-
-function collectTerminalOutputLinePathCandidates(line: string, add: (value: string) => void): void {
-  for (const match of line.matchAll(/file:\/\/([^/\s]*)(\/[^\s\x1b"'<>)]*)/gi)) {
-    const authority = match[1] ?? ''
-    const uriPath = match[2]
-    if (uriPath) {
-      const decoded = decodeTerminalOutputPercentEscapes(uriPath)
-      add(isTerminalOutputLoopbackAuthority(authority) ? decoded : `//${authority}${decoded}`)
-    }
-  }
-  for (const match of line.matchAll(
-    /(?:\/(?:tmp|private\/tmp)\/|[A-Za-z]:[\\/])[^\r\n\x1b"'<>]+/g
-  )) {
-    if (isInsideNonLocalFileUri(line, match.index)) {
-      continue
-    }
-    add(match[0])
-  }
-  for (const match of line.matchAll(
-    /\/[^\r\n\x1b"'<>]*\.[A-Za-z0-9_+-]+(?:[#:\s][^\r\n\x1b"'<>]*)?/g
-  )) {
-    if (isInsideNonLocalFileUri(line, match.index)) {
-      continue
-    }
-    add(match[0])
-  }
-}
-
-function normalizeTerminalOutputFileUriDrivePath(candidate: string): string | null {
-  return /^\/[A-Za-z]:[\\/]/.test(candidate) ? candidate.slice(1) : null
-}
-
-function trimTerminalOutputPathCandidate(value: string): string {
-  let candidate = value.trim().replace(/[),;.]+$/g, '')
-  if (Buffer.byteLength(candidate, 'utf8') > RECENT_PTY_PATH_CANDIDATE_MAX_BYTES) {
-    return ''
-  }
-  let selected: string | null = null
-  for (const match of candidate.matchAll(
-    /.+?\.[A-Za-z0-9_+-]+(?:#L\d+(?:C\d+)?|(?::\d+)?(?::\d+)?)?(?=\s+|$)/gi
-  )) {
-    const end = match.index + match[0].length
-    const text = candidate.slice(0, end)
-    if (countTerminalOutputPathStarts(text) > 1) {
-      continue
-    }
-    // Same as the tap parsers: a line-end token extends the candidate only when the added segment is path-like, so trailing prose isn't swallowed.
-    if (
-      end < candidate.length ||
-      selected === null ||
-      /[\\/]/.test(candidate.slice(selected.length, end))
-    ) {
-      selected = text
-    }
-  }
-  return trimTerminalOutputPathLocator(selected ?? candidate)
-}
-
-function isTerminalOutputLoopbackAuthority(authority: string): boolean {
-  const normalized = authority.toLowerCase()
-  return (
-    normalized === '' ||
-    normalized === 'localhost' ||
-    normalized === '127.0.0.1' ||
-    normalized === '::1' ||
-    normalized === '[::1]'
-  )
-}
-
-function isInsideNonLocalFileUri(output: string, pathStart: number): boolean {
-  const prefix = output.slice(0, pathStart)
-  const match = /file:\/\/([^/\s]*)$/i.exec(prefix)
-  return !!match && !isTerminalOutputLoopbackAuthority(match[1] ?? '')
-}
-
-function countTerminalOutputPathStarts(value: string): number {
-  let count = 0
-  for (const match of value.matchAll(/(?:^|\s)(?:~[\\/]|[\\/]|\.{1,2}[\\/]|[A-Za-z]:[\\/])/g)) {
-    void match
-    count += 1
-  }
-  return count
-}
-
-function trimTerminalOutputPathLocator(value: string): string {
-  return value.replace(/#L\d+(?:C\d+)?$/i, '').replace(/:\d+(?::\d+)?$/, '')
-}
-
-function wslTerminalOutputAliases(value: string): string[] {
-  const match = /^\\\\wsl(?:\.localhost|\$)\\[^\\]+(\\.*)$/i.exec(value)
-  if (!match) {
-    return []
-  }
-  const linuxPath = match[1]!.replace(/\\/g, '/')
-  return linuxPath.startsWith('/') ? [linuxPath] : [`/${linuxPath}`]
 }
 
 export function buildPreview(lines: string[], partialLine: string): string {

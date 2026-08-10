@@ -4,6 +4,7 @@
 // flags always win while present, and a bind failure surfaces as status
 // instead of crashing the app a remote client just reconfigured.
 import { randomBytes } from 'node:crypto'
+import { isValidPreviewToken } from '../../shared/preview-proxy-token'
 import type { GlobalSettings, PreviewProxyStatus } from '../../shared/types'
 import type { PreviewRouteResolver } from './preview-route-resolver'
 import { WorktreePreviewProxy, type PreviewProxyAuthMode } from './worktree-preview-proxy'
@@ -126,6 +127,17 @@ export class PreviewProxyReconciler {
         running: false,
         source,
         error: error instanceof Error ? error.message : String(error)
+      }
+      return
+    }
+    // Why: a token outside the cookie-safe alphabet (persisted before this
+    // validation existed, or written by an older client) would truncate the
+    // auth cookie silently; surface it as status like a bad domain.
+    if (desired.token && !isValidPreviewToken(desired.token)) {
+      this.currentStatus = {
+        running: false,
+        source,
+        error: 'Preview token must use 1-512 characters from A-Za-z0-9 . _ ~ -'
       }
       return
     }

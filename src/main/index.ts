@@ -90,6 +90,7 @@ import {
 } from './ports/preview-proxy-reconciler'
 import { createPreviewRouteResolver } from './ports/preview-route-resolver'
 import type { PreviewWorktreeDescriptor } from './ports/worktree-preview-routes'
+import { isValidPreviewToken, resolvePreviewToken } from '../shared/preview-proxy-token'
 import { reserveServeStdoutForReadiness } from './server/serve-stdout-boundary'
 import { DesktopRelayService } from './runtime/relay/desktop-relay-service'
 import type { RelayBrokerStatus } from './runtime/relay/relay-session-broker'
@@ -273,8 +274,10 @@ import { initializeBrowserSessionsForApp } from './browser/browser-session-start
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { AutomationService } from './automations/service'
 import { createHeadlessAutomationOutputSnapshotBuffer } from './automations/headless-dispatch'
+import { waitForHeadlessAgentLaunch } from './automations/headless-launch-observer'
 import { buildHeadlessAutomationWorktreeCreateArgs } from './automations/headless-workspace-create'
 import { AgentAwakeService } from './agent-awake-service'
+import { normalizeComputerAwakeMode } from '../shared/computer-awake-mode'
 import { registerSystemResumeBroadcast } from './system-resume-broadcast'
 import { settleTeardownWithinDeadline } from './quit-teardown-deadline'
 import { quitTeardownStartGate } from './quit-teardown-start-gate'
@@ -1848,12 +1851,17 @@ function getServePreviewOptions(flags: {
   if (rawAuth && rawAuth !== 'open' && rawAuth !== 'token') {
     throw new Error(`Invalid --preview-auth value: ${rawAuth} (use open or token)`)
   }
+  const resolvedToken = resolvePreviewToken(token, process.env.ORCA_PREVIEW_TOKEN)
+  if (resolvedToken && !isValidPreviewToken(resolvedToken)) {
+    const source = token ? '--preview-token' : 'ORCA_PREVIEW_TOKEN'
+    throw new Error(`Invalid ${source} value: use 1-512 characters from A-Za-z0-9 . _ ~ -`)
+  }
   return {
     port,
     bindHost: bindHost ?? '127.0.0.1',
     domain,
     auth: rawAuth === 'open' || rawAuth === 'token' ? rawAuth : null,
-    token
+    token: resolvedToken
   }
 }
 
@@ -1869,6 +1877,13 @@ function initPreviewProxyReconciler(runtimeService: {
   setPreviewProxyStatusProvider(provider: () => PreviewProxyStatus): void
 }): void {
   if (previewProxyReconciler || !store) {
+    // Why: without the reconciler the IPC channel would not exist at all, and
+    // every renderer status call would reject with "No handler registered"
+    // instead of reporting the proxy as simply not running.
+    if (!previewProxyReconciler) {
+      ipcMain.removeHandler('previewProxy:status')
+      ipcMain.handle('previewProxy:status', () => ({ running: false, source: null }))
+    }
     return
   }
   const settingsStore = store
@@ -1881,18 +1896,30 @@ function initPreviewProxyReconciler(runtimeService: {
   runtimeService.setPreviewProxyStatusProvider(() => reconciler.status())
   ipcMain.removeHandler('previewProxy:status')
   ipcMain.handle('previewProxy:status', () => reconciler.status())
+  const applySettings = (): void => {
+    // Why: reconcile rejects if tearing down a live listener fails; swallowing
+    // it with a bare `void` would surface as an unhandled rejection in main.
+    reconciler.applySettings(settingsStore.getSettings()).catch((error: unknown) => {
+      console.error('[preview-proxy] failed to apply settings', error)
+    })
+  }
   settingsStore.onSettingsChanged((updates) => {
     if ('previewProxy' in updates) {
-      void reconciler.applySettings(settingsStore.getSettings())
+      applySettings()
     }
   })
-  void reconciler.applySettings(settingsStore.getSettings())
+  applySettings()
 }
 
 async function startServePreviewProxy(options: ServeOptions): Promise<void> {
   const preview = options.preview
-  if (!preview || !previewProxyReconciler) {
+  if (!preview) {
     return
+  }
+  if (!previewProxyReconciler) {
+    // Why: the operator asked for a preview listener on the command line;
+    // reporting serve ready without one would look like a silent success.
+    throw new Error('Preview proxy failed to start: the reconciler was never initialized.')
   }
   // Why: a loopback bind is only reachable through a local reverse proxy the
   // operator already trusts; a wide bind is one LAN scan away from every
@@ -2331,7 +2358,12 @@ void app.whenReady().then(async () => {
   })
   unsubscribeSystemResumeBroadcast = registerSystemResumeBroadcast()
   agentAwakeService = new AgentAwakeService()
-  agentAwakeService.setEnabled(store.getSettings().keepComputerAwakeWhileAgentsRun)
+  agentAwakeService.setMode(
+    normalizeComputerAwakeMode(
+      store.getSettings().computerAwakeMode,
+      store.getSettings().keepComputerAwakeWhileAgentsRun
+    )
+  )
   // Why: start from empty — disk-hydrated status rows are UI continuity only; only this runtime's hook events keep the computer awake.
   agentAwakeService.setStatuses([])
   const collectChangedProviderSessionWorktrees = createHookProviderSessionInvalidator()
@@ -2635,6 +2667,7 @@ void app.whenReady().then(async () => {
           let terminalPtyId: string | null = null
           let workspaceId: string
           let workspaceDisplayName: string | null = null
+          const launchStartedAt = Date.now()
 
           if (automation.workspaceMode === 'new_per_run') {
             const created = await runtimeService.createManagedWorktree({
@@ -2708,6 +2741,37 @@ void app.whenReady().then(async () => {
             terminalSessionId,
             terminalPaneKey,
             terminalPtyId,
+            launchReady:
+              automation.agentId === 'codex'
+                ? !terminalPaneKey || !isAgentStatusHooksEnabled(store?.getSettings())
+                  ? Promise.resolve()
+                  : (launchDeadlineAt) =>
+                      waitForHeadlessAgentLaunch({
+                        paneKey: terminalPaneKey,
+                        agentType: automation.agentId,
+                        launchedAt: launchStartedAt,
+                        deadlineAt: launchDeadlineAt,
+                        getStatusSnapshotForPane: (paneKey) =>
+                          agentHookServer.getStatusSnapshotForPane(paneKey)
+                      })
+                : undefined,
+            cleanup: async () => {
+              await runtimeService.closeTerminal(terminalHandle).catch((error) => {
+                console.warn('[automations] failed to close headless launch terminal:', error)
+              })
+              if (automation.workspaceMode === 'new_per_run') {
+                // Why: a surviving per-run worktree is the user's to reclaim, so name it.
+                await runtimeService
+                  .removeManagedWorktree(`id:${workspaceId}`, true, false)
+                  .catch((error) => {
+                    console.warn(
+                      '[automations] failed to remove per-run worktree after launch failure:',
+                      workspaceId,
+                      error
+                    )
+                  })
+              }
+            },
             completion
           }
         }

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { OrchestrationDb } from './db'
 import { reconcileLifecycleMessage } from './lifecycle-reconciliation'
+import { buildBufferedNotSubmittedError } from '../../../shared/agent-prompt-submission'
 import {
   Coordinator,
   DISPATCH_STALE_THRESHOLD,
@@ -358,6 +359,28 @@ describe('Coordinator', () => {
     }
 
     const task = db.createTask({ spec: 'cannot dispatch' })
+    const coordinator = new Coordinator(db, runtime, {
+      spec: 'go',
+      coordinatorHandle: 'coord',
+      pollIntervalMs: 10
+    })
+
+    const result = await coordinator.run()
+
+    expect(result.status).toBe('failed')
+    expect(result.failedTasks).toContain(task.id)
+    expect(db.getTask(task.id)?.status).toBe('failed')
+  })
+
+  it('fails the dispatch when the prompt is buffered but never submitted', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = createMockRuntime()
+    runtime.terminals = [{ handle: 'term_a', worktreeId: 'wt1', connected: true, writable: true }]
+    runtime.sendTerminalAgentPrompt = async () => {
+      throw buildBufferedNotSubmittedError('idle')
+    }
+
+    const task = db.createTask({ spec: 'buffered but unsubmitted' })
     const coordinator = new Coordinator(db, runtime, {
       spec: 'go',
       coordinatorHandle: 'coord',

@@ -78,6 +78,7 @@ describe('createPreviewRouteResolver', () => {
     const resolve = createPreviewRouteResolver({
       descriptors: async () => [descriptor],
       ttlMs: 1_000,
+      freshMinIntervalMs: 500,
       now: () => now
     })
 
@@ -85,12 +86,35 @@ describe('createPreviewRouteResolver', () => {
     await resolve()
     expect(scanWorkspacePortProbesMock).toHaveBeenCalledTimes(1)
 
+    now = 600
     await resolve({ fresh: true })
     expect(scanWorkspacePortProbesMock).toHaveBeenCalledTimes(2)
 
     now = 2_000
     await resolve()
     expect(scanWorkspacePortProbesMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('rate-limits fresh rescans right after a scan completed', async () => {
+    scanWorkspacePortProbesMock.mockResolvedValue(scanWith([{ port: 3000 }]))
+    let now = 0
+    const resolve = createPreviewRouteResolver({
+      descriptors: async () => [descriptor],
+      ttlMs: 1_000,
+      freshMinIntervalMs: 500,
+      now: () => now
+    })
+
+    await resolve()
+    // A miss-flood forcing fresh scans reuses the just-built index…
+    now = 300
+    await resolve({ fresh: true })
+    expect(scanWorkspacePortProbesMock).toHaveBeenCalledTimes(1)
+
+    // …but a fresh request past the interval still rescans inside the TTL.
+    now = 600
+    await resolve({ fresh: true })
+    expect(scanWorkspacePortProbesMock).toHaveBeenCalledTimes(2)
   })
 
   it('lists a worktree with no listening ports so labels still resolve', async () => {

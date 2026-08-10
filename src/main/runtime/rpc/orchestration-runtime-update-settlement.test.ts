@@ -368,7 +368,10 @@ describe('orchestration runtime update settlement', () => {
     )
 
     expect(resultOf(response)).toMatchObject({
-      message: { type: 'status', body: WORK_BYTES.toString('utf8') }
+      message: { type: 'status', body: WORK_BYTES.toString('utf8') },
+      // Why: the pre-update coordinator handle has no live reader, so the receipt says so
+      // rather than refusing mail the adopted Run is meant to retain (#13363).
+      warnings: [expect.objectContaining({ code: 'no_live_terminal' })]
     })
     expect(harness.db.getTask(harness.taskId)).toMatchObject({ status: 'dispatched' })
     expect(harness.db.getDispatchContextById(harness.dispatchId)).toMatchObject({

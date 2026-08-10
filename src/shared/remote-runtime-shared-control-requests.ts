@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto'
 import { serializeRemoteRuntimeRpcRequest } from './remote-runtime-memory-limits'
 import {
   prepareRemoteRuntimeRequest,
-  releaseRemoteRuntimePreparedRequest,
   type RemoteRuntimePreparedRequest
 } from './remote-runtime-prepared-request-admission'
 import { remoteRuntimeTimeoutError } from './remote-runtime-request-frames'
@@ -22,12 +21,16 @@ export function requestSharedControl<TResult>(args: {
   ensureReady: () => Promise<void>
   send: (requestId: string) => void
   retireRequestId?: (requestId: string) => void
+  signal?: AbortSignal
   // Why: default off — ordinary short RPCs keep an absolute deadline. Only
   // long-polls routed through this path opt in so keepalives extend them.
   refreshTimeoutOnKeepalive?: boolean
 }): Promise<RuntimeRpcResponse<TResult>> {
   const { ensureReady, pendingRequests, send } = args
   const requestId = randomUUID()
+  if (args.signal?.aborted) {
+    return Promise.reject(createSharedControlRequestAbortError())
+  }
   let preparedRequest: RemoteRuntimePreparedRequest
   try {
     preparedRequest = prepareRemoteRuntimeRequest(pendingRequests, () =>
@@ -43,33 +46,58 @@ export function requestSharedControl<TResult>(args: {
   }
   return new Promise<RuntimeRpcResponse<TResult>>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      const pending = pendingRequests.get(requestId)
-      if (!pending) {
+      if (!pendingRequests.has(requestId)) {
         return
       }
-      pendingRequests.delete(requestId)
-      releaseRemoteRuntimePreparedRequest(pending)
       args.retireRequestId?.(requestId)
       // Why: one stalled method does not prove the shared socket is dead;
       // socket liveness owns connection-wide teardown so other RPCs survive.
-      pending.reject(remoteRuntimeTimeoutError())
+      rejectSharedControlPendingRequest(pendingRequests, requestId, remoteRuntimeTimeoutError())
     }, args.timeoutMs)
-    pendingRequests.set(requestId, {
+    const pending: SharedControlPendingRequest<unknown> = {
       method: args.method.slice(0, MAX_RETAINED_METHOD_CHARS),
       resolve: resolve as (response: RuntimeRpcResponse<unknown>) => void,
       reject,
       timeout,
       preparedRequest,
       refreshTimeoutOnKeepalive: args.refreshTimeoutOnKeepalive ?? false
-    })
-    void ensureReady().then(
-      () => send(requestId),
-      (error) =>
+    }
+    pendingRequests.set(requestId, pending)
+    if (args.signal) {
+      const signal = args.signal
+      const abort = (): void => {
+        if (!pendingRequests.has(requestId)) {
+          return
+        }
+        args.retireRequestId?.(requestId)
         rejectSharedControlPendingRequest(
           pendingRequests,
           requestId,
-          toRemoteRuntimeClientError(error)
+          createSharedControlRequestAbortError()
         )
-    )
+      }
+      pending.releaseCancellation = () => signal.removeEventListener('abort', abort)
+      signal.addEventListener('abort', abort, { once: true })
+      if (signal.aborted) {
+        abort()
+      }
+    }
+    if (pendingRequests.has(requestId)) {
+      void ensureReady().then(
+        () => send(requestId),
+        (error) =>
+          rejectSharedControlPendingRequest(
+            pendingRequests,
+            requestId,
+            toRemoteRuntimeClientError(error)
+          )
+      )
+    }
   })
+}
+
+function createSharedControlRequestAbortError(): Error {
+  const error = new Error('Remote runtime request was cancelled.')
+  error.name = 'AbortError'
+  return error
 }

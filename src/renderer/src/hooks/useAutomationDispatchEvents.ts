@@ -188,7 +188,11 @@ export function useAutomationDispatchEvents(): void {
               }
             }
             const sshStatus = sshOwnerEnvironmentId
-              ? selectRuntimeAwareSshStatus(useAppStore.getState(), sshOwnerEnvironmentId, sshTargetId)
+              ? selectRuntimeAwareSshStatus(
+                  useAppStore.getState(),
+                  sshOwnerEnvironmentId,
+                  sshTargetId
+                )
               : (await window.api.ssh.getState({ targetId: sshTargetId }))?.status
             if (sshStatus !== 'connected') {
               try {
@@ -326,8 +330,8 @@ export function useAutomationDispatchEvents(): void {
             )
           let dispatchMarked = false
           let pendingExitCode: number | null = null
-          let pendingDone = false
-          let completionMarked = false
+          let pendingDone = false,
+            completionMarked = false
           let unsubscribeAgentStatus = (): void => {}
           let unsubscribeSessionObserver = (): void => {}
           let releaseReuseDispatchTab = (): void => {}
@@ -579,9 +583,9 @@ export function useAutomationDispatchEvents(): void {
             throw new Error('Unable to build an agent launch plan.')
           }
           terminalOwnership = result.terminalOwnership
+          unsubscribeSessionObserver = result.disposeRunObservation
           if (automation.reuseSession) {
-            // Why: the first fresh launch is the seed for later reuse and must
-            // survive completion under the same policy as an already-reused tab.
+            // Why: a fresh launch seeds reuse and must survive completion like an already-reused tab.
             releaseTerminalOwnership()
           }
           const launchedTabId = result.tabId

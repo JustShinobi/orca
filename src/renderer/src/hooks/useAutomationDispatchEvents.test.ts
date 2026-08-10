@@ -11,6 +11,7 @@ const mockOnDispatchRequested = vi.fn()
 const mockRendererReady = vi.fn()
 const mockFinalizeTerminalOwnership = vi.fn()
 const mockReleaseTerminalOwnership = vi.fn()
+const mockDisposeRunObservation = vi.fn()
 const mockSshNeedsPassphrasePrompt = vi.fn()
 const mockSshGetState = vi.fn()
 const mockSshConnect = vi.fn()
@@ -180,6 +181,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
       paneKey: 'agent-tab:7c6fb4e5-3bf1-4ff4-8259-03f7ae81c40d',
       ptyId: 'agent-pty',
       startupPlan: {},
+      disposeRunObservation: mockDisposeRunObservation,
       terminalOwnership: {
         finalize: mockFinalizeTerminalOwnership,
         release: mockReleaseTerminalOwnership
@@ -222,7 +224,12 @@ describe('useAutomationDispatchEvents setup launch', () => {
     )
     mockLaunchAgentBackgroundSession.mockImplementation(async () => {
       order.push('agent')
-      return { tabId: 'agent-tab', ptyId: 'agent-pty', startupPlan: {} }
+      return {
+        tabId: 'agent-tab',
+        ptyId: 'agent-pty',
+        startupPlan: {},
+        disposeRunObservation: mockDisposeRunObservation
+      }
     })
 
     await registerAndDispatch()
@@ -523,6 +530,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
         paneKey: 'agent-tab:7c6fb4e5-3bf1-4ff4-8259-03f7ae81c40d',
         ptyId: 'agent-pty',
         startupPlan: {},
+        disposeRunObservation: mockDisposeRunObservation,
         terminalOwnership: {
           finalize: mockFinalizeTerminalOwnership,
           release: mockReleaseTerminalOwnership
@@ -541,6 +549,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
       'clear-terminal-identity'
     ])
     expect(mockReleaseTerminalOwnership).not.toHaveBeenCalled()
+    expect(mockDisposeRunObservation).toHaveBeenCalledOnce()
     // Why: the retired terminal is gone; the run must drop its pane/pty pointers
     // so "View run" resolves to the workspace/snapshot, not an unavailable terminal.
     expect(mockMarkDispatchResult).toHaveBeenLastCalledWith({
@@ -563,6 +572,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
         paneKey: 'agent-tab:7c6fb4e5-3bf1-4ff4-8259-03f7ae81c40d',
         ptyId: 'agent-pty',
         startupPlan: {},
+        disposeRunObservation: mockDisposeRunObservation,
         terminalOwnership: {
           finalize: mockFinalizeTerminalOwnership,
           release: mockReleaseTerminalOwnership
@@ -593,6 +603,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
         paneKey: 'agent-tab:7c6fb4e5-3bf1-4ff4-8259-03f7ae81c40d',
         ptyId: 'agent-pty',
         startupPlan: {},
+        disposeRunObservation: mockDisposeRunObservation,
         terminalOwnership: {
           finalize: mockFinalizeTerminalOwnership,
           release: mockReleaseTerminalOwnership
@@ -623,6 +634,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
         paneKey: 'agent-tab:7c6fb4e5-3bf1-4ff4-8259-03f7ae81c40d',
         ptyId: 'agent-pty',
         startupPlan: {},
+        disposeRunObservation: mockDisposeRunObservation,
         terminalOwnership: {
           finalize: mockFinalizeTerminalOwnership,
           release: mockReleaseTerminalOwnership
@@ -664,6 +676,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
         paneKey: 'agent-tab:7c6fb4e5-3bf1-4ff4-8259-03f7ae81c40d',
         ptyId: 'agent-pty',
         startupPlan: {},
+        disposeRunObservation: mockDisposeRunObservation,
         terminalOwnership: {
           finalize: mockFinalizeTerminalOwnership,
           release: mockReleaseTerminalOwnership
@@ -692,6 +705,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
         paneKey: 'agent-tab:7c6fb4e5-3bf1-4ff4-8259-03f7ae81c40d',
         ptyId: 'agent-pty',
         startupPlan: {},
+        disposeRunObservation: mockDisposeRunObservation,
         terminalOwnership: {
           finalize: mockFinalizeTerminalOwnership,
           release: mockReleaseTerminalOwnership

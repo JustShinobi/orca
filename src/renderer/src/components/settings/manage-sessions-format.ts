@@ -32,5 +32,10 @@ export function formatState(session: PtyManagementSession): string {
   if (session.shellState === 'pending') {
     return 'starting'
   }
+  // Why surfaced: the shell never proved it was reading, so any startup command this session was
+  // launched with may have gone nowhere. Reporting it beats a session that reads as healthy.
+  if (session.shellState === 'timed_out') {
+    return 'starting (unconfirmed)'
+  }
   return session.state
 }

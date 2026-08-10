@@ -34,7 +34,8 @@ import {
   addressForPortForwardEntry,
   advertisedBrowserUrlForDetectedPort,
   advertisedBrowserUrlForForwardedRow,
-  browserUrlForPortForwardEntry
+  browserUrlForPortForwardEntry,
+  previewBrowserUrlForPort
 } from '@/lib/workspace-port-urls'
 import { resolveLocalhostLabelRouteForPort } from '@/lib/workspace-port-localhost-label-selector'
 import { useMountedRef } from '@/hooks/useMountedRef'
@@ -582,7 +583,7 @@ function LocalPortRow({
 
   const processLabel = port.processName ?? (port.pid ? `PID ${port.pid}` : 'Unknown process')
   const address = addressForPort(port)
-  const previewUrl = port.kind === 'workspace' ? (port.previewUrl ?? null) : null
+  const previewUrl = previewBrowserUrlForPort(port)
   const previewHost = useMemo(() => {
     if (!previewUrl) {
       return null

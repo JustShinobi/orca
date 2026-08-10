@@ -1,0 +1,93 @@
+import {
+  AGENT_PROMPT_BUFFERED_NOT_SUBMITTED,
+  type AgentPromptSubmitOutcome
+} from '../../shared/agent-prompt-submission'
+
+export type AgentPromptReadiness = {
+  isRunningAgent: boolean
+  status: 'working' | 'permission' | 'idle' | null
+  // Why: newest explicit agent-status hook timestamp for this terminal — advances on
+  // any status change, not only turn-start. An advance while baseline was idle proves
+  // a turn began; on a working baseline it may instead be the previous turn ending.
+  explicitUpdatedAt: number | null
+}
+
+export type AgentPromptSubmitDeps = {
+  // Why: null means Orca has no status signal for this agent, not that it is unready.
+  readReadiness: () => Promise<AgentPromptReadiness | null>
+  writeSubmit: () => Promise<void>
+  wait: (ms: number) => Promise<void>
+}
+
+export const AGENT_PROMPT_SUBMIT_ATTEMPTS = 3
+export const AGENT_PROMPT_SUBMIT_CONFIRM_POLL_MS = 250
+export const AGENT_PROMPT_SUBMIT_CONFIRM_POLLS = 4
+
+export async function submitAgentPromptWithConfirmation(
+  deps: AgentPromptSubmitDeps
+): Promise<AgentPromptSubmitOutcome> {
+  const baseline = await deps.readReadiness()
+  if (!baseline) {
+    return await writeUnverified(deps)
+  }
+  // Why: an agent already mid-turn cannot produce an idle->working transition, so
+  // absence of one is not proof the Enter was swallowed — one Enter and stop, not
+  // up to 3 retries into a busy TUI.
+  if (baseline.status === 'working') {
+    return await writeUnverified(deps)
+  }
+  for (let attempt = 0; attempt < AGENT_PROMPT_SUBMIT_ATTEMPTS; attempt += 1) {
+    const readiness = attempt === 0 ? baseline : await deps.readReadiness()
+    if (!readiness) {
+      return await writeUnverified(deps)
+    }
+    if (readiness.isRunningAgent && readiness.status !== 'permission') {
+      await deps.writeSubmit()
+      if (await confirmTurnStarted(deps, baseline)) {
+        return 'confirmed'
+      }
+      continue
+    }
+    // Why: a permission prompt is not Enter-safe; wait it out instead of answering it.
+    await deps.wait(AGENT_PROMPT_SUBMIT_CONFIRM_POLL_MS * AGENT_PROMPT_SUBMIT_CONFIRM_POLLS)
+  }
+  throw new Error(AGENT_PROMPT_BUFFERED_NOT_SUBMITTED)
+}
+
+async function writeUnverified(deps: AgentPromptSubmitDeps): Promise<AgentPromptSubmitOutcome> {
+  await deps.writeSubmit()
+  return 'unverified'
+}
+
+async function confirmTurnStarted(
+  deps: AgentPromptSubmitDeps,
+  baseline: AgentPromptReadiness
+): Promise<boolean> {
+  for (let poll = 0; poll < AGENT_PROMPT_SUBMIT_CONFIRM_POLLS; poll += 1) {
+    await deps.wait(AGENT_PROMPT_SUBMIT_CONFIRM_POLL_MS)
+    const readiness = await deps.readReadiness()
+    if (!readiness) {
+      return false
+    }
+    if (readiness.status === 'working' && baseline.status !== 'working') {
+      return true
+    }
+    // Why: an agent that asks for permission right after the Enter also proves
+    // the turn started, even though it never reaches 'working'.
+    if (readiness.status === 'permission' && baseline.status !== 'permission') {
+      return true
+    }
+    // Why: a short turn can start and finish between two polls; a newer hook
+    // timestamp still proves the Enter registered — but on a working baseline the
+    // same advance may instead be the previous turn ending, so it proves nothing there.
+    if (
+      baseline.status !== 'working' &&
+      readiness.explicitUpdatedAt !== null &&
+      (baseline.explicitUpdatedAt === null ||
+        readiness.explicitUpdatedAt > baseline.explicitUpdatedAt)
+    ) {
+      return true
+    }
+  }
+  return false
+}

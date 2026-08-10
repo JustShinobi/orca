@@ -81,6 +81,7 @@ describe('runRemoteOrcaCli', () => {
       }),
       getLegacyAdoption: vi.fn(() => undefined),
       getActiveDispatchForIdentity: vi.fn(() => undefined),
+      getActiveDispatchForTerminal: vi.fn(() => undefined),
       getCurrentRunForPane: vi.fn(() => undefined),
       findActiveRemoteAttachmentForPane: vi.fn(() => undefined)
     }
@@ -95,7 +96,9 @@ describe('runRemoteOrcaCli', () => {
         liveLeafCount: 1
       }),
       getOrchestrationDb: () => db,
-      getTerminalPaneKey: () => null,
+      // Why: the recipient is a live terminal on the host; send refuses handles nothing holds.
+      getTerminalPaneKey: (handle: string) =>
+        handle === 'term_windows' ? 'tab_windows:leaf_windows' : null,
       deliverPendingMessagesForHandle: vi.fn(),
       notifyMessageArrived: vi.fn(),
       linearIssueContext: vi.fn(async (request: unknown) => ({
