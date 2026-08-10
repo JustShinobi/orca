@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { BrowserWindow, ipcMain } from 'electron'
 import type { Store } from '../persistence'
 import { advertisedUrlWatcher, type AdvertisedUrlWatcher } from '../ports/advertised-url-watcher'
@@ -112,13 +113,18 @@ function broadcastWorkspacePortAdvertisedUrlChanged(
 // stable regardless of which repo the scan request was scoped to.
 function storePreviewDescriptors(store: Store): PreviewWorktreeDescriptor[] {
   const reposById = new Map(store.getRepos().map((repo) => [repo.id, repo]))
-  return getStoreWorkspacePortProbes(store).map((probe) => ({
-    worktreeId: probe.id,
-    repoId: probe.repoId,
-    projectName: reposById.get(probe.repoId)?.displayName ?? '',
-    worktreeName: probe.displayName,
-    worktreePath: probe.path
-  }))
+  return getStoreWorkspacePortProbes(store).map((probe) => {
+    const repo = reposById.get(probe.repoId)
+    return {
+      worktreeId: probe.id,
+      repoId: probe.repoId,
+      // Why: an empty project name slugifies to the generic "workspace", so
+      // every unnamed repo's primary worktree would answer to the same label.
+      projectName: repo?.displayName || (repo ? path.basename(repo.path) : probe.displayName),
+      worktreeName: probe.displayName,
+      worktreePath: probe.path
+    }
+  })
 }
 
 function parseScanRequest(value: unknown): WorkspacePortScanRequest | undefined {

@@ -105,7 +105,7 @@ import { getGitCloneFailureMessage } from '../../shared/git-clone-failure-messag
 import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir, hostname, userInfo } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { resolveWorktreeCreateBase } from '../worktree-create-base'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree-base-ref'
@@ -21086,7 +21086,9 @@ export class OrcaRuntimeService {
         {
           worktreeId: worktree.id,
           repoId: worktree.repoId,
-          projectName: repo.displayName,
+          // Why: an empty project name slugifies to the generic "workspace",
+          // so every unnamed repo's primary worktree would share one label.
+          projectName: repo.displayName || basename(repo.path),
           worktreeName: worktree.displayName,
           worktreePath: worktree.git.path
         }

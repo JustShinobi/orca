@@ -1870,6 +1870,13 @@ function initPreviewProxyReconciler(runtimeService: {
   setPreviewProxyStatusProvider(provider: () => PreviewProxyStatus): void
 }): void {
   if (previewProxyReconciler || !store) {
+    // Why: without the reconciler the IPC channel would not exist at all, and
+    // every renderer status call would reject with "No handler registered"
+    // instead of reporting the proxy as simply not running.
+    if (!previewProxyReconciler) {
+      ipcMain.removeHandler('previewProxy:status')
+      ipcMain.handle('previewProxy:status', () => ({ running: false, source: null }))
+    }
     return
   }
   const settingsStore = store
@@ -1882,18 +1889,30 @@ function initPreviewProxyReconciler(runtimeService: {
   runtimeService.setPreviewProxyStatusProvider(() => reconciler.status())
   ipcMain.removeHandler('previewProxy:status')
   ipcMain.handle('previewProxy:status', () => reconciler.status())
+  const applySettings = (): void => {
+    // Why: reconcile rejects if tearing down a live listener fails; swallowing
+    // it with a bare `void` would surface as an unhandled rejection in main.
+    reconciler.applySettings(settingsStore.getSettings()).catch((error: unknown) => {
+      console.error('[preview-proxy] failed to apply settings', error)
+    })
+  }
   settingsStore.onSettingsChanged((updates) => {
     if ('previewProxy' in updates) {
-      void reconciler.applySettings(settingsStore.getSettings())
+      applySettings()
     }
   })
-  void reconciler.applySettings(settingsStore.getSettings())
+  applySettings()
 }
 
 async function startServePreviewProxy(options: ServeOptions): Promise<void> {
   const preview = options.preview
-  if (!preview || !previewProxyReconciler) {
+  if (!preview) {
     return
+  }
+  if (!previewProxyReconciler) {
+    // Why: the operator asked for a preview listener on the command line;
+    // reporting serve ready without one would look like a silent success.
+    throw new Error('Preview proxy failed to start: the reconciler was never initialized.')
   }
   // Why: a loopback bind is only reachable through a local reverse proxy the
   // operator already trusts; a wide bind is one LAN scan away from every

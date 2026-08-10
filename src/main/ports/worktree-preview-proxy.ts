@@ -8,7 +8,11 @@ import http, { type IncomingMessage, type Server, type ServerResponse } from 'no
 import type { Duplex } from 'node:stream'
 import { URL } from 'node:url'
 import { forwardHttpRequestToTarget, forwardUpgradeToTarget } from '../http-proxy-forwarding'
-import type { PreviewRouteEntry, PreviewRouteResolver } from './preview-route-resolver'
+import type {
+  PreviewRouteEntry,
+  PreviewRouteResolver,
+  PreviewRouteTarget
+} from './preview-route-resolver'
 import {
   buildPreviewPortUrl,
   parsePreviewHost,
@@ -93,8 +97,8 @@ export class WorktreePreviewProxy {
       respondText(response, 404, `No workspace matches preview label "${parsed.label}".`)
       return
     }
-    const targetPort = await this.resolveTargetPort(entry, parsed.port)
-    if (targetPort === null) {
+    const target = await this.resolveTarget(entry, parsed.port)
+    if (!target) {
       if (parsed.port !== null) {
         respondText(
           response,
@@ -106,16 +110,12 @@ export class WorktreePreviewProxy {
       this.respondPortIndex(response, entry)
       return
     }
-    const target = entry.ports.find((candidate) => candidate.port === targetPort)
-    if (!target) {
-      respondText(response, 404, `Port ${targetPort} is no longer listening.`)
-      return
-    }
     forwardHttpRequestToTarget({
       target: targetUrl(target.connectHost, target.port),
       request,
       response,
-      routeLabel: `${entry.label}:${target.port}`
+      routeLabel: `${entry.label}:${target.port}`,
+      stripCookies: [PREVIEW_TOKEN_COOKIE]
     })
   }
 
@@ -130,11 +130,7 @@ export class WorktreePreviewProxy {
       return
     }
     const entry = await this.resolveEntry(parsed.label)
-    const targetPort = entry ? await this.resolveTargetPort(entry, parsed.port) : null
-    const target =
-      entry && targetPort !== null
-        ? entry.ports.find((candidate) => candidate.port === targetPort)
-        : undefined
+    const target = entry ? await this.resolveTarget(entry, parsed.port) : null
     if (!target) {
       socket.destroy()
       return
@@ -143,7 +139,8 @@ export class WorktreePreviewProxy {
       target: targetUrl(target.connectHost, target.port),
       request,
       socket,
-      head
+      head,
+      stripCookies: [PREVIEW_TOKEN_COOKIE]
     })
   }
 
@@ -158,13 +155,18 @@ export class WorktreePreviewProxy {
     return freshIndex.get(label) ?? null
   }
 
-  private async resolveTargetPort(
+  /** Why: returns the target rather than a port number because the retry may
+   *  resolve against a fresher entry than the caller holds — `entry` belongs to
+   *  the resolver's cached index and must not be written through. */
+  private async resolveTarget(
     entry: PreviewRouteEntry,
     explicitPort: number | null
-  ): Promise<number | null> {
+  ): Promise<PreviewRouteTarget | null> {
     const requested = explicitPort ?? entry.primaryPort
-    if (requested !== null && entry.ports.some((candidate) => candidate.port === requested)) {
-      return requested
+    const cached =
+      requested === null ? undefined : entry.ports.find((candidate) => candidate.port === requested)
+    if (cached) {
+      return cached
     }
     // Why: dev servers start between scan ticks; retry once against a fresh scan
     // before reporting the port missing.
@@ -173,16 +175,11 @@ export class WorktreePreviewProxy {
     if (!freshEntry) {
       return null
     }
-    entry.ports = freshEntry.ports
-    entry.primaryPort = freshEntry.primaryPort
     const freshRequested = explicitPort ?? freshEntry.primaryPort
-    if (
-      freshRequested !== null &&
-      freshEntry.ports.some((candidate) => candidate.port === freshRequested)
-    ) {
-      return freshRequested
+    if (freshRequested === null) {
+      return null
     }
-    return null
+    return freshEntry.ports.find((candidate) => candidate.port === freshRequested) ?? null
   }
 
   /** Handles the response itself when the request is not allowed through. */

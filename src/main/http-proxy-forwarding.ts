@@ -15,12 +15,14 @@ export function forwardHttpRequestToTarget(options: {
   response: ServerResponse
   /** Names the route in the 502 body so failures are attributable. */
   routeLabel: string
+  /** Cookies the proxy owns; never handed to the target. */
+  stripCookies?: readonly string[]
 }): void {
   const { request, response, routeLabel } = options
   const target = targetUrlForRequest(options.target, request)
   const proxyRequest = requestForTarget(target, {
     method: request.method,
-    headers: requestHeadersForTarget(request, options.target)
+    headers: requestHeadersForTarget(request, options.target, options.stripCookies)
   })
 
   // Why: a client abort or downstream socket error must tear down the
@@ -54,12 +56,14 @@ export function forwardUpgradeToTarget(options: {
   request: IncomingMessage
   socket: Duplex
   head: Buffer
+  /** Cookies the proxy owns; never handed to the target. */
+  stripCookies?: readonly string[]
 }): void {
   const { request, socket, head } = options
   const target = targetUrlForRequest(options.target, request)
   const targetPort = Number(target.port || (target.protocol === 'https:' ? 443 : 80))
   const targetSocket = net.connect(targetPort, connectableLoopbackHost(target.hostname), () => {
-    const headers = requestHeadersForTarget(request, options.target)
+    const headers = requestHeadersForTarget(request, options.target, options.stripCookies)
     targetSocket.write(
       `${request.method ?? 'GET'} ${target.pathname}${target.search} HTTP/${request.httpVersion}\r\n`
     )
@@ -106,8 +110,28 @@ function targetUrlForRequest(target: URL, request: IncomingMessage): URL {
   return url
 }
 
-function requestHeadersForTarget(request: IncomingMessage, target: URL): http.OutgoingHttpHeaders {
+function requestHeadersForTarget(
+  request: IncomingMessage,
+  target: URL,
+  stripCookies?: readonly string[]
+): http.OutgoingHttpHeaders {
   const headers: http.OutgoingHttpHeaders = { ...request.headers }
   headers.host = target.host
+  if (stripCookies?.length && typeof headers.cookie === 'string') {
+    // Why: the proxy's own auth cookie gates every workspace behind this
+    // listener. Handing it to a dev server would let anything running in one
+    // workspace — a framework overlay, a logging middleware, a dependency —
+    // read the credential for all the others.
+    const kept = headers.cookie
+      .split(';')
+      .filter((part) => !stripCookies.includes(part.split('=')[0]?.trim() ?? ''))
+      .join('; ')
+      .trim()
+    if (kept) {
+      headers.cookie = kept
+    } else {
+      delete headers.cookie
+    }
+  }
   return headers
 }

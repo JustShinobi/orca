@@ -1,5 +1,6 @@
 import type React from 'react'
 import { useCallback, useEffect, useState } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 import type {
   GlobalSettings,
   PreviewProxySettings,
@@ -67,12 +68,19 @@ export function PreviewProxySettingsSection({
   const enabled = preview?.enabled === true
   const [draft, setDraft] = useState<PreviewProxyDraft>(() => draftFromSettings(preview))
   const [status, setStatus] = useState<PreviewProxyStatus | null>(null)
+  const [tokenRevealed, setTokenRevealed] = useState(false)
 
   const refreshStatus = useCallback(() => {
     let cancelled = false
     const timer = window.setTimeout(() => {
-      void window.api.previewProxy
-        .status()
+      // Why: a runtime that predates the preview proxy has no such preload
+      // entry; dereferencing it here would throw inside the timer, where no
+      // promise `catch` can see it.
+      const read = window.api?.previewProxy?.status
+      if (!read) {
+        return
+      }
+      void read()
         .then((next) => {
           if (!cancelled) {
             setStatus(next)
@@ -215,10 +223,35 @@ export function PreviewProxySettingsSection({
               'Token value'
             )}
           </Label>
-          <Input
-            value={draft.token}
-            onChange={(event) => setDraft({ ...draft, token: event.target.value })}
-          />
+          {/* Why: the token is a bearer credential for every workspace behind
+              the listener — it stays masked until asked for, so a shared screen
+              or a screenshot does not hand it out. */}
+          <div className="flex items-center gap-1">
+            <Input
+              type={tokenRevealed ? 'text' : 'password'}
+              value={draft.token}
+              onChange={(event) => setDraft({ ...draft, token: event.target.value })}
+            />
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label={
+                tokenRevealed
+                  ? translate(
+                      'auto.components.settings.PreviewProxySettingsSection.0f2ac1de77',
+                      'Hide token'
+                    )
+                  : translate(
+                      'auto.components.settings.PreviewProxySettingsSection.7e1b0b4b0c',
+                      'Show token'
+                    )
+              }
+              onClick={() => setTokenRevealed((value) => !value)}
+            >
+              {tokenRevealed ? <EyeOff size={14} /> : <Eye size={14} />}
+            </Button>
+          </div>
         </label>
       </div>
       <div className="flex items-center justify-between gap-3 pb-2">
@@ -256,13 +289,27 @@ export function PreviewProxySettingsSection({
         </Button>
       </div>
       {status?.running && status.auth === 'token' && status.token && !preview?.token && (
-        <p className="select-text pb-2 text-xs text-muted-foreground">
-          {translate(
-            'auto.components.settings.PreviewProxySettingsSection.d77f62edce',
-            'Generated session token: {{value0}}',
-            { value0: status.token }
-          )}
-        </p>
+        <div className="flex items-center gap-2 pb-2">
+          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+            {translate(
+              'auto.components.settings.PreviewProxySettingsSection.9a7c1f2e63',
+              'A session token was generated for this run. It is not stored in settings.'
+            )}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              void window.api.ui.writeClipboardText(status.token ?? '')
+            }}
+          >
+            {translate(
+              'auto.components.settings.PreviewProxySettingsSection.3d0a5c8b41',
+              'Copy token'
+            )}
+          </Button>
+        </div>
       )}
     </SearchableSetting>
   )

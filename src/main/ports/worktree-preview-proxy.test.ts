@@ -211,4 +211,42 @@ describe('WorktreePreviewProxy token auth', () => {
     })
     expect(response.status).toBe(200)
   })
+
+  it('never hands its own auth cookie to the workspace dev server', async () => {
+    let seenCookie: string | undefined = 'unset'
+    const upstreamPort = await startUpstream((request, response) => {
+      seenCookie = request.headers.cookie
+      response.writeHead(200)
+      response.end('ok')
+    })
+    const harness = await startTokenProxy(upstreamPort)
+
+    const response = await harness.request({
+      host: `feat--${upstreamPort}.preview.test`,
+      headers: { cookie: 'orca_preview_token=secret; app_session=keep-me' }
+    })
+
+    expect(response.status).toBe(200)
+    // The dev server keeps its own cookies and never learns the proxy's token,
+    // which gates every other workspace behind the same listener.
+    expect(seenCookie).toBe('app_session=keep-me')
+    expect(seenCookie).not.toContain('secret')
+  })
+
+  it('drops the cookie header entirely when the proxy token was its only value', async () => {
+    let hadCookieHeader = true
+    const upstreamPort = await startUpstream((request, response) => {
+      hadCookieHeader = 'cookie' in request.headers
+      response.writeHead(200)
+      response.end('ok')
+    })
+    const harness = await startTokenProxy(upstreamPort)
+
+    await harness.request({
+      host: `feat--${upstreamPort}.preview.test`,
+      headers: { cookie: 'orca_preview_token=secret' }
+    })
+
+    expect(hadCookieHeader).toBe(false)
+  })
 })

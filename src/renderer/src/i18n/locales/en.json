@@ -10549,7 +10549,10 @@
           "1d15aae5bc": "Running at {{value0}}",
           "d71f803a7d": "Anyone who can reach the listener and pass its auth mode can reach your dev servers. Keep token auth on untrusted networks.",
           "e759090f76": "Apply",
-          "d77f62edce": "Generated session token: {{value0}}"
+          "0f2ac1de77": "Hide token",
+          "7e1b0b4b0c": "Show token",
+          "9a7c1f2e63": "A session token was generated for this run. It is not stored in settings.",
+          "3d0a5c8b41": "Copy token"
         },
         "preview": {
           "proxy": {
