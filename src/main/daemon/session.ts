@@ -34,7 +34,12 @@ import type {
 import type { PtyOwnerBackend } from '../../shared/pty-owner-backend'
 import { createPtySlaveEchoProbe } from '../../shared/pty-slave-line-discipline-echo'
 
-const SHELL_READY_TIMEOUT_MS = 15_000
+export const SHELL_READY_TIMEOUT_MS = 15_000
+// Why: a cold worktree under load has been measured taking ~30s to reach its first prompt,
+// twice SHELL_READY_TIMEOUT_MS. Past that deadline queued keystrokes are released so the pane
+// stays typeable, but the startup command keeps waiting for the marker for this much longer —
+// written into a shell that is not reading yet it is swallowed and the launch is lost silently.
+export const SHELL_READY_LATE_MARKER_GRACE_MS = 30_000
 // Why: Codex skips marker-gated command delivery; this only bounds older daemon/local paths that still report shell-ready for Codex.
 export const CODEX_SHELL_READY_TIMEOUT_MS = 300
 const KILL_TIMEOUT_MS = 5_000
@@ -90,6 +95,10 @@ export type SessionOptions = {
   subprocess: SubprocessHandle
   shellReadySupported: boolean
   shellReadyTimeoutMs?: number
+  /** Extra wait for a late ready marker before the startup command is written without proof.
+   *  Defaults to 0 whenever shellReadyTimeoutMs is set: shortening the barrier is how a caller
+   *  (Codex) opts out of marker-gated delivery, and it must not inherit the longer wait. */
+  shellReadyLateMarkerGraceMs?: number
   historySeedChunks?: readonly string[]
   scrollback?: number
   wslDistro?: string
@@ -122,6 +131,9 @@ export class Session {
   private readonly onSessionExit?: (code: number) => void
   private attachedClients: AttachedClient[] = []
   private preReadyStdinQueue: string[] = []
+  private heldStartupCommand: string | null = null
+  private readonly shellReadyLateMarkerGraceMs: number
+  private shellReadyLateMarkerTimer: ReturnType<typeof setTimeout> | null = null
   private releaseStartupDeviceAttributesResponder: (() => void) | null = null
   private startupDeviceAttributesQueryFilter: StartupDeviceAttributesQueryFilter | null = null
   private shellReadyScanState: ShellReadyScanState | null = null
@@ -167,6 +179,10 @@ export class Session {
         ? undefined
         : opts.historySeedChunks.every((chunk) => this.emulator.writeSync(chunk))
 
+    this.shellReadyLateMarkerGraceMs =
+      opts.shellReadyLateMarkerGraceMs ??
+      (opts.shellReadyTimeoutMs === undefined ? SHELL_READY_LATE_MARKER_GRACE_MS : 0)
+
     if (opts.shellReadySupported) {
       this._shellState = 'pending'
       this.shellReadyScanState = createShellReadyScanState()
@@ -186,7 +202,9 @@ export class Session {
       this._shellState = 'unsupported'
     }
 
-    this.postReadyFlushGate = new PostReadyFlushGate(() => this.flushPreReadyQueue())
+    this.postReadyFlushGate = new PostReadyFlushGate(() =>
+      this.flushPreReadyQueue({ includeStartupCommand: true })
+    )
     const echoProbe = createPtySlaveEchoProbe(this.subprocess.slavePath)
     this.startupIngress = new PtyStartupIngress({
       ...(opts.startupIngress ? { intent: opts.startupIngress } : {}),
@@ -260,6 +278,22 @@ export class Session {
     }
 
     this.subprocess.write(data)
+  }
+
+  /** Delivery path for the command a session is launched with. Unlike `write`, it is not released
+   *  by the shell-ready deadline: a startup command written before the shell reads its PTY is
+   *  swallowed, and the caller is left with a healthy-looking session that never ran anything. It
+   *  waits for the ready marker instead, and the daemon logs the two outcomes that are not proof
+   *  of delivery — the grace deadline expiring, and the shell exiting while it is still held. */
+  writeStartupCommand(data: string): void {
+    if (this._state === 'exited' || this._disposed) {
+      return
+    }
+    if (this._shellState === 'pending' && this.heldStartupCommand === null) {
+      this.heldStartupCommand = data
+      return
+    }
+    this.write(data)
   }
 
   resize(cols: number, rows: number): void {
@@ -599,10 +633,8 @@ export class Session {
       clearTimeout(this.killTimer)
       this.killTimer = null
     }
-    if (this.shellReadyTimer) {
-      clearTimeout(this.shellReadyTimer)
-      this.shellReadyTimer = null
-    }
+    this.clearShellReadyTimers()
+    this.reportUndeliveredStartupCommand()
     this.shellReadyScanState = null
     this.preReadyStdinQueue = []
     this.postReadyFlushGate.clear()
@@ -649,7 +681,9 @@ export class Session {
     }
 
     let releaseStartupDeviceAttributes = false
-    if (this._shellState === 'pending' && this.shellReadyScanState) {
+    // Why the scan state, not the 'pending' state: it outlives the deadline while a held startup
+    // command waits on a late marker, and the marker bytes must be stripped whenever it does.
+    if (this.shellReadyScanState) {
       const scanned = scanForShellReady(this.shellReadyScanState, data)
       data = scanned.output
       if (scanned.matched) {
@@ -708,10 +742,8 @@ export class Session {
       clearTimeout(this.killTimer)
       this.killTimer = null
     }
-    if (this.shellReadyTimer) {
-      clearTimeout(this.shellReadyTimer)
-      this.shellReadyTimer = null
-    }
+    this.clearShellReadyTimers()
+    this.reportUndeliveredStartupCommand()
     this.postReadyFlushGate.clear()
 
     // Why: release the ptmx fd here or node-pty's _socket leaks the master fd until GC (docs/fix-pty-fd-leak.md).
@@ -759,11 +791,8 @@ export class Session {
   private transitionToReady(postMarkerBytesObserved = false): void {
     this._shellState = 'ready'
     this.shellReadyScanState = null
-    if (this.shellReadyTimer) {
-      clearTimeout(this.shellReadyTimer)
-      this.shellReadyTimer = null
-    }
-    if (this.preReadyStdinQueue.length === 0) {
+    this.clearShellReadyTimers()
+    if (this.preReadyStdinQueue.length === 0 && this.heldStartupCommand === null) {
       return
     }
     this.postReadyFlushGate.arm(postMarkerBytesObserved)
@@ -776,15 +805,71 @@ export class Session {
     }
     this._shellState = 'timed_out'
     this.releaseStartupDeviceAttributes()
-    this.releaseHeldShellReadyBytes()
-    this.flushPreReadyQueue()
+    if (this.heldStartupCommand === null || this.shellReadyLateMarkerGraceMs <= 0) {
+      this.releaseHeldShellReadyBytes()
+      this.flushPreReadyQueue({ includeStartupCommand: true })
+      return
+    }
+    // Why the queue splits here: keystrokes must go through or the pane is unusable, but the
+    // startup command has no one to notice it was dropped, so it keeps waiting. The marker scanner
+    // stays armed — a late marker is still proof the shell reads, and still has to be stripped.
+    this.flushPreReadyQueue({ includeStartupCommand: false })
+    this.shellReadyLateMarkerTimer = setTimeout(() => {
+      this.onShellReadyLateMarkerGraceExpired()
+    }, this.shellReadyLateMarkerGraceMs)
   }
 
-  private flushPreReadyQueue(): void {
+  private onShellReadyLateMarkerGraceExpired(): void {
+    this.shellReadyLateMarkerTimer = null
+    if (this._shellState !== 'timed_out' || this.heldStartupCommand === null) {
+      return
+    }
+    console.warn(
+      `[daemon/session] ${this.sessionId}: no shell-ready marker after ${
+        SHELL_READY_TIMEOUT_MS + this.shellReadyLateMarkerGraceMs
+      }ms; writing the startup command without proof the shell is reading it`
+    )
+    this.releaseHeldShellReadyBytes()
+    this.flushPreReadyQueue({ includeStartupCommand: true })
+  }
+
+  private flushPreReadyQueue(opts: { includeStartupCommand: boolean }): void {
+    const startupCommand = opts.includeStartupCommand ? this.heldStartupCommand : null
+    if (startupCommand !== null) {
+      this.heldStartupCommand = null
+    }
     const queued = this.preReadyStdinQueue
     this.preReadyStdinQueue = []
+    // Why first: the host writes it before any client input can arrive, so releasing it ahead of
+    // the queue is what preserves the order the caller asked for.
+    if (startupCommand !== null) {
+      this.subprocess.write(startupCommand)
+    }
     for (const data of queued) {
       this.subprocess.write(data)
+    }
+  }
+
+  /** The other non-delivery outcome: the session ended before the shell ever proved it was reading,
+   *  so the launch never happened. Silence here is what makes a lost session look like a healthy one. */
+  private reportUndeliveredStartupCommand(): void {
+    if (this.heldStartupCommand === null) {
+      return
+    }
+    this.heldStartupCommand = null
+    console.warn(
+      `[daemon/session] ${this.sessionId}: session ended before the shell-ready marker; its startup command was never delivered`
+    )
+  }
+
+  private clearShellReadyTimers(): void {
+    if (this.shellReadyTimer) {
+      clearTimeout(this.shellReadyTimer)
+      this.shellReadyTimer = null
+    }
+    if (this.shellReadyLateMarkerTimer) {
+      clearTimeout(this.shellReadyLateMarkerTimer)
+      this.shellReadyLateMarkerTimer = null
     }
   }
 

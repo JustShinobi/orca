@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SESSION_FORCE_KILL_RETRY_MS, Session } from './session'
+import {
+  SESSION_FORCE_KILL_RETRY_MS,
+  SHELL_READY_LATE_MARKER_GRACE_MS,
+  SHELL_READY_TIMEOUT_MS,
+  Session
+} from './session'
 import type { SessionState, ShellReadyState } from './types'
 import type { TuiAgent } from '../../shared/types'
 
@@ -103,6 +108,7 @@ describe('Session', () => {
   function createSession(opts?: {
     shellReadySupported?: boolean
     shellReadyTimeoutMs?: number
+    shellReadyLateMarkerGraceMs?: number
     cols?: number
     rows?: number
     launchAgent?: TuiAgent
@@ -125,6 +131,9 @@ describe('Session', () => {
       ...(opts?.startupIngress ? { startupIngress: opts.startupIngress } : {}),
       ...(opts?.shellReadyTimeoutMs !== undefined
         ? { shellReadyTimeoutMs: opts.shellReadyTimeoutMs }
+        : {}),
+      ...(opts?.shellReadyLateMarkerGraceMs !== undefined
+        ? { shellReadyLateMarkerGraceMs: opts.shellReadyLateMarkerGraceMs }
         : {})
     })
     return session
@@ -535,6 +544,96 @@ describe('Session', () => {
       vi.advanceTimersByTime(1)
       expect(session.shellState).toBe('timed_out' satisfies ShellReadyState)
       expect(subprocess.written).toEqual(['codex\n'])
+    })
+
+    // A startup command has no one to notice it was dropped, so it is not released by the ready
+    // deadline the way keystrokes are — it waits for the marker, and every path that ends without
+    // one says so. See SHELL_READY_LATE_MARKER_GRACE_MS.
+    describe('startup command delivery', () => {
+      let warn: ReturnType<typeof vi.spyOn>
+
+      beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      })
+
+      afterEach(() => {
+        warn.mockRestore()
+      })
+
+      it('delivers the startup command once the marker arrives', () => {
+        createSession({ shellReadySupported: true })
+        session.writeStartupCommand('claude\n')
+
+        subprocess.simulateData('\x1b]777;orca-shell-ready\x07\r\nuser@host $ ')
+        vi.advanceTimersByTime(30)
+
+        expect(session.shellState).toBe('ready' satisfies ShellReadyState)
+        expect(subprocess.written).toEqual(['claude\n'])
+        expect(warn).not.toHaveBeenCalled()
+      })
+
+      it('keeps holding the startup command past the deadline while keystrokes go through', () => {
+        createSession({ shellReadySupported: true })
+        session.writeStartupCommand('claude\n')
+        session.write('typed')
+
+        vi.advanceTimersByTime(SHELL_READY_TIMEOUT_MS)
+
+        expect(session.shellState).toBe('timed_out' satisfies ShellReadyState)
+        expect(subprocess.written).toEqual(['typed'])
+      })
+
+      it('delivers the startup command on a marker that arrives after the deadline', () => {
+        createSession({ shellReadySupported: true })
+        const received: string[] = []
+        session.attachClient({ onData: (data) => received.push(data), onExit: () => {} })
+        session.writeStartupCommand('claude\n')
+
+        vi.advanceTimersByTime(SHELL_READY_TIMEOUT_MS + SHELL_READY_LATE_MARKER_GRACE_MS - 1)
+        expect(subprocess.written).toEqual([])
+
+        subprocess.simulateData('\x1b]777;orca-shell-ready\x07\r\nuser@host $ ')
+        vi.advanceTimersByTime(30)
+
+        expect(session.shellState).toBe('ready' satisfies ShellReadyState)
+        expect(subprocess.written).toEqual(['claude\n'])
+        // The late marker is still stripped, so it never reaches the pane.
+        expect(received.join('')).toBe('\r\nuser@host $ ')
+        expect(warn).not.toHaveBeenCalled()
+      })
+
+      it('writes the startup command without proof once the grace deadline passes, and says so', () => {
+        createSession({ shellReadySupported: true })
+        session.writeStartupCommand('claude\n')
+
+        vi.advanceTimersByTime(SHELL_READY_TIMEOUT_MS + SHELL_READY_LATE_MARKER_GRACE_MS)
+
+        expect(subprocess.written).toEqual(['claude\n'])
+        expect(session.shellState).toBe('timed_out' satisfies ShellReadyState)
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('without proof'))
+      })
+
+      it('reports a startup command the shell exited before ever reading', () => {
+        createSession({ shellReadySupported: true })
+        session.writeStartupCommand('claude\n')
+
+        vi.advanceTimersByTime(SHELL_READY_TIMEOUT_MS)
+        subprocess.simulateExit(1)
+
+        expect(subprocess.written).toEqual([])
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('never delivered'))
+      })
+
+      // Why: shortening the barrier is how Codex opts out of marker-gated delivery.
+      it('gives no grace window to a session that shortened the barrier', () => {
+        createSession({ shellReadySupported: true, shellReadyTimeoutMs: 300 })
+        session.writeStartupCommand('codex\n')
+
+        vi.advanceTimersByTime(300)
+
+        expect(subprocess.written).toEqual(['codex\n'])
+        expect(warn).not.toHaveBeenCalled()
+      })
     })
 
     it('detects marker split across data chunks', () => {
