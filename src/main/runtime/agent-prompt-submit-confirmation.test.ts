@@ -62,8 +62,27 @@ describe('submitAgentPromptWithConfirmation', () => {
   })
 
   it('does not fail a dispatch to an agent that was already working', async () => {
-    const { deps } = makeDeps([working])
+    const { deps, submits } = makeDeps([working])
     await expect(submitAgentPromptWithConfirmation(deps)).resolves.toBe('unverified')
+    expect(submits).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not confirm from a timestamp advance when a working baseline was really the previous turn ending', async () => {
+    const { deps, submits } = makeDeps([
+      { isRunningAgent: true, status: 'working', explicitUpdatedAt: 100 },
+      { isRunningAgent: true, status: 'working', explicitUpdatedAt: 400 }
+    ])
+    await expect(submitAgentPromptWithConfirmation(deps)).resolves.toBe('unverified')
+    expect(submits).toHaveBeenCalledTimes(1)
+  })
+
+  it('confirms when an idle agent asks for permission immediately after the submit', async () => {
+    const { deps, submits } = makeDeps([
+      { isRunningAgent: true, status: 'idle', explicitUpdatedAt: null },
+      { isRunningAgent: true, status: 'permission', explicitUpdatedAt: null }
+    ])
+    await expect(submitAgentPromptWithConfirmation(deps)).resolves.toBe('confirmed')
+    expect(submits).toHaveBeenCalledTimes(1)
   })
 
   it('waits out a permission prompt instead of answering it with Enter', async () => {
