@@ -1566,7 +1566,22 @@ function createRuntimeEnvironmentsApi(): NonNullable<Partial<PreloadApi>['runtim
     subscribe: async ({ selector, method, params, timeoutMs }, callbacks) => {
       const environment = resolveEnvironment(selector)
       const client = getClientForEnvironment(environment)
-      const subscription = await client.subscribe(method, params, callbacks, { timeoutMs })
+      const subscription = await client.subscribe(
+        method,
+        params,
+        {
+          ...callbacks,
+          onResponse: (response) => {
+            // Why: subscriptions can be the first successful traffic after a
+            // transparent serve replacement. Persist its new runtime identity
+            // just like unary calls so later status/catalog reads do not keep
+            // reporting the retired runtime.
+            updateEnvironmentFromResponse(environment, response)
+            callbacks.onResponse(response)
+          }
+        },
+        { timeoutMs }
+      )
       if (manuallyDisconnectedEnvironmentIds.has(environment.id)) {
         subscription.unsubscribe()
         throw new Error('runtime_manually_disconnected')
@@ -3712,6 +3727,9 @@ function updateEnvironmentFromResponse(
     return
   }
   const runtimeId = response.ok ? response._meta.runtimeId : (response._meta?.runtimeId ?? null)
+  if (runtimeId === activeEnvironment.runtimeId) {
+    return
+  }
   activeEnvironment = updateStoredEnvironmentRuntimeId(environment, runtimeId)
 }
 
