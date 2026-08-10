@@ -96,9 +96,19 @@ type LifecycleSendRejection = {
   reason: string
 }
 
+type SendRecipientWarning = {
+  code: string
+  recipient: string
+  message: string
+}
+
 type OrchestrationSendResult =
-  | { message: { id: string }; lifecycle?: LifecycleSendRejection }
-  | { messages: { id: string }[]; recipients: number }
+  | {
+      message: { id: string }
+      lifecycle?: LifecycleSendRejection
+      warnings?: SendRecipientWarning[]
+    }
+  | { messages: { id: string }[]; recipients: number; warnings?: SendRecipientWarning[] }
   | {
       relay: {
         messageId: string
@@ -594,11 +604,18 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       process.exitCode = 1
     }
     printResult(result, json, (r) => {
+      // Why: an accepted address is not a read address, so the receipt has to say which
+      // recipients resolved to a mailbox nobody polls (#13363).
+      const warnings = 'warnings' in r && r.warnings ? r.warnings : []
+      const withWarnings = (line: string): string =>
+        warnings.length > 0
+          ? [line, ...warnings.map((warning) => `Warning: ${warning.message}`)].join('\n')
+          : line
       if ('message' in r) {
         if (r.lifecycle?.action === 'rejected') {
           return `Rejected ${r.message.id}: ${r.lifecycle.reason}`
         }
-        return `Sent ${r.message.id}`
+        return withWarnings(`Sent ${r.message.id}`)
       }
       if ('relay' in r) {
         if (r.relay.destination === 'worker') {
@@ -606,7 +623,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
         }
         return `Queued ${r.relay.messageId} for Run home (Dispatch ${r.relay.dispatchId})`
       }
-      return `Sent ${r.messages.length} messages to ${r.recipients} recipients`
+      return withWarnings(`Sent ${r.messages.length} messages to ${r.recipients} recipients`)
     })
   },
 

@@ -21,6 +21,7 @@ import {
 import { clampOrchestrationAskTimeoutMs } from '../../../../shared/orchestration-ask-timeout'
 import { ORCHESTRATION_GATE_METHODS } from './orchestration-gates'
 import { resolveRunScope } from './orchestration-run-scope'
+import { resolveTerminalRecipientReach } from './orchestration-recipient-reachability'
 import { ORCHESTRATION_RUN_METHODS } from './orchestration-runs'
 import { ORCHESTRATION_WORKER_METHODS } from './orchestration-worker-methods'
 import { ORCHESTRATION_FEDERATION_METHODS } from './orchestration-federation-methods'
@@ -512,6 +513,17 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         )
       }
 
+      const bareHandleReach =
+        isGroupAddress(to) || to.startsWith('run:') || to.startsWith('dispatch:')
+          ? undefined
+          : resolveTerminalRecipientReach({ runtime, db, handle: to, run: routing.run })
+      if (bareHandleReach && !bareHandleReach.deliverable) {
+        // Why: a handle with no live pane and no active Dispatch stores mail no reader can
+        // ever surface, so refuse it the way run:/dispatch: are refused (#13363).
+        throw new OrchestrationError('terminal_not_found', `Terminal ${to} was not found.`)
+      }
+      const sendWarnings = bareHandleReach?.warning ? [bareHandleReach.warning] : []
+
       if (!isGroupAddress(to)) {
         const federatedDispatchId = routing.dispatchId
         const federatedTarget =
@@ -631,7 +643,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           }
         }
         runtime.notifyMessageArrived(to, msg.type)
-        return { message: msg }
+        return { message: msg, ...(sendWarnings.length > 0 ? { warnings: sendWarnings } : {}) }
       }
 
       // Why: fan out one message per recipient (independent read-tracking) but share a thread_id for correlation (Section 4.5).
@@ -671,7 +683,19 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         runtime.notifyMessageArrived(message.to_handle, message.type)
       }
 
-      return { messages, recipients: handles.length }
+      // Why: fan-out rows are legacy-handle rows too, so every recipient already reading a Run
+      // or Dispatch mailbox gets a message its check will never return (#13363). The group form
+      // stays accepted — its members are live terminals — so the receipt names them instead.
+      const groupWarnings = handles.flatMap((handle) => {
+        const reach = resolveTerminalRecipientReach({ runtime, db, handle, run: routing.run })
+        return reach.warning ? [reach.warning] : []
+      })
+
+      return {
+        messages,
+        recipients: handles.length,
+        ...(groupWarnings.length > 0 ? { warnings: groupWarnings } : {})
+      }
     }
   }),
 
