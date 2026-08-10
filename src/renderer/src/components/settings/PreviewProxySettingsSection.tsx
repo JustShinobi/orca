@@ -17,7 +17,7 @@ type PreviewProxySettingsSectionProps = {
   updateSettings: (updates: Partial<GlobalSettings>) => void
 }
 
-type PreviewProxyDraft = {
+export type PreviewProxyDraft = {
   domain: string
   port: string
   bindHost: string
@@ -29,7 +29,7 @@ type PreviewProxyDraft = {
 // one delayed refetch shows the resulting state without polling.
 const STATUS_REFRESH_DELAY_MS = 500
 
-function draftFromSettings(preview: PreviewProxySettings | undefined): PreviewProxyDraft {
+export function draftFromSettings(preview: PreviewProxySettings | undefined): PreviewProxyDraft {
   return {
     domain: preview?.domain ?? '',
     port: preview?.port ? String(preview.port) : '',
@@ -39,7 +39,10 @@ function draftFromSettings(preview: PreviewProxySettings | undefined): PreviewPr
   }
 }
 
-function settingsFromDraft(draft: PreviewProxyDraft, enabled: boolean): PreviewProxySettings {
+export function settingsFromDraft(
+  draft: PreviewProxyDraft,
+  enabled: boolean
+): PreviewProxySettings {
   return {
     enabled,
     port: Number.parseInt(draft.port, 10) || 0,
@@ -48,6 +51,12 @@ function settingsFromDraft(draft: PreviewProxyDraft, enabled: boolean): PreviewP
     ...(draft.auth === 'auto' ? {} : { auth: draft.auth }),
     ...(draft.token.trim() ? { token: draft.token.trim() } : {})
   }
+}
+
+/** A domain and a port are the minimum the reconciler will bind; without both,
+ *  enabling would persist `enabled: true` against a config that never starts. */
+export function isApplicablePreviewDraft(draft: PreviewProxyDraft): boolean {
+  return draft.domain.trim() !== '' && Number.parseInt(draft.port, 10) > 0
 }
 
 export function PreviewProxySettingsSection({
@@ -80,7 +89,7 @@ export function PreviewProxySettingsSection({
   useEffect(() => refreshStatus(), [refreshStatus, preview])
 
   const dirty = JSON.stringify(draftFromSettings(preview)) !== JSON.stringify(draft)
-  const canApply = draft.domain.trim() !== '' && Number.parseInt(draft.port, 10) > 0
+  const canApply = isApplicablePreviewDraft(draft)
 
   const apply = (nextEnabled: boolean): void => {
     updateSettings({ previewProxy: settingsFromDraft(draft, nextEnabled) })
@@ -108,6 +117,7 @@ export function PreviewProxySettingsSection({
           "Requests to <workspace>.<domain> are forwarded to that workspace's dev server. Point a wildcard DNS record and reverse-proxy route at the listener port."
         )}
         checked={enabled}
+        disabled={!enabled && !canApply}
         onChange={() => apply(!enabled)}
         ariaLabel={translate(
           'auto.components.settings.PreviewProxySettingsSection.a4a7afac96',
@@ -124,7 +134,10 @@ export function PreviewProxySettingsSection({
           </Label>
           <Input
             value={draft.domain}
-            placeholder="https://preview.example.com"
+            placeholder={translate(
+              'auto.components.settings.PreviewProxySettingsSection.fe1fbcd16f',
+              'https://preview.example.com'
+            )}
             onChange={(event) => setDraft({ ...draft, domain: event.target.value })}
           />
         </label>

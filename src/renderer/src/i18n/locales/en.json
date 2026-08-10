@@ -10496,6 +10496,7 @@
           "c5b96de11c": "Requests to <workspace>.<domain> are forwarded to that workspace's dev server. Point a wildcard DNS record and reverse-proxy route at the listener port.",
           "a4a7afac96": "Enable preview proxy",
           "29f99ff349": "Public domain",
+          "fe1fbcd16f": "https://preview.example.com",
           "fa3d3820e3": "Listener port",
           "3743f05344": "Bind address",
           "e54c382974": "Authentication",
@@ -10509,6 +10510,19 @@
           "d71f803a7d": "Anyone who can reach the listener and pass its auth mode can reach your dev servers. Keep token auth on untrusted networks.",
           "e759090f76": "Apply",
           "d77f62edce": "Generated session token: {{value0}}"
+        },
+        "preview": {
+          "proxy": {
+            "search": {
+              "6c17d9b6a2": "preview",
+              "a1ce90a10a": "ports",
+              "4cf2e3c78e": "dev server",
+              "9d1bb03df1": "domain",
+              "4f0d0b1f6b": "wildcard",
+              "7a5e9e0d92": "serve",
+              "5c1f5f4a1e": "token"
+            }
+          }
         }
       },
       "right": {
