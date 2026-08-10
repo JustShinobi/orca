@@ -166,6 +166,7 @@ import { recoverLegacyWorkerTerminalsForRendererStartup } from './startup/legacy
 import { createWslCliReconciliationStartupBarrier } from './startup/wsl-cli-reconciliation-startup-barrier'
 import { getDevInstanceIdentity } from './startup/dev-instance-identity'
 import { hydrateShellPath, mergePathSegments } from './startup/hydrate-shell-path'
+import { createWindowsShellPathHydration } from './startup/windows-shell-path-hydration'
 import {
   acquireSingleInstanceLock,
   logSingleInstanceLockBypass,
@@ -2239,6 +2240,21 @@ void app.whenReady().then(async () => {
 
   const activeOrcaProfile = ensureActiveOrcaProfile()
   store = new Store({ dataFile: activeOrcaProfile.dataFile })
+  const windowsShellPathHydration = createWindowsShellPathHydration()
+  if (process.platform === 'win32') {
+    const settings = store.getSettings()
+    if (app.isPackaged) {
+      void windowsShellPathHydration.hydrate(
+        settings.terminalWindowsShell,
+        settings.terminalWindowsPowerShellImplementation
+      )
+    } else {
+      windowsShellPathHydration.configure(
+        settings.terminalWindowsShell,
+        settings.terminalWindowsPowerShellImplementation
+      )
+    }
+  }
   wslHookRelayManager.setManagedHookSettingsResolver(() => store?.getSettings() ?? null)
   logStartupMilestone('store-loaded')
   // Why: apply initial fallback WSL distro from store settings for global git/CLI calls.
@@ -2247,6 +2263,22 @@ void app.whenReady().then(async () => {
     if ('terminalWindowsWslDistro' in updates) {
       // Why: synchronize fallback WSL distro updates to runner.
       setDefaultWslDistroOverride(settings.terminalWindowsWslDistro ?? null)
+    }
+    if (
+      ('terminalWindowsShell' in updates || 'terminalWindowsPowerShellImplementation' in updates) &&
+      process.platform === 'win32'
+    ) {
+      if (app.isPackaged) {
+        void windowsShellPathHydration.hydrate(
+          settings.terminalWindowsShell,
+          settings.terminalWindowsPowerShellImplementation
+        )
+      } else {
+        windowsShellPathHydration.configure(
+          settings.terminalWindowsShell,
+          settings.terminalWindowsPowerShellImplementation
+        )
+      }
     }
     if ('showMenuBarIcon' in updates) {
       // Why: Store is the mutation authority for all settings writes, so every macOS toggle updates the native item live.
@@ -2858,7 +2890,7 @@ void app.whenReady().then(async () => {
     if (isAgentStatusHooksEnabled(store.getSettings())) {
       const managedHookStore = store
       void applyAgentStatusHooksEnabled(true, managedHookStore.getSettings(), {
-        shouldHydrateShellPath: app.isPackaged && process.platform !== 'win32',
+        shouldHydrateShellPath: app.isPackaged,
         onInstallError: recordManagedHookInstallFailure,
         shouldContinue: (agent) => {
           const settings = managedHookStore.getSettings()
@@ -3032,6 +3064,8 @@ void app.whenReady().then(async () => {
     }
   })
 
+  // Why: Git hooks inherit process.env, so Source Control must not open before profile PATH settles.
+  await windowsShellPathHydration.whenReady()
   startTerminalRuntimeStartupServices()
   app.on('activate', handleMacAppActivation)
 
