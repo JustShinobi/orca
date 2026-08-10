@@ -228,6 +228,7 @@ import type {
   GitHubPullRequestStateUpdate,
   GitHubPRFile,
   GitHubPRReviewCommentInput,
+  GitHubReactionContent,
   GitLabIssueUpdate,
   GitLabMRInlineCommentInput,
   GitLabProjectRef,
@@ -597,6 +598,7 @@ import {
   getPRCheckDetails,
   rerunPRChecks,
   getPRComments,
+  setPRCommentReaction,
   getIssue,
   resolveReviewThread,
   setPRFileViewed,
@@ -20170,6 +20172,25 @@ export class OrcaRuntimeService {
     )
   }
 
+  async setRepoPRCommentReaction(
+    repoSelector: string,
+    reactionSubjectId: string,
+    content: GitHubReactionContent,
+    reacted: boolean,
+    prRepo?: GitHubOwnerRepo | null
+  ): Promise<Awaited<ReturnType<typeof setPRCommentReaction>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return setPRCommentReaction(
+      repo.path,
+      reactionSubjectId,
+      content,
+      reacted,
+      repo.connectionId ?? null,
+      prRepo ?? null,
+      ...this.getLocalGitExecutionOptionArgs(repo)
+    )
+  }
+
   async getRepoPRFileContents(
     repoSelector: string,
     args: {
@@ -23627,17 +23648,21 @@ export class OrcaRuntimeService {
     // Why: fetch failures are non-fatal; we proceed with whatever the
     // last-known remote ref points at. `fetchRemoteWithCache` never throws.
     await this.fetchRemoteWithCache(repo.path, remote, localWorktreeGitOptions)
-    const drift = getRemoteDrift(wt.path, 'HEAD', base, localGitExecOptions)
+    const drift = await getRemoteDrift(wt.path, 'HEAD', base, localGitExecOptions)
     if (!drift) {
       return null
     }
-    const recentSubjects = getRecentDriftSubjects(
-      wt.path,
-      'HEAD',
-      base,
-      DRIFT_PROBE_SUBJECT_LIMIT,
-      localGitExecOptions
-    )
+    // Why: behind=0 proves HEAD..base is empty, so git log cannot add subjects.
+    const recentSubjects =
+      drift.behind > 0
+        ? await getRecentDriftSubjects(
+            wt.path,
+            'HEAD',
+            base,
+            DRIFT_PROBE_SUBJECT_LIMIT,
+            localGitExecOptions
+          )
+        : []
     return { base, behind: drift.behind, recentSubjects }
   }
 
