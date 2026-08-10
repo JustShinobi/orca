@@ -104,8 +104,8 @@ import {
 import { getGitCloneFailureMessage } from '../../shared/git-clone-failure-message'
 import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
 import { createHash, randomUUID } from 'node:crypto'
-import { homedir } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { homedir, hostname, userInfo } from 'node:os'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { resolveWorktreeCreateBase } from '../worktree-create-base'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree-base-ref'
@@ -228,6 +228,7 @@ import type {
   GitHubPullRequestStateUpdate,
   GitHubPRFile,
   GitHubPRReviewCommentInput,
+  GitHubReactionContent,
   GitLabIssueUpdate,
   GitLabMRInlineCommentInput,
   GitLabProjectRef,
@@ -236,7 +237,8 @@ import type {
   MRListState,
   PRRefreshOutcome,
   ClaudeRateLimitAccountsState,
-  CodexRateLimitAccountsState
+  CodexRateLimitAccountsState,
+  PreviewProxyStatus
 } from '../../shared/types'
 import type { TaskSourceContext } from '../../shared/task-source-context'
 import { assertWorktreeUnlockedForRemoval } from '../../shared/worktree-removal'
@@ -490,16 +492,11 @@ import {
   listAiVaultSessions
 } from '../ai-vault/cached-session-list'
 import { resolveLocalAiVaultSessionTitles } from '../ai-vault/session-title-resolver'
-import {
-  readAiVaultSessionIdentity,
-  resolveAiVaultSessionLiveness
-} from '../ai-vault/session-liveness'
-import type { AiVaultAgent, AiVaultListArgs, AiVaultListResult } from '../../shared/ai-vault-types'
+import type { AiVaultListArgs, AiVaultListResult } from '../../shared/ai-vault-types'
 import type {
   AiVaultSessionTitleRequest,
   AiVaultSessionTitlesResult
 } from '../../shared/ai-vault-session-title'
-import type { AiVaultSessionLiveness } from '../../shared/ai-vault-session-deletion'
 import type {
   AiVaultPrepareSessionResumeArgs,
   AiVaultPrepareSessionResumeResult
@@ -516,6 +513,11 @@ import {
   scanWorkspacePortProbes
 } from '../ports/workspace-port-ownership'
 import { advertisedUrlWatcher } from '../ports/advertised-url-watcher'
+import {
+  enrichScanWithPreviewUrls,
+  getActivePreviewProxyConfig,
+  type PreviewWorktreeDescriptor
+} from '../ports/worktree-preview-routes'
 import type { AutomationService } from '../automations/service'
 import { RuntimeBrowserCommands } from './orca-runtime-browser'
 import { RemoteRuntimeTerminalCreateIdempotency } from './remote-runtime-terminal-create-idempotency'
@@ -596,6 +598,7 @@ import {
   getPRCheckDetails,
   rerunPRChecks,
   getPRComments,
+  setPRCommentReaction,
   getIssue,
   resolveReviewThread,
   setPRFileViewed,
@@ -1156,6 +1159,7 @@ type RuntimeStore = {
     terminalMainSideEffectAuthority?: GlobalSettings['terminalMainSideEffectAuthority']
     terminalHiddenDeliveryGate?: GlobalSettings['terminalHiddenDeliveryGate']
     terminalModelQueryAuthority?: GlobalSettings['terminalModelQueryAuthority']
+    previewProxy?: GlobalSettings['previewProxy']
   }
   // Why: narrow to `unknown` return so test mocks can return void without
   // a cast. The runtime never reads the return value — the persisted value
@@ -3571,6 +3575,7 @@ export class OrcaRuntimeService {
     | 'minimaxGroupId'
     | 'minimaxUsageModels'
     | 'prBotAuthorOverrides'
+    | 'previewProxy'
     // Read-only on purpose: clients preflight the publish capability here, but SettingsUpdate
     // still omits the key so no RPC caller can grant it to itself.
     | 'artifactSharingEnabled'
@@ -3580,6 +3585,7 @@ export class OrcaRuntimeService {
     }
     const settings = this.store.getSettings()
     return {
+      ...(settings.previewProxy ? { previewProxy: settings.previewProxy } : {}),
       defaultTuiAgent: settings.defaultTuiAgent ?? null,
       disabledTuiAgents: settings.disabledTuiAgents ?? [],
       agentCmdOverrides: settings.agentCmdOverrides ?? {},
@@ -3601,6 +3607,18 @@ export class OrcaRuntimeService {
     }
   }
 
+  // Why: the reconciler lives in main wiring; the runtime only relays its
+  // status so paired clients can render the settings card's live state.
+  private previewProxyStatusProvider: (() => PreviewProxyStatus) | null = null
+
+  setPreviewProxyStatusProvider(provider: () => PreviewProxyStatus): void {
+    this.previewProxyStatusProvider = provider
+  }
+
+  getPreviewProxyStatus(): PreviewProxyStatus | null {
+    return this.previewProxyStatusProvider?.() ?? null
+  }
+
   private reconcileManagedAgentHooks(): Promise<void> {
     const generation = ++this.managedHookReconciliationGeneration
     const reconciliation = this.managedHookReconciliationTail.then(async () => {
@@ -3612,7 +3630,7 @@ export class OrcaRuntimeService {
         return
       }
       await applyAgentStatusHooksEnabled(settings.agentStatusHooksEnabled !== false, settings, {
-        shouldHydrateShellPath: app.isPackaged && process.platform !== 'win32',
+        shouldHydrateShellPath: app.isPackaged,
         onInstallError: recordManagedHookInstallFailure,
         shouldContinue: (agent) => {
           const current = this.store?.getSettings()
@@ -3647,6 +3665,7 @@ export class OrcaRuntimeService {
       | 'minimaxGroupId'
       | 'minimaxUsageModels'
       | 'prBotAuthorOverrides'
+      | 'previewProxy'
     >
   ): Promise<
     Pick<
@@ -3668,6 +3687,7 @@ export class OrcaRuntimeService {
       | 'minimaxGroupId'
       | 'minimaxUsageModels'
       | 'prBotAuthorOverrides'
+      | 'previewProxy'
     >
   > {
     if (!this.store?.getSettings || !this.store.updateSettings) {
@@ -4988,74 +5008,6 @@ export class OrcaRuntimeService {
     signal?: AbortSignal
   ): Promise<AiVaultSessionTitlesResult> {
     return resolveLocalAiVaultSessionTitles(requests, signal)
-  }
-
-  async getAiVaultSessionLiveness(target: {
-    agent: AiVaultAgent
-    sessionId: string | undefined
-    filePath: string
-  }): Promise<AiVaultSessionLiveness> {
-    const provider = this.getLocalProviderFn?.()
-    if (!provider || !this.getAgentProviderSessionSnapshotFn) {
-      return 'unknown'
-    }
-    const identity = await readAiVaultSessionIdentity(target)
-    if (identity.outcome !== 'found') {
-      return 'unknown'
-    }
-    const deadlineMs = Date.now() + 3_000
-    return await resolveAiVaultSessionLiveness(
-      {
-        agent: target.agent,
-        sessionId: identity.sessionId
-      },
-      {
-        deadlineMs,
-        listProcesses: async () => {
-          const result = await withTimeoutResult(
-            provider.listProcesses({ deadlineMs }),
-            Math.max(1, deadlineMs - Date.now())
-          )
-          if (!result.ok) {
-            throw new Error('agent_session_ownership_unknown')
-          }
-          return result.value
-        },
-        getStatusSnapshot: this.getAgentProviderSessionSnapshotFn,
-        inspectForegroundProcess: async (ptyId) => {
-          const result = await withTimeoutResult(
-            provider.getForegroundProcess(ptyId),
-            Math.max(1, deadlineMs - Date.now())
-          )
-          return result.ok
-            ? { available: true, process: result.value }
-            : { available: false, process: null }
-        },
-        getStatusPtyId: (status) => {
-          if (status.terminalHandle) {
-            const live = this.getLivePtyForHandle(status.terminalHandle)
-            if (live) {
-              return live.pty.ptyId
-            }
-            for (const [ptyId, handle] of this.handleByPtyId) {
-              if (handle === status.terminalHandle) {
-                return ptyId
-              }
-            }
-          }
-          return this.getPtyRecordForPaneKey(status.paneKey)?.ptyId ?? null
-        },
-        getAgentHint: (process) => {
-          const pty = this.ptysById.get(process.id)
-          const runtimeHint = pty?.foregroundAgent ?? pty?.launchAgent
-          if (runtimeHint) {
-            return runtimeHint
-          }
-          const ownerAgents = new Set(process.agentSessionOwners?.map((owner) => owner.claim.agent))
-          return ownerAgents.size === 1 ? ([...ownerAgents][0] ?? null) : null
-        }
-      }
-    )
   }
 
   prepareAiVaultSessionResume(
@@ -20220,6 +20172,25 @@ export class OrcaRuntimeService {
     )
   }
 
+  async setRepoPRCommentReaction(
+    repoSelector: string,
+    reactionSubjectId: string,
+    content: GitHubReactionContent,
+    reacted: boolean,
+    prRepo?: GitHubOwnerRepo | null
+  ): Promise<Awaited<ReturnType<typeof setPRCommentReaction>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return setPRCommentReaction(
+      repo.path,
+      reactionSubjectId,
+      content,
+      reacted,
+      repo.connectionId ?? null,
+      prRepo ?? null,
+      ...this.getLocalGitExecutionOptionArgs(repo)
+    )
+  }
+
   async getRepoPRFileContents(
     repoSelector: string,
     args: {
@@ -21077,7 +21048,52 @@ export class OrcaRuntimeService {
   }
 
   async scanWorkspacePorts(repoId?: string): Promise<WorkspacePortScanResult> {
-    return scanWorkspacePortProbes(await this.getWorkspacePortProbes(repoId))
+    const scan = await scanWorkspacePortProbes(await this.getWorkspacePortProbes(repoId))
+    const previewConfig = getActivePreviewProxyConfig()
+    const enriched = previewConfig
+      ? enrichScanWithPreviewUrls(scan, await this.getPreviewWorktreeDescriptors(), previewConfig)
+      : scan
+    // Why: remote clients compose `ssh -L` hints from the runtime host identity;
+    // optional fields keep older clients' scans decoding unchanged.
+    let sshUsername: string | undefined
+    try {
+      sshUsername = userInfo().username || undefined
+    } catch {
+      // userInfo() throws when the uid has no passwd entry (minimal containers).
+    }
+    return {
+      ...enriched,
+      sshHostname: hostname(),
+      ...(sshUsername ? { sshUsername } : {})
+    }
+  }
+
+  /** Worktrees the preview proxy may route to, with the project name the
+   *  preview label derives from. Mirrors getWorkspacePortProbes' exclusion of
+   *  SSH-connected repos: their ports listen on another machine. */
+  async getPreviewWorktreeDescriptors(): Promise<PreviewWorktreeDescriptor[]> {
+    const reposById = new Map(
+      this.requireStore()
+        .getRepos()
+        .map((repo) => [repo.id, repo])
+    )
+    return (await this.listResolvedWorktrees()).flatMap((worktree) => {
+      const repo = reposById.get(worktree.repoId)
+      if (!repo || repo.connectionId) {
+        return []
+      }
+      return [
+        {
+          worktreeId: worktree.id,
+          repoId: worktree.repoId,
+          // Why: an empty project name slugifies to the generic "workspace",
+          // so every unnamed repo's primary worktree would share one label.
+          projectName: repo.displayName || basename(repo.path),
+          worktreeName: worktree.displayName,
+          worktreePath: worktree.git.path
+        }
+      ]
+    })
   }
 
   async killWorkspacePort(args: WorkspacePortKillRequest): Promise<WorkspacePortKillResult> {
@@ -23634,17 +23650,21 @@ export class OrcaRuntimeService {
     // Why: fetch failures are non-fatal; we proceed with whatever the
     // last-known remote ref points at. `fetchRemoteWithCache` never throws.
     await this.fetchRemoteWithCache(repo.path, remote, localWorktreeGitOptions)
-    const drift = getRemoteDrift(wt.path, 'HEAD', base, localGitExecOptions)
+    const drift = await getRemoteDrift(wt.path, 'HEAD', base, localGitExecOptions)
     if (!drift) {
       return null
     }
-    const recentSubjects = getRecentDriftSubjects(
-      wt.path,
-      'HEAD',
-      base,
-      DRIFT_PROBE_SUBJECT_LIMIT,
-      localGitExecOptions
-    )
+    // Why: behind=0 proves HEAD..base is empty, so git log cannot add subjects.
+    const recentSubjects =
+      drift.behind > 0
+        ? await getRecentDriftSubjects(
+            wt.path,
+            'HEAD',
+            base,
+            DRIFT_PROBE_SUBJECT_LIMIT,
+            localGitExecOptions
+          )
+        : []
     return { base, behind: drift.behind, recentSubjects }
   }
 

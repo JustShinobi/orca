@@ -4,6 +4,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { preloadE2EConfig } from './e2e-config'
 import { glApi } from './gitlab'
 import type { AppIdentity } from '../shared/app-identity'
+import type { ComputerAwakeStatus } from '../shared/computer-awake-mode'
 import type {
   DashboardRevealAgentArgs,
   DashboardSleepWorkspaceArgs,
@@ -75,6 +76,7 @@ import type {
   GitHubCommentResult,
   GitHubCreateIssueResult,
   GitHubOwnerRepo,
+  GitHubReactionContent,
   GitHubWorkItem,
   JiraProjectStatusOrder,
   GitPushTarget,
@@ -928,6 +930,10 @@ const api = {
     }
   } satisfies PreloadApi['workspacePorts'],
 
+  previewProxy: {
+    status: () => ipcRenderer.invoke('previewProxy:status')
+  } satisfies PreloadApi['previewProxy'],
+
   pty: {
     spawn: (opts: {
       cols: number
@@ -1469,6 +1475,16 @@ const api = {
       prRepo?: GitHubOwnerRepo | null
       noCache?: boolean
     }): Promise<unknown[]> => ipcRenderer.invoke('gh:prComments', args),
+
+    setPRCommentReaction: (args: {
+      repoPath: string
+      repoId?: string
+      sourceContext?: TaskSourceContext | null
+      reactionSubjectId: string
+      content: GitHubReactionContent
+      reacted: boolean
+      prRepo?: GitHubOwnerRepo | null
+    }): Promise<boolean> => ipcRenderer.invoke('gh:setPRCommentReaction', args),
 
     resolveReviewThread: (args: {
       repoPath: string
@@ -2035,6 +2051,16 @@ const api = {
       return () => ipcRenderer.removeListener('settings:changed', listener)
     }
   },
+
+  agentAwake: {
+    getStatus: (): Promise<ComputerAwakeStatus> => ipcRenderer.invoke('agentAwake:getStatus'),
+    onChanged: (callback: (status: ComputerAwakeStatus) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: ComputerAwakeStatus): void =>
+        callback(status)
+      ipcRenderer.on('agentAwake:changed', listener)
+      return () => ipcRenderer.removeListener('agentAwake:changed', listener)
+    }
+  } satisfies PreloadApi['agentAwake'],
 
   localhostWorktreeLabels: {
     register: (args: LocalhostWorktreeLabelRoute): Promise<LocalhostWorktreeLabelResult> =>

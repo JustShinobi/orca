@@ -9,6 +9,7 @@ import type {
   HostedReviewProvider
 } from '../shared/hosted-review'
 import type { NativeFileDropPayload } from '../shared/native-file-drop'
+import type { ComputerAwakeStatus } from '../shared/computer-awake-mode'
 import type { BrowserFindSource } from '../shared/browser-find-source'
 import type {
   DashboardRevealAgentArgs,
@@ -226,6 +227,7 @@ import type {
   MarkdownDocument,
   FloatingTerminalCwdRequest,
   GitHubIssueUpdate,
+  GitHubReactionContent,
   GitHubPRRefreshCandidate,
   GitHubPRRefreshEnqueueResult,
   GitHubPRRefreshEvent,
@@ -286,7 +288,8 @@ import type {
   WorktreeStartupLaunch,
   WorkspaceSessionPatch,
   WorkspaceSessionState,
-  LinuxPackageInstallInstructions
+  LinuxPackageInstallInstructions,
+  PreviewProxyStatus
 } from '../shared/types'
 import type { PtyModelRestoreNeededEvent } from '../shared/pty-model-restore-marker'
 import type { PtyListedSession } from '../shared/pty-listed-session'
@@ -1529,6 +1532,10 @@ export type PreloadApi = {
       callback: (event: WorkspacePortAdvertisedUrlChangedEvent) => void
     ) => () => void
   }
+  previewProxy: {
+    /** Null when the connected runtime predates the preview proxy. */
+    status: () => Promise<PreviewProxyStatus | null>
+  }
   pty: {
     spawn: (opts: {
       cols: number
@@ -1882,6 +1889,15 @@ export type PreloadApi = {
       prRepo?: GitHubOwnerRepo | null
       noCache?: boolean
     }) => Promise<PRComment[]>
+    setPRCommentReaction: (args: {
+      repoPath: string
+      repoId?: string
+      sourceContext?: TaskSourceContext | null
+      reactionSubjectId: string
+      content: GitHubReactionContent
+      reacted: boolean
+      prRepo?: GitHubOwnerRepo | null
+    }) => Promise<boolean>
     resolveReviewThread: (args: {
       repoPath: string
       repoId?: string
@@ -2414,6 +2430,10 @@ export type PreloadApi = {
     previewWarpThemeImport: (source: WarpThemeImportSource) => Promise<WarpThemeImportPreview>
     /** Subscribe to out-of-band settings updates (e.g. View > Appearance toggles) to stay in sync with main. */
     onChanged: (callback: (updates: Partial<GlobalSettings>) => void) => () => void
+  }
+  agentAwake: {
+    getStatus: () => Promise<ComputerAwakeStatus>
+    onChanged: (callback: (status: ComputerAwakeStatus) => void) => () => void
   }
   localhostWorktreeLabels: {
     register: (args: LocalhostWorktreeLabelRoute) => Promise<LocalhostWorktreeLabelResult>

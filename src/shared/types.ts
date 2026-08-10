@@ -53,6 +53,7 @@ import type { CodexResetCreditAttemptLedger } from './codex-reset-credit-attempt
 import type { TaskSourceContext } from './task-source-context'
 import type { SetupRunnerShell } from './setup-runner-command'
 import type { AiVaultSessionTitle } from './ai-vault-session-title'
+import type { ComputerAwakeMode } from './computer-awake-mode'
 
 // Re-exported for backward compat with renderer call sites that import
 // `WorkspaceCreateTelemetrySource` from '../../../shared/types'.
@@ -1485,6 +1486,7 @@ export type GitHubReactionContent =
 export type GitHubReaction = {
   content: GitHubReactionContent
   count: number
+  viewerHasReacted?: boolean
 }
 
 export type PRComment = {
@@ -1495,6 +1497,8 @@ export type PRComment = {
   createdAt: string
   url: string
   reactions?: GitHubReaction[]
+  /** GraphQL node ID for GitHub comments that support reaction mutations. */
+  reactionSubjectId?: string
   /** File path for inline review comments (absent for top-level conversation comments). */
   path?: string
   /** GraphQL node ID of the review thread — present only for inline review comments.
@@ -2732,6 +2736,38 @@ export type HostSettingOverrides = {
 /** Presentation mode for the experimental Agent Dashboard. */
 export type AgentDashboardMode = 'in-window' | 'popout'
 
+/** Workspace preview proxy exposed to browsers outside pairing auth (see
+ *  docs/reference/headless-linux-server.md). Editable from paired clients, so
+ *  every field is validated again in the main process before a listener binds. */
+export type PreviewProxySettings = {
+  enabled: boolean
+  /** Listener port; the single port an external reverse proxy forwards to. */
+  port: number
+  /** Public base domain, `[scheme://]host[:port]` (labels become subdomains). */
+  domain: string
+  /** Listener bind address; defaults to loopback when empty. */
+  bindHost?: string
+  /** Omitted = open on loopback binds, token otherwise. */
+  auth?: 'open' | 'token'
+  /** Omitted with token auth = a session token is generated at start. */
+  token?: string
+}
+
+/** Live state of the preview proxy listener, for the settings UI. */
+export type PreviewProxyStatus = {
+  running: boolean
+  /** Which config source is (or failed to be) applied; null when disabled. */
+  source: 'flags' | 'settings' | null
+  /** Wildcard origin clients hit, e.g. `https://*.preview.example.com`. */
+  origin?: string
+  bindHost?: string
+  port?: number
+  auth?: 'open' | 'token'
+  /** Present so the settings UI can show/copy a generated session token. */
+  token?: string | null
+  error?: string
+}
+
 export type GlobalSettings = {
   workspaceDir: string
   /** Per-host overrides keyed by ExecutionHostId. Effective value for a
@@ -2874,10 +2910,14 @@ export type GlobalSettings = {
   openLinksInApp: boolean
   /** Worktree-scoped localhost hostnames to distinguish tabs; opt-in since a non-localhost host can break apps binding cookies/sessions to localhost. */
   localhostWorktreeLabelsEnabled?: boolean
+  /** Settings-driven workspace preview proxy; `orca serve --preview-*` flags override this whole object while set. */
+  previewProxy?: PreviewProxySettings
   /** Tracks the one-time first-use prompt for terminal link routing (avoid silently changing where links open). */
   openLinksInAppPreferencePrompted: boolean
   /** Opt-in: Shift+modifier click inverts openLinksInApp instead of always forcing the system browser. Off keeps the historical one-way escape hatch. */
   openLinksInAppModifierInverts?: boolean
+  /** Show terminal link actions on plain click; off restores modifier-click-only terminal links. */
+  terminalLinkActionPopoverEnabled?: boolean
   /** Opt-in: open new coding-agent tabs in native chat instead of the raw terminal; optional for legacy settings. */
   openAgentTabsInChatByDefault?: boolean
   /** Experimental native chat surface for Claude/Codex sessions; off by default. */
@@ -3045,6 +3085,8 @@ export type GlobalSettings = {
   confirmClosePinnedTab: boolean
   /** When true, Orca requests local awake assertions while hook-reported agents are working. */
   keepComputerAwakeWhileAgentsRun: boolean
+  /** Optional for mixed-version compatibility; the legacy boolean maps true to Auto. */
+  computerAwakeMode?: ComputerAwakeMode
   /** macOS Option key: compose layout chars (@ German, € French) vs act as Meta/Esc for readline.
    *  'auto' (default) = layout-aware via navigator.keyboard.getLayoutMap() (US → Meta, else compose);
    *  'false' = compose; 'true' = Meta on both Option keys; 'left'/'right' = only that key is Meta.
