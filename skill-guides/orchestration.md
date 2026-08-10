@@ -210,7 +210,7 @@ orca orchestration worker-start --task <task_id> --worktree new-top-level --name
 
 Setup normally starts alongside the agent. Only a repository explicitly configured with `wait-for-setup` delays agent launch until setup succeeds. Use `--setup skip` or `--setup inherit` only for a concrete reason.
 
-Read the returned receipt before continuing: `ready` plus setup `running` is normal for start-immediately, while wait-for-setup returns setup `succeeded` before accepting task input. A failed or unknown start exits nonzero; inspect its `stage`, `effects`, and `residualResources` instead of guessing or automatically retrying. A wait-for-setup timeout can honestly leave setup `running`, which is not proof of failure.
+Read the returned receipt before continuing. `state: ready` with `stage: prompt_submitted` means Orca confirmed the worker started a turn. `state: ready` with `stage: input_accepted` means the prompt reached the agent but Orca cannot observe that agent's status, so a started turn is not proven; confirm with `worker-read --dispatch <id> --json` and treat `fallbackReason: "transcript_missing"` as not started. `ready` plus setup `running` is normal for start-immediately, while wait-for-setup returns setup `succeeded` before accepting task input. A failed or unknown start exits nonzero; inspect its `stage`, `failedStage`, `recovery`, `effects`, and `residualResources` instead of guessing or automatically retrying. A wait-for-setup timeout can honestly leave setup `running`, which is not proof of failure.
 
 To run the worker on another connected Orca server, add `--on <saved-environment>`. The Run and Tasks remain authoritative on the current server; later commands route by Dispatch ID, so never repeat `--on`:
 
@@ -263,7 +263,10 @@ orca orchestration reply --id <message_id> --body "<answer>" --json
 
 Recovery is conditional, never a fixed destructive sequence:
 
-- `worker-show --dispatch <id>` says `ready`: keep waiting or read bounded output.
+- `worker-show --dispatch <id>` says `ready` with `stage: prompt_submitted`: keep waiting or read bounded output.
+- It says `ready` with `stage: input_accepted`: the prompt was delivered but the turn start is unproven. Read the worker before assuming progress; a worker that holds a full prompt and never starts needs a single Enter in its terminal, not a new dispatch.
+- It failed at `dispatch_input` with `recovery: nothing_written`: nothing reached the agent, so re-running the dispatch is safe.
+- It failed at `dispatch_input` with `recovery: buffered_not_submitted`: the prompt is already in the agent's composer. Do not re-run the dispatch — that creates two user turns. Recovery is a single Enter in that terminal.
 - It proves `failed` or `stopped`: start a replacement with `worker-start --task <task> --retry-of <id>` plus an explicit `--on`/`--worktree` and `--agent`/`--terminal` choice. Retry does not silently inherit placement.
 - It remains `outcome_unknown`: either `worker-stop --dispatch <id>` and inspect again, or explicitly `worker-abandon --dispatch <id>` while accepting that resources may still be live. Abandon performs no remote, process, or filesystem action.
 - `worker-stop` closes only the exact supervised agent terminal. It never deletes the worktree, setup terminal, configured tabs, or unrelated processes.
