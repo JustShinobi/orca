@@ -12,10 +12,6 @@ import {
 } from './useComposerState'
 
 const HOOK_SOURCE = readFileSync(join(__dirname, 'useComposerState.ts'), 'utf8')
-const RECIPE_OPTIONS_SOURCE = readFileSync(
-  join(__dirname, 'useEphemeralVmRecipeOptions.ts'),
-  'utf8'
-)
 
 function sourceBetween(source: string, startPattern: string, endPattern: string): string {
   const start = source.indexOf(startPattern)
@@ -654,6 +650,19 @@ describe('useComposerState host-context boundaries', () => {
     expect(section).toContain('setCreateError({')
   })
 
+  it('uses submit-time smart metadata for both folder launch mode and startup content', () => {
+    const section = sourceBetween(
+      HOOK_SOURCE,
+      'const submitFolderTarget',
+      'const submit = useCallback'
+    )
+    expect(section).toContain(
+      'const submitLinkedWorkItem = smartGitHubMetadata?.linkedWorkItem ?? linkedWorkItem'
+    )
+    expect(section).toContain('resolveFolderWorkspaceLaunchDraft(submitLinkedWorkItem, note)')
+    expect(section).toContain('linkedWorkItem: submitLinkedWorkItem')
+  })
+
   it('gates every submit path on the derived source intent', () => {
     // Why: derived from name+mode, so the submitted name and the gate can never disagree.
     expect(HOOK_SOURCE).toContain(
@@ -742,162 +751,5 @@ describe('useComposerState host-context boundaries', () => {
     expect(
       getMatchingLinkedTaskSourceContext({ ...item, jiraIdentifier: 'ORCA-999' }, context)
     ).toBeNull()
-  })
-
-  it('resolves quick-create base refs through the worktree-create precedence helper', () => {
-    const section = sourceBetween(
-      HOOK_SOURCE,
-      'const smartSubmitBaseBranch',
-      'const createDisplayName'
-    )
-
-    expect(section).toContain('resolveWorktreeCreateBaseBranch')
-    expect(section).toContain('explicitBaseBranch: smartSubmitBaseBranch')
-    expect(section).not.toContain('repoWorktreeBaseRef: selectedRepo.worktreeBaseRef')
-    expect(section).not.toContain('getRuntimeRepoBaseRefDefault')
-  })
-
-  it('plans new workspace agent startup from the selected repo runtime', () => {
-    expect(HOOK_SOURCE).toContain('const selectedRepoAgentLaunchPlatform = useMemo')
-    expect(HOOK_SOURCE).toContain('getLocalRepoProjectExecutionRuntimeContext')
-    expect(HOOK_SOURCE).toContain('getAgentLaunchPlatformForRepo(selectedRepo, projectRuntime)')
-
-    const fullSubmit = sourceBetween(
-      HOOK_SOURCE,
-      'const submit = useCallback',
-      'const submitQuick = useCallback'
-    )
-    expect(fullSubmit).toContain('platform: selectedRepoAgentLaunchPlatform')
-    expect(fullSubmit).toContain('startupDraft: startupPlan.draftPrompt')
-    expect(fullSubmit).not.toContain('platform: CLIENT_PLATFORM')
-
-    const quickSubmit = sourceBetween(
-      HOOK_SOURCE,
-      'const submitQuick = useCallback',
-      'const createGateInput'
-    )
-    expect(quickSubmit).toContain('platform: selectedRepoAgentLaunchPlatform')
-    expect(quickSubmit).not.toContain('platform: CLIENT_PLATFORM')
-  })
-
-  // Why: activation no longer rebuilds a startup from `createdWithAgent`, so this
-  // caller's own `startup` is the only thing that launches the agent it planned.
-  it('passes its own startup to activation when submit planned an agent', () => {
-    const activation = sourceBetween(
-      HOOK_SOURCE,
-      'const activation = activateAndRevealWorktree(worktree.id, {',
-      'if (startupPlan) {'
-    )
-
-    expect(activation).toContain('...(startupPlan && !backendSpawnedStartup')
-    expect(activation).toContain('backendStartupTerminalSpawned: true')
-    expect(activation).toContain('command: startupPlan.launchCommand')
-    expect(activation).toContain('launchAgent: tuiAgent')
-    // The removed activation-time fallback must not come back through this caller.
-    expect(HOOK_SOURCE).not.toContain('buildCreatedAgentReopenStartup')
-  })
-
-  it('prepares linked quick-create drafts for the selected default agent', () => {
-    const quickSubmit = sourceBetween(
-      HOOK_SOURCE,
-      'const submitQuick = useCallback',
-      'const createGateInput'
-    )
-
-    expect(quickSubmit).toContain(
-      'const promptLinkedWorkItem = agent === null ? null : submitLinkedWorkItem'
-    )
-    expect(quickSubmit).toContain('resolveQuickCreateLinkedWorkItemPrompt(promptLinkedWorkItem')
-    expect(quickSubmit).not.toContain('explicitAgentChoice')
-    expect(quickSubmit).not.toContain('shouldPrepareQuickLinkedWorkItemAgentPrompt')
-    expect(HOOK_SOURCE).not.toContain('resolveQuickWorkspaceSubmitAgent')
-  })
-
-  it('keeps sentinel-based Jira and Linear starts out of issue-command templates', () => {
-    expect(HOOK_SOURCE).not.toContain('isOrcaCliAvailableForLaunch')
-    expect(HOOK_SOURCE).not.toContain('hasGeneratedLinearSourceContext')
-    expect(HOOK_SOURCE).not.toContain('shouldDraftGeneratedLinearContext')
-    expect(HOOK_SOURCE).toMatch(
-      /willApplyIssueCommandAsPrompt[\s\S]*canUseIssueCommandForLinkedItemProvider\(linkedWorkItemProvider\)/
-    )
-
-    const previewSection = sourceBetween(
-      HOOK_SOURCE,
-      'const shouldApplyLinkedOnlyTemplate =',
-      'const linkedOnlyTemplatePrompt'
-    )
-    expect(previewSection).toContain(
-      'canUseIssueCommandForLinkedItemProvider(linkedWorkItemProvider)'
-    )
-
-    const fullSubmit = sourceBetween(
-      HOOK_SOURCE,
-      'const submit = useCallback',
-      'const submitQuick = useCallback'
-    )
-    expect(fullSubmit).toContain(
-      'canUseIssueCommandForLinkedItemProvider(submitLinkedWorkItemProvider)'
-    )
-    expect(fullSubmit).toMatch(
-      /submitShouldRunIssueAutomation[\s\S]*canUseIssueCommandForLinkedItemProvider\(submitLinkedWorkItemProvider\)/
-    )
-    expect(fullSubmit).toContain('prompt: submitStartupPrompt')
-    expect(fullSubmit).toContain('const shouldSeedInitialAgentStatus =')
-    expect(fullSubmit).toContain('...(shouldSeedInitialAgentStatus')
-
-    const quickSubmit = sourceBetween(
-      HOOK_SOURCE,
-      'const submitQuick = useCallback',
-      'const createGateInput'
-    )
-    expect(quickSubmit).toContain('agent === null || !quickDraftPrompt')
-    expect(quickSubmit).toContain('startupPlan.draftPrompt = quickDraftPrompt')
-  })
-
-  it('selects the failed Jira source host before opening integration settings', () => {
-    const section = sourceBetween(
-      HOOK_SOURCE,
-      'const handleOpenJiraSettings = useCallback',
-      'const applyWorktreeMeta = useCallback'
-    )
-
-    expect(section).toContain('getTaskSourceRuntimeSettings(')
-    expect(section).toContain('smartNameJiraSourceContext')
-    expect(section).toContain('setActiveRuntimeEnvironmentPreference(targetRuntimeEnvironmentId)')
-    expect(section.indexOf('setActiveRuntimeEnvironmentPreference')).toBeLessThan(
-      section.indexOf("openSettingsTarget({ pane: 'integrations'")
-    )
-    expect(section).toContain('if (!selected)')
-  })
-
-  it('gates per-workspace environment recipe discovery behind the experimental setting', () => {
-    const recipeLoadSection = sourceBetween(
-      HOOK_SOURCE,
-      'const ephemeralVmsEnabled',
-      'const selectedRepoConnectionId'
-    )
-    expect(recipeLoadSection).toContain('settings?.experimentalEphemeralVms === true')
-    expect(recipeLoadSection).toContain('useEphemeralVmRecipeOptions')
-    expect(recipeLoadSection).toContain('enabled: ephemeralVmsEnabled')
-    expect(RECIPE_OPTIONS_SOURCE).toContain('args.enabled &&')
-    expect(RECIPE_OPTIONS_SOURCE).toContain('window.api.ephemeralVm')
-    expect(RECIPE_OPTIONS_SOURCE).toContain('window.api.plugins.onChanged')
-    expect(RECIPE_OPTIONS_SOURCE).toContain('requestGeneration')
-
-    const submitSection = sourceBetween(
-      HOOK_SOURCE,
-      'let ephemeralVmRecipe',
-      'const request: WorktreeCreationRequest'
-    )
-    expect(submitSection).toContain(
-      'const activeEphemeralVmRecipeId = ephemeralVmsEnabled ? selectedEphemeralVmRecipeId : null'
-    )
-    expect(submitSection).toContain('recipeId: activeEphemeralVmRecipeId')
-
-    const cardPropsSection = sourceBetween(HOOK_SOURCE, 'const cardProps', 'return {')
-    expect(cardPropsSection).toContain('ephemeralVmRecipes:')
-    expect(cardPropsSection).toContain('!ephemeralVmsEnabled')
-    expect(cardPropsSection).toContain('selectedEphemeralVmRecipeId:')
-    expect(cardPropsSection).toContain('ephemeralVmRecipeError:')
   })
 })

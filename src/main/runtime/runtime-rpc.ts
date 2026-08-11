@@ -735,6 +735,7 @@ export class OrcaRuntimeRpcServer {
       endpoint,
       deviceToken: device.token,
       publicKeyB64,
+      pairedDeviceId: device.deviceId,
       scope
     })
     return {
@@ -947,6 +948,7 @@ export class OrcaRuntimeRpcServer {
         endpoint: direct.endpoint,
         deviceToken: device.token,
         publicKeyB64,
+        pairedDeviceId: device.deviceId,
         scope: 'mobile',
         relay: relayPairing.relay
       })
