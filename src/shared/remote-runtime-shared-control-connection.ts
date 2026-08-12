@@ -64,7 +64,9 @@ export class RemoteRuntimeSharedControlConnection {
         isSharedControlReady({ state: this.state, ws: this.ws, sharedKey: this.sharedKey }),
       getSocket: () => this.ws,
       probe: async (timeoutMs, signal) =>
-        requireSessionProbeSuccess(await this.request('status.get', undefined, timeoutMs, signal)),
+        requireSessionProbeSuccess(
+          await this.request('status.get', undefined, timeoutMs, undefined, signal)
+        ),
       // Why: the probe's socket identity guard makes the current generation authoritative.
       forceClose: (error) =>
         this.handleSocketClosed(error, this.socketGeneration.currentGeneration())
@@ -184,9 +186,7 @@ export class RemoteRuntimeSharedControlConnection {
       this.handleSocketClosed(opened.error, socketGeneration)
       return
     }
-    this.ws = opened.socket.ws
-    this.sharedKey = opened.socket.sharedKey
-    this.socketCleanup = opened.socket.cleanup
+    ;({ ws: this.ws, sharedKey: this.sharedKey, cleanup: this.socketCleanup } = opened.socket)
     this.state = 'awaiting_ready'
   }
 
