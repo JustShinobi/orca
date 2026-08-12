@@ -219,7 +219,7 @@ export async function requestActiveSshAiVaultSessionList(
   targetId: string,
   params: SshAiVaultRelayListParams,
   options: { signal?: AbortSignal; timeoutMs?: number } = {}
-): Promise<unknown | null> {
+): Promise<unknown> {
   if (isRuntimeOwnedSshTargetId(targetId)) {
     return null
   }
@@ -234,7 +234,7 @@ export async function requestActiveSshAiVaultSessionTitles(
   targetId: string,
   params: SshAiVaultRelayTitleParams,
   options: { signal?: AbortSignal; timeoutMs?: number } = {}
-): Promise<unknown | null> {
+): Promise<unknown> {
   if (isRuntimeOwnedSshTargetId(targetId)) {
     return null
   }

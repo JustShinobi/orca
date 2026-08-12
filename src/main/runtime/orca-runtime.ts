@@ -542,7 +542,8 @@ import { RemoteRuntimeTerminalCreateIdempotency } from './remote-runtime-termina
 import { deriveRemoteRuntimeTerminalCreateHandle } from './remote-runtime-terminal-create-identity'
 import {
   buildHeadlessTerminalSplitLayout,
-  countTerminalLayoutLeaves
+  countTerminalLayoutLeaves,
+  terminalLayoutContainsLeaf
 } from './headless-terminal-split-layout'
 import { RECENT_PTY_OUTPUT_LIMIT, RecentPtyOutputBuffer } from './recent-pty-output-buffer'
 import {
@@ -691,6 +692,8 @@ import { inspectSetupScriptImportCandidates } from '../../shared/setup-script-im
 import type {
   CreateHostedReviewInput,
   CreateHostedReviewResult,
+  CreateStackedHostedReviewInput,
+  CreateStackedHostedReviewResult,
   HostedReviewCreationEligibility,
   HostedReviewCreationEligibilityArgs,
   HostedReviewInfo
@@ -700,6 +703,7 @@ import {
   createHostedReview as createHostedReviewFromRepo,
   getHostedReviewCreationEligibility as getHostedReviewCreationEligibilityFromRepo
 } from '../source-control/hosted-review-creation'
+import { createStackedHostedReview as createStackedHostedReviewFromRepo } from '../source-control/stacked-hosted-review-creation'
 import {
   getLocalProjectGitExecOptions,
   getLocalProjectWorktreeGitOptions,
@@ -935,7 +939,7 @@ import {
 } from '../worktree-create-candidates'
 import { normalizeSparseDirectories } from '../ipc/sparse-checkout-directories'
 import { addRemoteRepoFromPath, scanNestedReposForIpc } from '../ipc/repos'
-import type { Store } from '../persistence'
+import type { PtyBindingSourceExpectation, Store } from '../persistence'
 import type { StatsCollector } from '../stats/collector'
 import { AgentDetector } from '../stats/agent-detector'
 import {
@@ -1700,6 +1704,7 @@ type RuntimePtyController = {
     sessionId?: string
     isNewSession?: boolean
     persistHostSessionBinding?: boolean
+    expectedSourceBinding?: PtyBindingSourceExpectation
     terminalColorQueryReplies?: { foreground?: string; background?: string }
     agentSessionEnsure?: {
       claim: AgentSessionExecutionClaim
@@ -7702,10 +7707,10 @@ export class OrcaRuntimeService {
     ptyId: string
     splitFromLeafId: string
     direction: 'horizontal' | 'vertical'
-  }): void {
+  }): boolean {
     const session = this.getWorkspaceSessionForWorktree(args.worktreeId)
     if (!session || !this.store?.setWorkspaceSession) {
-      return
+      return false
     }
     const existing = session.terminalLayoutsByTabId?.[args.tabId]
     const nextLayout = buildHeadlessTerminalSplitLayout(
@@ -7719,6 +7724,7 @@ export class OrcaRuntimeService {
         [args.tabId]: nextLayout
       }
     })
+    return true
   }
 
   private persistHeadlessTerminalActiveLeaf(
@@ -19876,6 +19882,36 @@ export class OrcaRuntimeService {
     return result
   }
 
+  async createStackedHostedReview(
+    args: CreateStackedHostedReviewInput & { repoSelector: string; worktreeSelector?: string }
+  ): Promise<CreateStackedHostedReviewResult> {
+    const { repo, repoPath } = await this.resolveHostedReviewTarget(args)
+    const executionOptions = this.getHostedReviewExecutionOptions(repo)
+    const result = await createStackedHostedReviewFromRepo(
+      repoPath,
+      {
+        provider: args.provider,
+        base: args.base,
+        head: args.head,
+        title: args.title,
+        body: args.body,
+        draft: args.draft,
+        ...(args.useTemplate !== undefined ? { useTemplate: args.useTemplate } : {})
+      },
+      repo.connectionId ?? null,
+      executionOptions ?? {}
+    )
+    if (result.ok && this.stats && !this.stats.hasCountedPR(result.url)) {
+      this.stats.record({
+        type: 'pr_created',
+        at: Date.now(),
+        repoId: repo.id,
+        meta: { prNumber: result.number, prUrl: result.url }
+      })
+    }
+    return result
+  }
+
   async listGitLabRepoWorkItems(
     repoSelector: string,
     state?: MRListState,
@@ -23864,8 +23900,7 @@ export class OrcaRuntimeService {
       this.invalidateWorktreeScanCacheForRepo(worktree.repoId)
     }
     const shouldClearPushTarget =
-      Object.prototype.hasOwnProperty.call(metaUpdates, 'pushTarget') &&
-      metaUpdates.pushTarget === null
+      Object.hasOwn(metaUpdates, 'pushTarget') && metaUpdates.pushTarget === null
     const normalizedMetaUpdates: Partial<WorktreeMeta> = shouldClearPushTarget
       ? { ...metaUpdates, pushTarget: undefined }
       : (metaUpdates as Partial<WorktreeMeta>)
@@ -27486,6 +27521,15 @@ export class OrcaRuntimeService {
     }
     const direction = opts.direction ?? 'horizontal'
     const workspace = await this.resolveTerminalWorkspaceLaunchScope(`id:${pty.worktreeId}`)
+    const sourceAuthority = this.resolveTerminalSplitSourceAuthority(
+      workspace.id,
+      parentTabId,
+      parsedPaneKey.leafId,
+      pty.ptyId
+    )
+    if (!sourceAuthority) {
+      throw new Error('terminal_split_source_not_found')
+    }
     const leafId = randomUUID()
     const preAllocatedHandle = this.createPreAllocatedTerminalHandle()
     const paneKey = makePaneKey(parentTabId, leafId)
@@ -27502,7 +27546,22 @@ export class OrcaRuntimeService {
       preAllocatedHandle,
       tabId: parentTabId,
       leafId,
-      persistHostSessionBinding: true
+      persistHostSessionBinding: true,
+      ...(sourceAuthority.persisted
+        ? {
+            expectedSourceBinding: {
+              ...(sourceAuthority.persistedWorktreeId
+                ? { worktreeId: sourceAuthority.persistedWorktreeId }
+                : {}),
+              tabId: parentTabId,
+              leafId: parsedPaneKey.leafId,
+              ptyId: pty.ptyId,
+              ...(sourceAuthority.persistedIncarnationId
+                ? { incarnationId: sourceAuthority.persistedIncarnationId }
+                : {})
+            }
+          }
+        : {})
     })
     this.registerPreAllocatedHandleForPty(result.id, preAllocatedHandle)
     if (result.wslDistro) {
@@ -27520,7 +27579,7 @@ export class OrcaRuntimeService {
       )
     }
 
-    try {
+    const revealSplit = async (): Promise<void> => {
       await this.notifier?.revealTerminalSession?.(workspace.id, {
         ptyId: result.id,
         title: null,
@@ -27532,31 +27591,134 @@ export class OrcaRuntimeService {
         splitDirection: direction,
         splitTelemetrySource: opts.telemetrySource
       })
+    }
+
+    try {
+      const revalidatedAuthority = this.resolveTerminalSplitSourceAuthority(
+        workspace.id,
+        parentTabId,
+        parsedPaneKey.leafId,
+        pty.ptyId
+      )
+      if (!revalidatedAuthority || (sourceAuthority.persisted && !revalidatedAuthority.persisted)) {
+        throw new Error('terminal_split_source_not_found')
+      }
+      if (!sourceAuthority.persisted) {
+        await revealSplit()
+      }
+      if (createdPty) {
+        const persisted = this.persistHeadlessTerminalSplit({
+          worktreeId: workspace.id,
+          tabId: parentTabId,
+          leafId,
+          ptyId: createdPty.ptyId,
+          splitFromLeafId: parsedPaneKey.leafId,
+          direction
+        })
+        if (sourceAuthority.persisted && !persisted) {
+          throw new Error('workspace_session_unavailable')
+        }
+        this.publishPtyBackedMobileSessionTerminal(workspace.id, createdPty, {
+          tabId: parentTabId,
+          leafId,
+          title: null,
+          activate: opts.activate !== false,
+          split: { splitFromLeafId: parsedPaneKey.leafId, direction }
+        })
+      }
     } catch (error) {
       this.setPairedRendererSessionOwnership(result.id, false)
       this.ptyController.kill?.(result.id)
       throw error
     }
-    if (createdPty) {
-      this.publishPtyBackedMobileSessionTerminal(workspace.id, createdPty, {
-        tabId: parentTabId,
-        leafId,
-        title: null,
-        activate: opts.activate !== false,
-        split: { splitFromLeafId: parsedPaneKey.leafId, direction }
-      })
-      // Why: persist the split so a later snapshot rebuild keeps it instead of collapsing to a single pane.
-      this.persistHeadlessTerminalSplit({
-        worktreeId: workspace.id,
-        tabId: parentTabId,
-        leafId,
-        ptyId: createdPty.ptyId,
-        splitFromLeafId: parsedPaneKey.leafId,
-        direction
-      })
+    const committedSourceAuthority = sourceAuthority.persisted
+      ? this.resolveTerminalSplitSourceAuthority(
+          workspace.id,
+          parentTabId,
+          parsedPaneKey.leafId,
+          pty.ptyId
+        )
+      : null
+    if (sourceAuthority.persisted && committedSourceAuthority?.rendererMounted) {
+      // Why: renderer adoption is a projection after the durable main commit; rejection cannot undo it.
+      void revealSplit().catch(() => undefined)
     }
 
     return { handle: this.issuePtyHandle(createdPty ?? pty), tabId: parentTabId, paneRuntimeId: -1 }
+  }
+
+  private resolveTerminalSplitSourceAuthority(
+    worktreeId: string,
+    tabId: string,
+    leafId: string,
+    ptyId: string
+  ): {
+    persisted: boolean
+    rendererMounted: boolean
+    persistedWorktreeId: string | null
+    persistedIncarnationId: string | null
+  } | null {
+    const session = this.getWorkspaceSessionForWorktree(worktreeId)
+    const sessionWorktreeId = session ? resolveTerminalSessionWorktreeId(session, worktreeId) : null
+    const persistedTab = sessionWorktreeId
+      ? session?.tabsByWorktree[sessionWorktreeId]?.find(
+          (tab) => tab.id === tabId && runtimeWorktreeIdsEqual(tab.worktreeId, worktreeId)
+        )
+      : undefined
+    const persistedLayout = session?.terminalLayoutsByTabId?.[tabId]
+    const persistedIncarnationId =
+      session?.terminalPtyIncarnationsByPaneKey?.[makePaneKey(tabId, leafId)] ?? null
+    const liveIncarnationId = this.ptysById.get(ptyId)?.incarnationId ?? null
+    if (
+      persistedIncarnationId &&
+      liveIncarnationId &&
+      persistedIncarnationId !== liveIncarnationId
+    ) {
+      return null
+    }
+    const persisted = Boolean(
+      persistedTab &&
+      persistedLayout?.ptyIdsByLeafId?.[leafId] === ptyId &&
+      terminalLayoutContainsLeaf(persistedLayout.root, leafId)
+    )
+    const rendererTab = this.tabs.get(tabId)
+    const rendererLeaf = this.leaves.get(this.getLeafKey(tabId, leafId))
+    const rendererMounted = Boolean(
+      rendererTab &&
+      rendererLeaf &&
+      runtimeWorktreeIdsEqual(rendererTab.worktreeId, worktreeId) &&
+      runtimeWorktreeIdsEqual(rendererLeaf.worktreeId, worktreeId) &&
+      rendererLeaf.ptyId === ptyId
+    )
+    if (persisted && persistedLayout) {
+      return {
+        persisted: true,
+        rendererMounted,
+        persistedWorktreeId: sessionWorktreeId,
+        persistedIncarnationId
+      }
+    }
+    // Why: renderer adoption can precede graph sync; this path still requires reveal success before commit.
+    const projected = [...this.mobileSessionTabsByWorktree.entries()].some(
+      ([candidateWorktreeId, snapshot]) =>
+        runtimeWorktreeIdsEqual(candidateWorktreeId, worktreeId) &&
+        snapshot.tabs.some(
+          (tab) =>
+            tab.type === 'terminal' &&
+            tab.parentTabId === tabId &&
+            tab.leafId === leafId &&
+            (tab.ptyId === ptyId || tab.parentLayout?.ptyIdsByLeafId?.[leafId] === ptyId)
+        )
+    )
+    if (!rendererMounted && !projected) {
+      return null
+    }
+    return {
+      persisted: false,
+      rendererMounted,
+      persistedWorktreeId: null,
+      persistedIncarnationId: null
+    }
   }
 
   async handleAgentTeamsTmuxCompat(
@@ -27988,7 +28150,7 @@ export class OrcaRuntimeService {
           committedPtyIds,
           terminalHandlesByPtyId
         })
-        if (failedStopIndex >= 0) {
+        if (failedStopIndex !== -1) {
           const failedStop = stopResults[failedStopIndex]
           throw Object.assign(new Error('terminal_worktree_sleep_failed'), {
             ptyId: orderedLivePtyIds[failedStopIndex],
@@ -28015,7 +28177,7 @@ export class OrcaRuntimeService {
         committedPtyIds,
         terminalHandlesByPtyId
       })
-      if (failedStopIndex >= 0 && remainingLivePtyIds.size > 0) {
+      if (failedStopIndex !== -1 && remainingLivePtyIds.size > 0) {
         const failedStop = stopResults[failedStopIndex]
         console.error('[runtime] worktree terminal sleep physical stop failed', {
           worktreeId: worktree.id,
@@ -30034,7 +30196,7 @@ export class OrcaRuntimeService {
   private syncMobileSessionTabs(
     snapshots: RuntimeMobileSessionTabsSnapshot[] | undefined,
     unchangedWorktreeIds?: string[],
-    resyncWorktreeIds: Set<string> = new Set()
+    resyncWorktreeIds = new Set<string>()
   ): Set<string> {
     const changedWorktreeIds = new Set<string>()
     if (snapshots === undefined) {
@@ -32694,7 +32856,7 @@ export class OrcaRuntimeService {
   linearSearchForAgents(args: {
     query: string
     limit?: number
-    workspaceId?: string | 'all'
+    workspaceId?: (string & {}) | 'all'
   }): ReturnType<typeof searchLinearIssuesForAgents> {
     return searchLinearIssuesForAgents(args)
   }
@@ -32704,7 +32866,7 @@ export class OrcaRuntimeService {
   }
 
   async linearTeamListForAgents(params: {
-    workspaceId?: string | 'all'
+    workspaceId?: (string & {}) | 'all'
   }): Promise<LinearTeamListResult> {
     try {
       const result = await listLinearTeamsForAgent(params.workspaceId)
@@ -32783,7 +32945,7 @@ export class OrcaRuntimeService {
   async linearProjectListForAgents(params: {
     query?: string
     limit?: number
-    workspaceId?: string | 'all'
+    workspaceId?: (string & {}) | 'all'
   }): Promise<LinearProjectListResult> {
     const limit = clampLinearSearchLimit(params.limit)
     try {
@@ -32822,7 +32984,7 @@ export class OrcaRuntimeService {
     filter?: LinearIssueListFilter
     teamInput?: string
     limit?: number
-    workspaceId?: string | 'all'
+    workspaceId?: (string & {}) | 'all'
   }): Promise<LinearIssueListResult> {
     const filter = params.filter ?? 'assigned'
     const limit = clampLinearIssueListLimit(params.limit)
@@ -34505,7 +34667,7 @@ export class OrcaRuntimeService {
 
   private async resolveLinearTeamInput(
     teamInput: string,
-    workspaceId?: string | 'all'
+    workspaceId?: (string & {}) | 'all'
   ): Promise<{
     id: string
     key: string
@@ -36413,12 +36575,12 @@ function applyTerminalLineControls(line: string): {
   hadControl: boolean
 } {
   const carriageIndex = line.lastIndexOf('\r')
-  const latestRedraw = carriageIndex >= 0 ? line.slice(carriageIndex + 1) : line
+  const latestRedraw = carriageIndex !== -1 ? line.slice(carriageIndex + 1) : line
   if (!latestRedraw.includes('\u0008') && !latestRedraw.includes('\u001b')) {
     return {
       text: latestRedraw,
       cursorColumn: latestRedraw.length,
-      hadControl: carriageIndex >= 0
+      hadControl: carriageIndex !== -1
     }
   }
 

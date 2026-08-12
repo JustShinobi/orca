@@ -147,6 +147,8 @@ import {
 } from '@/hooks/useVirtualizedScrollAnchor'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { useFolderWorkspacePathStatusCacheExpiryTick } from '@/lib/folder-workspace-path-status-cache-expiry'
+import { useWorktreeListScrollToTop } from './use-worktree-list-scroll-to-top'
+import { WorktreeListScrollToTopButton } from './WorktreeListScrollToTopButton'
 import {
   getFolderWorkspacePathStatusDescription,
   getFolderWorkspacePathStatusTitle
@@ -1377,6 +1379,8 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   scrollAnchorRef
 }: VirtualizedWorktreeViewportProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Why: callback-ref only mutates scrollRef; state re-runs the scroll-to-top listener attach.
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
   const suppressMeasurementAdjustmentUntilRef = useRef(0)
   const directScrollInputUntilRef = useRef(0)
   const [dragOverStatus, setDragOverStatus] = useState<WorkspaceStatus | null>(null)
@@ -2066,6 +2070,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     suppressMeasurementAdjustmentUntilRef.current = suppressUntil
     directScrollInputUntilRef.current = suppressUntil
   }, [])
+  const { showScrollToTop, scrollToTop } = useWorktreeListScrollToTop({
+    scrollElement,
+    onUserScrollIntent: markDirectScrollInput
+  })
   const hasDirectScrollInput = useCallback(
     () => window.performance.now() < directScrollInputUntilRef.current,
     []
@@ -2684,6 +2692,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         clearWorktreeDrag()
       }
       scrollRef.current = node
+      setScrollElement(node)
     },
     [
       cancelPendingRevealFrames,
@@ -5197,6 +5206,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
           })}
         </div>
       </div>
+      {showScrollToTop ? <WorktreeListScrollToTopButton onClick={scrollToTop} /> : null}
     </div>
   )
 })
