@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
-import type { TuiAgent } from '../../../../shared/types'
+import type { TuiAgent } from '../../../../shared/tui-agent'
 import { workspaceSourceSchema } from '../../../../shared/telemetry-events'
 import { sleepingAgentLaunchConfigSchema } from '../../../../shared/workspace-session-sleeping-agents'
 import { RUNTIME_NAVIGATION_TARGETS } from '../../../../shared/runtime-navigation'
@@ -58,7 +58,8 @@ export const WorktreeTeardownMissingTerminalsParams = WorktreeDetectedListParams
 
 export const WorktreePsParams = z.object({
   limit: OptionalFiniteNumber,
-  afterSnapshotId: z.string().min(1).max(128).nullable().optional()
+  afterSnapshotId: z.string().min(1).max(128).nullable().optional(),
+  supportsWorktreeVisibilitySourceDefaults: z.literal(true).optional()
 })
 
 export const WorktreeSortOrder = z.object({

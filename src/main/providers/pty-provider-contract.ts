@@ -1,4 +1,4 @@
-import type { TuiAgent } from '../../shared/types'
+import type { TuiAgent } from '../../shared/tui-agent'
 import type { PtyStartupIngressIntent } from '../../shared/pty-startup-ingress'
 import type { StartupCommandDelivery } from '../../shared/codex-startup-delivery'
 import type { TerminalOscLinkRange } from '../../shared/terminal-osc-link-ranges'
@@ -32,6 +32,10 @@ export type PtyProviderBufferSnapshot = {
   oscLinks?: TerminalOscLinkRange[]
   alternateScreen?: boolean
   pendingEscapeTailAnsi?: string
+  /** Effective kitty keyboard flags PROVEN at this snapshot's own `seq`
+   *  boundary. Absent means the source could not prove them; readers must not
+   *  rewrite that silence into a known `0`. */
+  kittyKeyboardFlags?: number
 }
 
 export type PtySpawnOptions = {

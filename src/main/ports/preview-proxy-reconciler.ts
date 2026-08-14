@@ -5,7 +5,8 @@
 // instead of crashing the app a remote client just reconfigured.
 import { randomBytes } from 'node:crypto'
 import { isValidPreviewToken } from '../../shared/preview-proxy-token'
-import type { GlobalSettings, PreviewProxyStatus } from '../../shared/types'
+import type { GlobalSettings } from '../../shared/global-settings-types'
+import type { PreviewProxyStatus } from '../../shared/preview-proxy-types'
 import type { PreviewRouteResolver } from './preview-route-resolver'
 import { WorktreePreviewProxy, type PreviewProxyAuthMode } from './worktree-preview-proxy'
 import {

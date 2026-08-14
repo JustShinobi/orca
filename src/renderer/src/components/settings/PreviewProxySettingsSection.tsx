@@ -2,11 +2,11 @@ import type React from 'react'
 import { useCallback, useEffect, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { isValidPreviewToken } from '../../../../shared/preview-proxy-token'
+import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import type {
-  GlobalSettings,
   PreviewProxySettings,
   PreviewProxyStatus
-} from '../../../../shared/types'
+} from '../../../../shared/preview-proxy-types'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'

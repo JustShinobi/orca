@@ -1,5 +1,5 @@
 import type { AppState } from '@/store/types'
-import type { Repo } from '../../../../shared/types'
+import type { Repo } from '../../../../shared/repo-types'
 import { getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import {
   selectRuntimeAwareSshStatus,

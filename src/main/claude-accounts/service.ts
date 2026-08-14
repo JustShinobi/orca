@@ -9,7 +9,7 @@ import type {
   ClaudeManagedAccount,
   ClaudeManagedAccountSummary,
   ClaudeRateLimitAccountsState
-} from '../../shared/types'
+} from '../../shared/managed-account-types'
 import type { Store } from '../persistence'
 import type { RateLimitService } from '../rate-limits/service'
 import { invokeLoginCallbackSafely } from '../accounts/safe-login-callback-invocation'

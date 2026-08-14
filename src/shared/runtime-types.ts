@@ -7,29 +7,29 @@ import type {
 } from './agent-status-types'
 import type { AgentPromptSubmitOutcome } from './agent-prompt-submission'
 import type {
-  BaseRefSearchResult,
-  BrowserCookieImportResult,
   BrowserCertificateFailure,
+  BrowserCookieImportResult,
   BrowserLoadError,
   BrowserSessionProfile,
-  BrowserSessionProfileSource,
+  BrowserSessionProfileSource
+} from './browser-workspace-types'
+import type {
   ClaudeRateLimitAccountsState,
-  CodexRateLimitAccountsState,
-  CreateWorktreeResult,
-  GitWorktreeInfo,
-  RemoveWorktreeResult,
-  Repo,
-  TabGroupLayoutNode,
-  TerminalColorOverrides,
-  TerminalLayoutSnapshot,
-  TuiAgent,
-  Worktree,
-  WorktreeLineage,
-  WorkspaceLineage,
-  WorktreeLineageWarning,
-  TerminalPaneLayoutNode
-} from './types'
+  CodexRateLimitAccountsState
+} from './managed-account-types'
 import type { RateLimitState } from './rate-limit-types'
+import type { BaseRefSearchResult, Repo } from './repo-types'
+import type { TabGroupLayoutNode } from './tab-types'
+import type { TerminalColorOverrides } from './terminal-color-overrides'
+import type { TerminalLayoutSnapshot, TerminalPaneLayoutNode } from './terminal-tab-types'
+import type { TuiAgent } from './tui-agent'
+import type { CreateWorktreeResult, RemoveWorktreeResult } from './worktree/create-types'
+import type {
+  WorkspaceLineage,
+  WorktreeLineage,
+  WorktreeLineageWarning
+} from './worktree/lineage-types'
+import type { GitWorktreeInfo, Worktree } from './worktree/types'
 import type {
   RuntimeMarkdownReadTabResult,
   RuntimeMarkdownSaveTabResult
@@ -154,6 +154,11 @@ export type RuntimeSyncWindowGraph = {
   /** Worktrees the renderer is still publishing unchanged; main must keep their
    *  stored snapshots alive instead of pruning them as removed. */
   unchangedMobileSessionWorktrees?: string[]
+}
+
+export type RuntimeRendererSyncWindowGraph = RuntimeSyncWindowGraph & {
+  /** Unique to one renderer document; a reload must publish from a new generation. */
+  rendererGeneration: string
 }
 
 export type RuntimeNativeChatLaunchDraftResolution = {
@@ -408,11 +413,18 @@ export type RuntimeTerminalPathOpenTarget =
       provider: 'local' | 'ssh'
       absolutePath: string
       grantId: string
+      /** Present when the exact-path grant permits preview/read but not mutation. */
+      readOnly?: true
     }
   | {
       kind: 'unsupported'
       reason: string
     }
+
+export type RuntimeNativeChatFileContext = {
+  tabId: string
+  sessionId: string
+}
 
 /** Result of resolving a file path tapped in the mobile terminal against the
  *  selected or sibling workspace root (+ optional cwd). relativePath is null

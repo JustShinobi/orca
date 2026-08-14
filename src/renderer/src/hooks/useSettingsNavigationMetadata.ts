@@ -1,6 +1,7 @@
 /* oxlint-disable max-lines */
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useShallow } from 'zustand/react/shallow'
 // Why: this registry mirrors the Settings sidebar in one neutral module so
 // Cmd+J and Settings visibility cannot drift. Keep it free of Settings pane UI
 // imports; the boundary is enforced by a focused architecture test.
@@ -38,7 +39,7 @@ import {
 } from 'lucide-react'
 import { OrcaLogoSettingsIcon } from '@/components/settings/orca-logo-settings-icon'
 import { LinearIcon } from '@/components/icons/LinearIcon'
-import type { Repo } from '../../../shared/types'
+import type { Repo } from '../../../shared/repo-types'
 import { getRepoKindLabel } from '../../../shared/repo-kind'
 import { useAppStore } from '@/store'
 import { isMacUserAgent, isWindowsUserAgent } from '@/components/terminal-pane/pane-helpers'
@@ -91,6 +92,7 @@ import { useWindowsTerminalCapabilityOwnerKey } from './useWindowsTerminalCapabi
 import { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { useLinearProviderConnected } from '@/hooks/useLinearProviderConnected'
 import { translate } from '@/i18n/i18n'
+import { getClientCreationActionPolicy } from '@/lib/client-creation-action-policy'
 
 export { isWebClientLocation } from '@/lib/web-client-location'
 
@@ -125,6 +127,8 @@ export function buildSettingsNavigationMetadata({
   isLocalWindowsHost = isWindows,
   isWindowsTerminalHost = isWindows,
   isWebClient,
+  managedBrowserCreationEnabled = !isWebClient,
+  mobileEmulatorCreationEnabled = !isWebClient,
   isDev = import.meta.env.DEV,
   isLinearConnected = false,
   repos
@@ -134,6 +138,8 @@ export function buildSettingsNavigationMetadata({
   isLocalWindowsHost?: boolean
   isWindowsTerminalHost?: boolean
   isWebClient: boolean
+  managedBrowserCreationEnabled?: boolean
+  mobileEmulatorCreationEnabled?: boolean
   isDev?: boolean
   isLinearConnected?: boolean
   repos: readonly Repo[]
@@ -357,7 +363,7 @@ export function buildSettingsNavigationMetadata({
       ),
       description: translate(
         'auto.hooks.useSettingsNavigationMetadata.ab4b21b58e',
-        'Branch naming, base refs, attribution, and Git AI Author.'
+        'Branch naming, base refs, and Git AI Author.'
       ),
       icon: GitBranch,
       // Why: Git AI Author is rendered inside Git, so shared
@@ -438,12 +444,19 @@ export function buildSettingsNavigationMetadata({
     {
       id: 'floating-workspace',
       title: translate('auto.hooks.useSettingsNavigationMetadata.65b19f5bde', 'Floating Workspace'),
-      description: translate(
-        'auto.hooks.useSettingsNavigationMetadata.2d0659f6f0',
-        'Global terminal, browser, and markdown tabs.'
-      ),
+      description: showDesktopOnlySettings
+        ? translate(
+            'auto.hooks.useSettingsNavigationMetadata.2d0659f6f0',
+            'Global terminal, browser, and markdown tabs.'
+          )
+        : translate(
+            'auto.hooks.useSettingsNavigationMetadata.floatingWorkspaceWebDescription',
+            'Global terminal and markdown tabs.'
+          ),
       icon: PanelsTopLeft,
-      searchEntries: getFloatingWorkspaceSearchEntries(),
+      searchEntries: getFloatingWorkspaceSearchEntries({
+        includeBrowser: showDesktopOnlySettings
+      }),
       group: 'workflows'
     },
     {
@@ -498,7 +511,10 @@ export function buildSettingsNavigationMetadata({
         'Keyboard shortcuts for common actions.'
       ),
       icon: Keyboard,
-      searchEntries: getShortcutsPaneSearchEntries(),
+      searchEntries: getShortcutsPaneSearchEntries({
+        includeManagedBrowser: managedBrowserCreationEnabled,
+        includeMobileEmulator: mobileEmulatorCreationEnabled
+      }),
       group: 'interface'
     },
     {
@@ -670,6 +686,15 @@ export function useSettingsNavigationMetadata(): SettingsNavSection[] {
   const activeLocale = i18n.language
   const repos = useAppStore((state) => state.repos)
   const settings = useAppStore((state) => state.settings)
+  const [managedBrowserCreationEnabled, mobileEmulatorCreationEnabled] = useAppStore(
+    useShallow((state) => {
+      const policy = getClientCreationActionPolicy(state, state.activeWorktreeId)
+      return [
+        policy['managed-browser'].state === 'enabled',
+        policy['mobile-emulator'].state === 'enabled'
+      ] as const
+    })
+  )
   const isMac = isMacUserAgent()
   const isWindows = isWindowsUserAgent()
   const isWebClient = isWebClientLocation()
@@ -712,6 +737,8 @@ export function useSettingsNavigationMetadata(): SettingsNavSection[] {
         isLocalWindowsHost,
         isWindowsTerminalHost,
         isWebClient,
+        managedBrowserCreationEnabled,
+        mobileEmulatorCreationEnabled,
         isDev: import.meta.env.DEV,
         isLinearConnected,
         repos
@@ -723,6 +750,8 @@ export function useSettingsNavigationMetadata(): SettingsNavSection[] {
       isLocalWindowsHost,
       isWindowsTerminalHost,
       isWebClient,
+      managedBrowserCreationEnabled,
+      mobileEmulatorCreationEnabled,
       isLinearConnected,
       repos,
       activeLocale

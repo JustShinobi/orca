@@ -51,7 +51,7 @@ export async function saveNewSshHostFromForm({
   ssh: SshApi
   /** When set, the target is added on the paired runtime server instead of locally. */
   owner?: SshTargetOwnerEnvironment | null
-  recordSshRepoReadoptions: (readoptions: SshRepoReadoption[]) => void
+  recordSshRepoReadoptions: (readoptions: readonly SshRepoReadoption[]) => void
   setSshTargetsMetadata: (targets: SshTarget[]) => void
   recordFeatureInteraction: (feature: 'ssh') => void
 }): Promise<'saved' | 'validation-failed' | 'failed'> {
@@ -188,7 +188,7 @@ export async function addAllSshConfigHostsToOrca({
   ssh: SshApi
   /** When set, ~/.ssh/config is imported on the paired runtime server instead of locally. */
   owner?: SshTargetOwnerEnvironment | null
-  recordSshRepoReadoptions: (readoptions: SshRepoReadoption[]) => void
+  recordSshRepoReadoptions: (readoptions: readonly SshRepoReadoption[]) => void
   setSshTargetsMetadata: (targets: SshTarget[]) => void
   recordFeatureInteraction: (feature: 'ssh') => void
 }): Promise<{ kind: 'added'; count: number } | { kind: 'already-synced' } | { kind: 'failed' }> {

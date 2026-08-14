@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useAppStore } from '@/store'
-import type { TuiAgent } from '../../../shared/types'
+import type { TuiAgent } from '../../../shared/tui-agent'
 import { getRuntimeAgentDetectionKey } from '@/lib/runtime-agent-detection-key'
 
 export type UseDetectedAgentsResult = {
@@ -18,7 +18,7 @@ export type UseDetectedAgentsResult = {
 }
 
 export type AgentDetectionTarget =
-  | { kind: 'local' }
+  | { kind: 'local'; worktreeId?: string | null; contextKey?: string }
   | { kind: 'ssh'; connectionId: string }
   | { kind: 'runtime'; environmentId: string; connectionId?: string | null }
 
@@ -71,6 +71,8 @@ export function useDetectedAgents(
       ? getRuntimeAgentDetectionKey(target.environmentId, target.connectionId)
       : null
   const runtimeConnectionId = target?.kind === 'runtime' ? target.connectionId : null
+  const localWorktreeId = target?.kind === 'local' ? target.worktreeId : undefined
+  const localContextKey = target?.kind === 'local' ? target.contextKey : undefined
   const remoteTargetKey =
     targetKind === 'ssh' && targetId
       ? `ssh:${targetId}`
@@ -88,7 +90,9 @@ export function useDetectedAgents(
     if (targetKind === 'runtime' && runtimeDetectionKey) {
       return s.runtimeDetectedAgentIds[runtimeDetectionKey] ?? null
     }
-    return s.detectedAgentIds
+    return localContextKey
+      ? (s.localDetectedAgentIdsByContext[localContextKey] ?? null)
+      : s.detectedAgentIds
   })
   const isLoading = useAppStore((s) => {
     if (isUnknown) {
@@ -100,16 +104,23 @@ export function useDetectedAgents(
     if (targetKind === 'runtime' && runtimeDetectionKey) {
       return s.isDetectingRuntimeAgents[runtimeDetectionKey] ?? false
     }
-    return s.isDetectingAgents
+    return localContextKey
+      ? (s.isDetectingLocalAgentsByContext[localContextKey] ?? false)
+      : s.isDetectingAgents
   })
   const isRefreshing = useAppStore((s) => {
-    if (targetKind === 'runtime' && targetId) {
-      return s.isRefreshingRuntimeAgents[targetId] ?? false
+    if (targetKind === 'runtime' && runtimeDetectionKey) {
+      return s.isRefreshingRuntimeAgents[runtimeDetectionKey] ?? false
     }
     if (targetKind === 'ssh' && targetId) {
       return s.isDetectingRemoteAgents[targetId] ?? false
     }
-    return targetKind === 'local' ? s.isRefreshingAgents : false
+    if (targetKind !== 'local') {
+      return false
+    }
+    return localContextKey
+      ? (s.isRefreshingLocalAgentsByContext[localContextKey] ?? false)
+      : s.isRefreshingAgents
   })
   const detectionFailed =
     detectedIds === null &&
@@ -132,8 +143,8 @@ export function useDetectedAgents(
     if (targetKind === 'ssh' && targetId) {
       return state.refreshRemoteDetectedAgents(targetId)
     }
-    return state.refreshDetectedAgents()
-  }, [isUnknown, targetKind, targetId, runtimeConnectionId])
+    return state.refreshDetectedAgents(localWorktreeId)
+  }, [isUnknown, localWorktreeId, targetKind, targetId, runtimeConnectionId])
 
   useEffect(() => {
     if (isUnknown) {
@@ -165,10 +176,19 @@ export function useDetectedAgents(
       }
     } else {
       if (detectedIds === null) {
-        void state.ensureDetectedAgents()
+        void state.ensureDetectedAgents(localWorktreeId)
       }
     }
-  }, [isUnknown, targetKind, targetId, remoteTargetKey, runtimeConnectionId, detectedIds])
+  }, [
+    isUnknown,
+    targetKind,
+    targetId,
+    remoteTargetKey,
+    runtimeConnectionId,
+    detectedIds,
+    localWorktreeId,
+    localContextKey
+  ])
 
   return { detectedIds, isLoading, detectionFailed, isRefreshing, refresh }
 }

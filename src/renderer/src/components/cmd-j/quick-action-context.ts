@@ -1,16 +1,18 @@
 import type { AppState } from '@/store/types'
 import { findWorktreeById } from '@/store/slices/worktree-helpers'
-import type { Worktree } from '../../../../shared/types'
+import type { Worktree } from '../../../../shared/worktree/types'
 import type { SshConnectionStatus } from '../../../../shared/ssh-types'
 import { getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { selectRuntimeAwareSshStatus } from '@/store/slices/runtime-environment-ssh'
 import { isPairedWebClientWindow } from '@/lib/desktop-window-chrome'
+import { getClientCreationActionPolicy } from '@/lib/client-creation-action-policy'
 
 export type CmdJUnavailableReason =
   | 'loading'
   | 'no-active-workspace'
   | 'ssh-disconnected'
   | 'no-active-group'
+  | 'client-action-unsupported'
 
 export type CmdJQuickActionAvailability =
   | { available: true }
@@ -28,6 +30,7 @@ export type CmdJQuickActionContext = {
   isLoading: boolean
   sshStatus: SshConnectionStatus | null
   runtimeMode: 'local-desktop' | 'paired-web'
+  managedBrowserCreationEnabled?: boolean
   activeGroupId: string | null
   openNewBrowserTab: (groupId: string) => Promise<void>
   openNewMarkdownFile: (groupId: string) => Promise<void>
@@ -116,6 +119,15 @@ export function getWorkspaceScopedActionAvailability(
   return { available: true }
 }
 
+export function getBrowserWorkspaceActionAvailability(
+  ctx: CmdJQuickActionContext
+): CmdJQuickActionAvailability {
+  if (ctx.managedBrowserCreationEnabled === false) {
+    return { available: false, reason: 'client-action-unsupported' }
+  }
+  return getWorkspaceScopedActionAvailability(ctx)
+}
+
 export function getCurrentWorkspaceActionAvailability(
   ctx: Pick<CmdJQuickActionContext, 'activeView' | 'activeWorktreeId' | 'isLoading' | 'sshStatus'>
 ): CmdJQuickActionAvailability {
@@ -157,6 +169,9 @@ export function buildCmdJQuickActionContext(args: {
     args.state.settings?.activeRuntimeEnvironmentId?.trim()
       ? 'paired-web'
       : 'local-desktop'
+  const managedBrowserCreationEnabled =
+    getClientCreationActionPolicy(args.state, activeWorktreeId)['managed-browser'].state ===
+    'enabled'
 
   return {
     activeView: args.state.activeView,
@@ -165,6 +180,7 @@ export function buildCmdJQuickActionContext(args: {
     isLoading,
     sshStatus: getActiveWorktreeSshStatus(args.state, activeWorktree),
     runtimeMode,
+    managedBrowserCreationEnabled,
     activeGroupId,
     openNewBrowserTab: args.openNewBrowserTab,
     openNewMarkdownFile: args.openNewMarkdownFile,
@@ -188,5 +204,7 @@ export function getUnavailableQuickActionMessage(
       return `Can't ${actionTitle.toLowerCase()} — workspace is disconnected.`
     case 'no-active-group':
       return `Can't ${actionTitle.toLowerCase()} — no tab group is available.`
+    case 'client-action-unsupported':
+      return `Can't ${actionTitle.toLowerCase()} — this client and runtime do not support it.`
   }
 }
