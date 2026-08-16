@@ -29,13 +29,12 @@ import {
   spawnShellWithFallback
 } from './local-pty-utils'
 import { prepareMacosTccLoginShell } from './macos-tcc-login-shell'
+import { getMarkerlessShellLaunchConfig, getShellReadyLaunchConfig } from './local-pty-shell-ready'
 import {
-  getMarkerlessShellLaunchConfig,
-  getShellReadyLaunchConfig,
   writeStartupCommandWhenShellReady,
   STARTUP_COMMAND_READY_MAX_WAIT_MS
-} from './local-pty-shell-ready'
-import type { ShellReadySignal } from './local-pty-shell-ready'
+} from './local-pty-shell-ready-startup-command'
+import type { ShellReadySignal } from './local-pty-shell-ready-startup-command'
 import { removeInheritedNoColor } from '../pty/terminal-color-env'
 import { removeAppImageRuntimeEnv } from '../pty/appimage-terminal-env'
 import { stripInheritedBuildModeEnv } from '../pty/build-mode-env'
@@ -1150,15 +1149,20 @@ export class LocalPtyProvider implements IPtyProvider {
   hasPty(id: string): boolean {
     return ptyProcesses.has(id)
   }
-  write(id: string, data: string): void {
+  write(id: string, data: string): boolean {
     // Cooked PTYs echo private DSR/OSC replies; CPR/DA remain immediate (#13137, #7329).
     if (extractOnlyCookedEchoSafeQueryReplies(data)) {
       const ingress = startupIngressByPty.get(id)
       if (ingress?.answerLiveQueryReply(data)) {
-        return
+        return true
       }
     }
-    ptyProcesses.get(id)?.write(data)
+    const proc = ptyProcesses.get(id)
+    if (!proc) {
+      return false
+    }
+    proc.write(data)
+    return true
   }
   resize(id: string, cols: number, rows: number): void {
     ptyProcesses.get(id)?.resize(cols, rows)

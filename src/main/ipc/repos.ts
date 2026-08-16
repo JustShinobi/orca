@@ -42,7 +42,7 @@ import { TaskSourceContextSchema } from '../../shared/task-source-context-schema
 import { WorkspaceLinkedItemSchema } from '../../shared/workspace-linked-item-schema'
 import { isWorkspaceLinkedItemSourceContextMatch } from '../../shared/workspace-linked-item-source-context'
 import { DiffCommentSchema } from '../../shared/diff-comment-schema'
-import { invalidateAuthorizedRootsCache } from './filesystem-auth'
+import { invalidateAuthorizedRootsCache } from './registered-worktree-roots-cache'
 import type { ChildProcess } from 'node:child_process'
 import { access, mkdir, readdir, rm } from 'node:fs/promises'
 import {
@@ -91,6 +91,7 @@ import { getActiveMultiplexer } from './ssh'
 import { normalizeSparseDirectories } from './sparse-checkout-directories'
 import { track } from '../telemetry/client'
 import { scheduleCurrentWorktreeBaseDirectoryWatcherSync } from './worktree-base-directory-watcher'
+import { wakeFolderRepoGitUpgradeWatch } from './folder-repo-git-upgrade-wake'
 import { getCohortAtEmit } from '../telemetry/cohort-classifier'
 import type { RepoMethod } from '../../shared/telemetry-events'
 import type {
@@ -2776,7 +2777,8 @@ function getRepoForExecutionHost(
   )
 }
 
-function notifyReposChanged(mainWindow: BrowserWindow): void {
+export function notifyReposChanged(mainWindow: BrowserWindow): void {
+  wakeFolderRepoGitUpgradeWatch()
   if (!mainWindow.isDestroyed()) {
     mainWindow.webContents.send('repos:changed')
   }

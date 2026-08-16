@@ -1,16 +1,13 @@
 import type WebSocket from 'ws'
 import type { PairingOffer } from './pairing'
 import type { RemoteRuntimeClientError } from './remote-runtime-client-error'
+import { remoteRuntimeUnavailableError } from './remote-runtime-request-frames'
 import { openSharedControlSocket } from './remote-runtime-shared-control-open'
 import { handleSharedControlTextFrame } from './remote-runtime-shared-control-frame-handler'
 import * as sharedControlProtocol from './remote-runtime-shared-control-protocol'
-import {
-  isSharedControlReady,
-  isSharedControlSocketGone,
-  waitForSharedControlReadyWithTimeout
-} from './remote-runtime-shared-control-ready'
+import * as sharedControlReady from './remote-runtime-shared-control-ready'
+import { isSharedControlSocketGone } from './remote-runtime-shared-control-ready'
 import { SharedControlReconnectScheduler } from './remote-runtime-shared-control-reconnect'
-import { reconnectSharedControlNow } from './remote-runtime-shared-control-manual-reconnect'
 import { requestSharedControl } from './remote-runtime-shared-control-requests'
 import {
   createSharedControlSessionProbe,
@@ -60,14 +57,12 @@ export class RemoteRuntimeSharedControlConnection {
     this.sessionProbe = createSharedControlSessionProbe(options, {
       isIntentionallyClosed: () => this.intentionallyClosed,
       hasSubscriptions: () => this.subscriptions.size > 0,
-      isReady: () =>
-        isSharedControlReady({ state: this.state, ws: this.ws, sharedKey: this.sharedKey }),
+      isReady: () => this.isReady(),
       getSocket: () => this.ws,
       probe: async (timeoutMs, signal) =>
         requireSessionProbeSuccess(
           await this.request('status.get', undefined, timeoutMs, undefined, signal)
         ),
-      // Why: the probe's socket identity guard makes the current generation authoritative.
       forceClose: (error) =>
         this.handleSocketClosed(error, this.socketGeneration.currentGeneration())
     })
@@ -87,7 +82,7 @@ export class RemoteRuntimeSharedControlConnection {
       params,
       timeoutMs,
       envelope,
-      ensureReady: () => this.ensureReadyWithTimeout(timeoutMs),
+      ensureReady: () => this.ensureReadyWithTimeout(timeoutMs, signal),
       send: (requestId) => this.sendRequest(requestId),
       retireRequestId: (requestId) => this.retiredRequestIds.retire(requestId),
       signal
@@ -116,11 +111,12 @@ export class RemoteRuntimeSharedControlConnection {
     this.intentionallyClosed = true
     this.socketGeneration.invalidate()
     this.reconnect.clear()
-    Array.from(this.subscriptions.values()).forEach((s) => this.closeSubscription(s.requestId))
+    Array.from(this.subscriptions.values()).forEach((s) => {
+      this.closeSubscription(s.requestId)
+    })
     this.closeSocket(error)
   }
 
-  // Why: pending timers only exist while a logical subscription owns reconnect.
   readonly retryNow = (): boolean => this.reconnect.retryNow()
 
   getDiagnostics(): SharedControlTypes.RemoteRuntimeSharedConnectionDiagnostics {
@@ -137,26 +133,37 @@ export class RemoteRuntimeSharedControlConnection {
   }
 
   reconnectNow(): void {
-    reconnectSharedControlNow(
-      !this.intentionallyClosed &&
-        !isSharedControlReady({ state: this.state, ws: this.ws, sharedKey: this.sharedKey }),
-      (error) => this.closeSocket(error, true),
-      () => this.open()
+    if (this.intentionallyClosed || this.isReady()) {
+      return
+    }
+    this.closeSocket(
+      remoteRuntimeUnavailableError('Refreshing remote runtime control transport.'),
+      true
     )
+    this.open()
   }
 
-  private ensureReadyWithTimeout(timeoutMs: number): Promise<void> {
-    if (isSharedControlReady({ state: this.state, ws: this.ws, sharedKey: this.sharedKey })) {
+  private ensureReadyWithTimeout(timeoutMs: number, signal?: AbortSignal): Promise<void> {
+    if (this.isReady()) {
       return Promise.resolve()
     }
-    return waitForSharedControlReadyWithTimeout({
+    return sharedControlReady.waitForSharedControlReadyWithTimeout({
       readyWaiters: this.readyWaiters,
       timeoutMs,
+      signal,
       open: () => {
         if (isSharedControlSocketGone(this.ws)) {
           this.open()
         }
       }
+    })
+  }
+
+  private isReady(): boolean {
+    return sharedControlReady.isSharedControlReady({
+      state: this.state,
+      ws: this.ws,
+      sharedKey: this.sharedKey
     })
   }
 
@@ -175,11 +182,17 @@ export class RemoteRuntimeSharedControlConnection {
         }
         this.handleSocketClosed(error, socketGeneration)
       },
-      onError: (error) => this.handleSocketClosed(error, socketGeneration),
-      onTextFrame: (frame) => this.handleTextFrame(frame, socketGeneration),
+      onError: (error) => {
+        this.handleSocketClosed(error, socketGeneration)
+      },
+      onTextFrame: (frame) => {
+        this.handleTextFrame(frame, socketGeneration)
+      },
       liveness: {
         options: this.options.liveness,
-        onDead: (error) => this.handleSocketClosed(error, socketGeneration)
+        onDead: (error) => {
+          this.handleSocketClosed(error, socketGeneration)
+        }
       }
     })
     if (!opened.ok) {
@@ -207,7 +220,9 @@ export class RemoteRuntimeSharedControlConnection {
       setState: (state) => {
         this.state = state
       },
-      handleSocketClosed: (error) => this.handleSocketClosed(error, socketGeneration),
+      handleSocketClosed: (error) => {
+        this.handleSocketClosed(error, socketGeneration)
+      },
       sendEncrypted: (payload) => this.sendEncrypted(payload),
       markReady: () => {
         this.lastConnectedAt = Date.now()
@@ -218,8 +233,12 @@ export class RemoteRuntimeSharedControlConnection {
         })
         this.sessionProbe.schedule()
       },
-      replaySubscriptions: () => this.replaySubscriptions(),
-      reconcileSubscriptionLifecycle: () => this.reconcileSubscriptionLifecycle()
+      replaySubscriptions: () => {
+        this.replaySubscriptions()
+      },
+      reconcileSubscriptionLifecycle: () => {
+        this.reconcileSubscriptionLifecycle()
+      }
     })
   }
 
@@ -252,7 +271,9 @@ export class RemoteRuntimeSharedControlConnection {
   private replaySubscriptions(): void {
     sharedControlSubscriptions.replaySharedControlSubscriptions({
       subscriptions: this.subscriptions,
-      send: (subscription) => this.sendSubscription(subscription),
+      send: (subscription) => {
+        this.sendSubscription(subscription)
+      },
       tagReplayedResponses: this.everReady
     })
     this.everReady = true
@@ -290,14 +311,18 @@ export class RemoteRuntimeSharedControlConnection {
         error,
         everReady: this.everReady,
         subscriptions: this.subscriptions,
-        closeSocket: () => this.closeSocket(error)
+        closeSocket: () => {
+          this.closeSocket(error)
+        }
       })
     ) {
       return
     }
     this.lastError = error.message
     if (this.subscriptions.size > 0 && !this.intentionallyClosed) {
-      this.reconnect.scheduleWithDefaultBackoff(this.intentionallyClosed, () => this.open())
+      this.reconnect.scheduleWithDefaultBackoff(this.intentionallyClosed, () => {
+        this.open()
+      })
     }
   }
 
@@ -313,7 +338,9 @@ export class RemoteRuntimeSharedControlConnection {
       ws: this.ws,
       error,
       preserveReadyWaitersAndPendingRequests,
-      clearReadyStableTimer: () => this.readyStableReset.clear()
+      clearReadyStableTimer: () => {
+        this.readyStableReset.clear()
+      }
     })
     this.sessionProbe.clear()
     this.ws = this.sharedKey = this.socketCleanup = null

@@ -132,7 +132,7 @@ import { getPaletteHostBadge, type PaletteHostBadge } from '@/components/cmd-j/p
 import PaletteFilterMenu from '@/components/cmd-j/PaletteFilterMenu'
 import PaletteFilterChips from '@/components/cmd-j/PaletteFilterChips'
 import { buildPaletteFilterModel } from '@/components/cmd-j/palette-filter-options'
-import { getProjectGroupExecutionHostIdForRows } from '@/components/sidebar/worktree-list-host-filtering'
+import { getProjectGroupExecutionHostIdForRows } from '@/components/sidebar/worktree-list/listing/host-filtering'
 import {
   buildPaletteFilterPredicate,
   EMPTY_PALETTE_FILTER,
@@ -3255,9 +3255,9 @@ function WorktreeJumpPaletteContent({
                 )
                 const WorkspaceTabIcon =
                   result.contentType === 'terminal' ? SquareTerminal : FileText
-                // Why null on a typed query: live corner pips belong to the frozen recent section —
-                // Open Tabs search results stay content-icon only (no agent status overlay).
-                const recentRow = hasQuery ? null : (recentTabRowById.get(entry.id) ?? null)
+                // Why regardless of query: a searched-for tab is exactly when you need to know it's
+                // still working — the map covers every open tab, not just the recent section.
+                const recentRow = recentTabRowById.get(entry.id) ?? null
 
                 return (
                   <CommandItem

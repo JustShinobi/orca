@@ -61,6 +61,7 @@ import {
 import { useHostClient, useForceReconnect } from '../../../../src/transport/client-context'
 import {
   useLastConnectedAt,
+  usePendingConnectionPath,
   useReconnectAttempt
 } from '../../../../src/transport/client-context-connection-metrics'
 import {
@@ -207,6 +208,7 @@ import {
   confirmsMirroredTabSelection,
   type AppliedSnapshotMarker
 } from '../../../../src/session/session-tab-snapshot-gate'
+import { hasPendingTerminalHandleRecoveryNeed } from '../../../../src/session/pending-terminal-handle-recovery'
 import {
   createInitialSessionAutoCreateState,
   useInitialSessionTerminalAutoCreate,
@@ -735,6 +737,7 @@ export default function SessionScreen() {
   const { client, state: connState } = useHostClient(hostId)
   const reconnectAttempts = useReconnectAttempt(hostId)
   const lastConnectedAt = useLastConnectedAt(hostId)
+  const pendingConnectionPath = usePendingConnectionPath(hostId)
   const forceReconnectHost = useForceReconnect()
   const { name: worktreeName, resolution: worktreeResolution } = useLiveWorktreeName({
     client,
@@ -2283,6 +2286,10 @@ export default function SessionScreen() {
     () =>
       closedTabTombstonesRef.current.size > 0 ||
       pendingBrowserFocusPageIdRef.current !== null ||
+      // Why: a pending-handle terminal only turns ready in a fresh snapshot. A live
+      // stream otherwise parks the poll, and a host that mints the handle without
+      // republishing strands the pane on its spinner forever (STA-4256).
+      hasPendingTerminalHandleRecoveryNeed(sessionTabsRef.current, activeSessionTabIdRef.current) ||
       // Why: a chat-covered handle that ran out of rearms and left `terminal.list`
       // was reminted by a desktop graph reload. Only a fresh tab snapshot carries
       // the replacement handle, so force one instead of holding the composer locked.
@@ -4144,7 +4151,8 @@ export default function SessionScreen() {
     state: connState,
     reconnectAttempts,
     lastConnectedAt,
-    endpoint: hostEndpoint
+    endpoint: hostEndpoint,
+    pendingPath: pendingConnectionPath
   })
   const showConnectionRetry =
     connectionVerdict.kind === 'warning' || connectionVerdict.kind === 'unreachable'
