@@ -1,12 +1,10 @@
 name: Ad-hoc Fork Release Build
 
-# Why: this fork carries stablyai/orca#8884 (headless accounts CLI: list/add/select/rm)
-# and stablyai/orca#11977 (remote-server usage sync fix) merged on top of main, ahead of
-# upstream review/merge. release-cut.yml is gated to `github.repository == 'stablyai/orca'`
-# and no-ops on forks; pr.yml's package/package_windows jobs only run
-# `electron-builder --dir` for smoke-testing, never the real installer targets. This
-# workflow runs the same build steps but packages the actual AppImage / NSIS installer
-# and uploads them as run artifacts. Unsigned — no SignPath secrets exist on this fork.
+# Why: this fork carries custom features and improvements on top of main.
+# release-cut.yml is gated to `github.repository == 'stablyai/orca'` and no-ops on forks.
+# This workflow packages the real AppImage / NSIS installer, publishes them directly
+# to GitHub Releases (zero Actions storage quota used), and retains only the 3 most
+# recent releases automatically.
 
 on:
   workflow_dispatch:
@@ -16,6 +14,14 @@ on:
         required: false
         type: string
         default: justshinobi/main
+      prerelease:
+        description: Mark as pre-release
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
 
 jobs:
   build-linux:
@@ -70,7 +76,7 @@ jobs:
       - name: Package AppImage
         env:
           ORCA_REUSE_PREPARED_NATIVE_RUNTIME: '1'
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # Why: config/electron-builder.config.cjs hardcodes publish.owner/repo to
         # stablyai/orca (the upstream project). Override both so this fork's
         # build publishes to JustShinobi/orca instead of the real upstream repo.
@@ -79,13 +85,13 @@ jobs:
             -c.publish.owner="${{ github.repository_owner }}" \
             -c.publish.repo="${{ github.event.repository.name }}"
 
-      - name: Upload AppImage
+      - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:
           name: orca-linux-appimage
           path: dist/*.AppImage
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
   build-windows:
     name: Build Windows installer
@@ -133,7 +139,7 @@ jobs:
         env:
           ORCA_REUSE_PREPARED_NATIVE_RUNTIME: '1'
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # Why: config/electron-builder.config.cjs hardcodes publish.owner/repo to
         # stablyai/orca (the upstream project). Override both so this fork's
         # build publishes to JustShinobi/orca instead of the real upstream repo.
@@ -142,10 +148,77 @@ jobs:
             "-c.publish.owner=${{ github.repository_owner }}" `
             "-c.publish.repo=${{ github.event.repository.name }}"
 
-      - name: Upload Windows installer
+      - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: orca-windows-setup
           path: dist/*.exe
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Download Linux AppImage
+        uses: actions/download-artifact@v4
+        with:
+          name: orca-linux-appimage
+          path: release-assets
+
+      - name: Download Windows Installer
+        uses: actions/download-artifact@v4
+        with:
+          name: orca-windows-setup
+          path: release-assets
+
+      - name: Create Release and Prune Old Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          VERSION=$(node -p "require('./package.json').version")
+          DATE=$(date +'%Y%m%d-%H%M')
+          TAG="v${VERSION}-fork-${DATE}"
+          TITLE="Orca Fork v${VERSION} (${DATE})"
+
+          echo "Publishing release: $TAG"
+          ls -la release-assets/
+
+          PRERELEASE_FLAG=""
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          gh release create "$TAG" \
+            release-assets/* \
+            --title "$TITLE" \
+            --notes "Automated release build for ref \`${{ inputs.ref }}\` (commit \`${{ github.sha }}\`)." \
+            $PRERELEASE_FLAG
+
+          echo "Release created successfully: https://github.com/${{ github.repository }}/releases/tag/$TAG"
+
+          # Prune old releases to keep only the 3 most recent
+          echo "Checking existing releases (retaining latest 3)..."
+          OLD_TAGS=$(gh release list --limit 100 --json tagName,createdAt --jq 'sort_by(.createdAt) | reverse | .[3:] | .[].tagName' || true)
+
+          for old_tag in $OLD_TAGS; do
+            if [ -n "$old_tag" ]; then
+              echo "Pruning older release: $old_tag"
+              gh release delete "$old_tag" --yes --cleanup-tag || true
+            fi
+          done
+
+          echo "Retention check complete. Kept the latest 3 releases."
