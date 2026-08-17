@@ -68,6 +68,7 @@ import type {
   AgentProviderSessionMetadata,
   SleepingAgentLaunchConfig
 } from '../../../../shared/agent-session-resume'
+import type { AutoSwitchRateLimitAgent } from '../../../../shared/agent-rate-limit-detection'
 import { resolveTerminalFontWeights } from '../../../../shared/terminal-fonts'
 import {
   buildFontFamily,
@@ -295,6 +296,13 @@ type UseTerminalPaneLifecycleDeps = {
   onPtyRecoveryStateRef?: React.RefObject<
     (paneId: number, state: PtyTransportRecoveryState | null) => void
   >
+  onAgentRateLimitDetected?: (event: {
+    paneId: number
+    paneKey: string
+    ptyId: string
+    agent: AutoSwitchRateLimitAgent
+    providerSession: AgentProviderSessionMetadata
+  }) => void
   clearTabPtyId: (tabId: string, ptyId: string) => void
   consumeSuppressedPtyExit: (ptyId: string) => boolean
   isPtyShutdownPending: (ptyId: string) => boolean
@@ -659,6 +667,7 @@ export function useTerminalPaneLifecycle({
   onAgentExitedRef,
   onPtyErrorRef,
   onPtyRecoveryStateRef,
+  onAgentRateLimitDetected,
   clearTabPtyId,
   consumeSuppressedPtyExit,
   isPtyShutdownPending,
@@ -901,6 +910,7 @@ export function useTerminalPaneLifecycle({
       onAgentExitedRef,
       onPtyErrorRef,
       onPtyRecoveryStateRef,
+      onAgentRateLimitDetected,
       clearTabPtyId,
       consumeSuppressedPtyExit,
       isPtyShutdownPending,

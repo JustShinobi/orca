@@ -304,6 +304,7 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     activeCodexManagedAccountIdsByRuntime: { host: null, wsl: {} },
     claudeManagedAccounts: [],
     activeClaudeManagedAccountId: null,
+    autoSwitchRateLimitedAccounts: false,
     terminalScopeHistoryByWorktree: true,
     terminalHiddenViewParking: true,
     // C1 kill switches — runtime reads stay `!== false` so older persisted

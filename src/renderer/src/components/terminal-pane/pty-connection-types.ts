@@ -16,6 +16,7 @@ import type { TerminalKittyKeyboardModeTracker } from '../../../../shared/termin
 import type { PtyTransportRecoveryState } from './pty-transport-types'
 import type { SessionOptionValue } from '../../../../shared/native-chat-session-options'
 import type { DirectSshPaneRetryAttemptId } from '@/store/slices/direct-ssh-terminal-recovery'
+import type { AutoSwitchRateLimitAgent } from '../../../../shared/agent-rate-limit-detection'
 
 export type PtyConnectionDeps = {
   tabId: string
@@ -69,6 +70,13 @@ export type PtyConnectionDeps = {
   onPtyRecoveryStateRef?: React.RefObject<
     (paneId: number, state: PtyTransportRecoveryState | null) => void
   >
+  onAgentRateLimitDetected?: (event: {
+    paneId: number
+    paneKey: string
+    ptyId: string
+    agent: AutoSwitchRateLimitAgent
+    providerSession: AgentProviderSessionMetadata
+  }) => void
   clearTabPtyId: (tabId: string, ptyId: string) => void
   consumeSuppressedPtyExit: (ptyId: string) => boolean
   isPtyShutdownPending: (ptyId: string) => boolean

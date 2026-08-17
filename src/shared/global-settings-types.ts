@@ -277,6 +277,10 @@ export type GlobalSettings = {
   claudeManagedAccounts: ClaudeManagedAccount[]
   activeClaudeManagedAccountId: string | null
   activeClaudeManagedAccountIdsByRuntime?: ClaudeManagedAccountRuntimeSelection
+  /** When enabled, Orca exits a rate-limited managed Claude/Codex session,
+   *  switches to another managed account with available quota, resumes the
+   *  same provider session, then sends "continue". */
+  autoSwitchRateLimitedAccounts?: boolean
   /** Per-worktree shell history file so ArrowUp doesn't surface other worktrees' commands. Defaults to true. */
   terminalScopeHistoryByWorktree: boolean
   /** Kill switch for hidden terminal view parking: unmount long-hidden panes while a pane-less watcher keeps PTY side effects alive. */

@@ -340,6 +340,11 @@ import {
 } from './renderer-owned-agent-status-registry'
 import type { DirectSshPaneRetryAttempt } from '@/store/slices/direct-ssh-terminal-recovery'
 import { directSshAuthoritiesEqual } from '@/store/slices/direct-ssh-terminal-authority-ledger'
+import {
+  detectAgentRateLimitOutput,
+  isAutoSwitchRateLimitAgent,
+  type AgentRateLimitDetectionState
+} from '../../../../shared/agent-rate-limit-detection'
 
 const pendingSpawnByPaneKey = new Map<string, Promise<string | null>>()
 const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
@@ -1381,6 +1386,9 @@ export function connectPanePty(
   const clearRegisteredStartupLaunchConfig = (): void => {
     useAppStore.getState().clearAgentLaunchConfig(cacheKey)
   }
+  const rateLimitDetectionState: AgentRateLimitDetectionState = { tail: '' }
+  let lastRateLimitDetectionKey: string | null = null
+  let rateLimitDetectionPtyId: string | null = null
   const neutralTerminalTitle = (): string => {
     const state = useAppStore.getState()
     const tab = (state.tabsByWorktree[deps.worktreeId] ?? []).find(
@@ -7750,6 +7758,39 @@ export function connectPanePty(
             salvageRendererQueriesFromDiscardedRestoreData(data)
           }
           return
+        }
+      }
+      const currentPtyId = transport.getPtyId()
+      if (currentPtyId !== rateLimitDetectionPtyId) {
+        // Why: pane bindings can swap PTYs; stale split output must not trigger a new session.
+        rateLimitDetectionPtyId = currentPtyId
+        rateLimitDetectionState.tail = ''
+        lastRateLimitDetectionKey = null
+      }
+      if (
+        currentPtyId &&
+        deps.onAgentRateLimitDetected &&
+        useAppStore.getState().settings?.autoSwitchRateLimitedAccounts === true
+      ) {
+        const entry = useAppStore.getState().agentStatusByPaneKey[cacheKey]
+        const agent = entry?.agentType
+        const providerSession = normalizeAgentProviderSession(entry?.providerSession)
+        if (
+          isAutoSwitchRateLimitAgent(agent) &&
+          providerSession &&
+          detectAgentRateLimitOutput(agent, data, rateLimitDetectionState)
+        ) {
+          const detectionKey = `${currentPtyId}:${agent}:${providerSession.key}:${providerSession.id}`
+          if (lastRateLimitDetectionKey !== detectionKey) {
+            lastRateLimitDetectionKey = detectionKey
+            deps.onAgentRateLimitDetected({
+              paneId: pane.id,
+              paneKey: cacheKey,
+              ptyId: currentPtyId,
+              agent,
+              providerSession
+            })
+          }
         }
       }
       respondToTerminalPixelSizeQueries(data)
