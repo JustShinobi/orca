@@ -1,14 +1,14 @@
 import { isValidPtySize } from './daemon-pty-size'
-import { SessionOutputPlane, type AttachedClient } from './session-output-plane'
-import { SessionProducerPause } from './session-producer-pause'
+import type { SessionOutputPlane, AttachedClient } from './session-output-plane'
+import type { SessionProducerPause } from './session-producer-pause'
 import {
-  SessionShellReadyBarrier,
+  type SessionShellReadyBarrier,
   SHELL_READY_TIMEOUT_MS,
   SHELL_READY_LATE_MARKER_GRACE_MS,
   CODEX_SHELL_READY_TIMEOUT_MS
 } from './session-shell-ready-barrier'
 import {
-  SessionTerminationController,
+  type SessionTerminationController,
   IMMEDIATE_KILL_PHYSICAL_EXIT_TIMEOUT_MS,
   SESSION_FORCE_KILL_RETRY_MS
 } from './session-termination-controller'
@@ -17,15 +17,24 @@ import type { SubprocessHandle } from './session-subprocess-handle'
 import type { SessionOptions } from './session-options'
 import type { TuiAgent } from '../../shared/tui-agent'
 import { randomUUID } from 'node:crypto'
-import { PtyStartupIngress } from '../../shared/pty-startup-ingress'
-import { extractOnlyCookedEchoSafeQueryReplies } from '../../shared/terminal-query-reply'
+import type { PtyStartupIngress } from '../../shared/pty-startup-ingress'
 import type {
   SessionState,
   ShellReadyState,
   TakePendingOutputResult,
   TerminalSnapshot
 } from './types'
-import { createPtySlaveEchoProbe } from '../../shared/pty-slave-line-discipline-echo'
+import {
+  teardownSessionSubprocess,
+  handleSessionSubprocessExit,
+  disposeSession
+} from './session-subprocess-teardown'
+import { writeSessionData, writeSessionStartupCommand } from './session-write-router'
+import {
+  collectSessionPendingOutput,
+  prepareSessionForFinalSnapshot
+} from './session-pending-output-collector'
+import { createSessionComponents } from './session-components'
 
 export {
   SHELL_READY_TIMEOUT_MS,
@@ -59,45 +68,18 @@ export class Session {
     this.wslDistro = opts.wslDistro ?? null
     this.subprocess = opts.subprocess
     this.onSessionExit = opts.onExit
-    this.output = new SessionOutputPlane({
-      cols: opts.cols,
-      rows: opts.rows,
-      scrollback: opts.scrollback,
-      wslDistro: opts.wslDistro,
-      historySeedChunks: opts.historySeedChunks
-    })
-    this.producerPause = new SessionProducerPause(this.subprocess)
-    this.termination = new SessionTerminationController({
-      sessionId: this.sessionId,
-      subprocess: this.subprocess,
-      launchAgent: this.launchAgent,
-      isExited: () => this._state === 'exited',
-      releaseProducerPause: (pauseOpts) => this.producerPause.release(pauseOpts)
-    })
 
-    this.shellReady = new SessionShellReadyBarrier({
-      sessionId: this.sessionId,
-      subprocess: this.subprocess,
-      responderParser: this.output.responderParser,
-      shellReadySupported: opts.shellReadySupported,
-      shellReadyTimeoutMs: opts.shellReadyTimeoutMs,
-      shellReadyLateMarkerGraceMs: opts.shellReadyLateMarkerGraceMs,
-      installDeviceAttributesFilter: () => this.output.installDeviceAttributesFilter(),
-      releaseDeviceAttributesFilter: () => this.output.releaseDeviceAttributesFilter(),
-      acceptStartupIngress: (data) => this.startupIngress.accept(data)
+    const components = createSessionComponents({
+      opts,
+      getState: () => this._state,
+      handleSubprocessData: (data) => this.handleSubprocessData(data),
+      handleSubprocessExit: (code) => this.handleSubprocessExit(code)
     })
-
-    const echoProbe = createPtySlaveEchoProbe(this.subprocess.slavePath)
-    this.startupIngress = new PtyStartupIngress({
-      ...(opts.startupIngress ? { intent: opts.startupIngress } : {}),
-      ...(opts.ownerBackend ? { ownerBackend: opts.ownerBackend } : {}),
-      write: (data) => this.subprocess.write(data),
-      onEmission: (emission) => this.output.emit(emission),
-      ...(echoProbe ? { echoProbe } : {})
-    })
-    this.shellReady.startPromptReadinessProbe()
-    this.subprocess.onData((data) => this.handleSubprocessData(data))
-    this.subprocess.onExit((code) => this.handleSubprocessExit(code))
+    this.output = components.output
+    this.producerPause = components.producerPause
+    this.termination = components.termination
+    this.shellReady = components.shellReady
+    this.startupIngress = components.startupIngress
   }
 
   get state(): SessionState {
@@ -129,29 +111,25 @@ export class Session {
   }
 
   write(data: string): void {
-    if (this._state === 'exited' || this._disposed) {
-      return
-    }
-    if (
-      extractOnlyCookedEchoSafeQueryReplies(data) &&
-      this.startupIngress.answerLiveQueryReply(data)
-    ) {
-      return
-    }
-    if (this.shellReady.tryEnqueue(data)) {
-      return
-    }
-    this.subprocess.write(data)
+    writeSessionData({
+      data,
+      disposed: this._disposed,
+      state: this._state,
+      startupIngress: this.startupIngress,
+      shellReady: this.shellReady,
+      subprocess: this.subprocess
+    })
   }
 
   writeStartupCommand(data: string): void {
-    if (this._state === 'exited' || this._disposed) {
-      return
-    }
-    if (this.shellReady.writeStartupCommand(data)) {
-      return
-    }
-    this.write(data)
+    writeSessionStartupCommand({
+      data,
+      disposed: this._disposed,
+      state: this._state,
+      startupIngress: this.startupIngress,
+      shellReady: this.shellReady,
+      subprocess: this.subprocess
+    })
   }
 
   resize(cols: number, rows: number): void {
@@ -227,14 +205,15 @@ export class Session {
     includeSnapshot: boolean,
     opts: { teardownSnapshot?: boolean } = {}
   ): TakePendingOutputResult | null {
-    if (this._disposed) {
-      return null
-    }
-    const releasedHeldBytes =
-      includeSnapshot && opts.teardownSnapshot === true ? this.prepareForFinalSnapshot() : ''
-    return this.output.takePendingOutput(includeSnapshot, releasedHeldBytes, () =>
-      this.getSnapshot()
-    )
+    return collectSessionPendingOutput({
+      disposed: this._disposed,
+      includeSnapshot,
+      teardownSnapshot: opts.teardownSnapshot,
+      shellReady: this.shellReady,
+      startupIngress: this.startupIngress,
+      output: this.output,
+      getSnapshot: (o) => this.getSnapshot(o)
+    })
   }
 
   getCwd(): string | null {
@@ -262,40 +241,28 @@ export class Session {
   }
 
   prepareForFinalSnapshot(): string {
-    const held = this.shellReady.releaseHeldBytes()
-    this.startupIngress.snapshotBarrier()
-    return held
+    return prepareSessionForFinalSnapshot(this.shellReady, this.startupIngress)
   }
 
   dispose(): void {
     if (this._disposed) {
       return
     }
-    this.shellReady.releaseDeviceAttributes()
-    this.shellReady.releaseHeldBytes()
-    this.startupIngress.drainAndClose()
-    const wasTerminating = this.termination.isTerminating && this._state !== 'exited'
-    const clientsToNotify = wasTerminating ? this.output.snapshotClients() : []
-    if (wasTerminating) {
-      try {
-        this.subprocess.forceKill()
-      } catch {
-        /* child may already be gone */
-      }
-      this._exitCode = -1
-      this.termination.clearTerminating()
+    const result = disposeSession({
+      incarnationId: this.incarnationId,
+      state: this._state,
+      subprocess: this.subprocess,
+      output: this.output,
+      producerPause: this.producerPause,
+      termination: this.termination,
+      shellReady: this.shellReady,
+      startupIngress: this.startupIngress,
+      teardownSubprocess: () => this.#teardownSubprocess()
+    })
+    if (result.exitCode !== null) {
+      this._exitCode = result.exitCode
     }
-
-    this.#teardownSubprocess()
     this._state = 'exited'
-
-    this.output.clearClients()
-    this.shellReady.clearPendingWrites()
-    this.output.disposeEmulator()
-
-    for (const client of clientsToNotify) {
-      client.onExit(-1, this.incarnationId)
-    }
   }
 
   disposeSubprocess(): void {
@@ -313,11 +280,12 @@ export class Session {
       return
     }
     this._disposed = true
-    this.output.markDisposed()
-    this.producerPause.release({ resume: true })
-    this.termination.cancelForceKillFallback()
-    this.shellReady.dispose()
-    this.termination.disposeSubprocessHandle()
+    teardownSessionSubprocess({
+      output: this.output,
+      producerPause: this.producerPause,
+      termination: this.termination,
+      shellReady: this.shellReady
+    })
   }
 
   private handleSubprocessData(data: string): void {
@@ -332,24 +300,18 @@ export class Session {
     if (this._disposed) {
       return
     }
-
-    this.shellReady.releaseDeviceAttributes()
-    this.shellReady.disposePromptReadinessProbe()
-    this.shellReady.releaseHeldBytes()
-    this.startupIngress.drainAndClose()
     this._exitCode = code
     this._state = 'exited'
-    this.termination.clearTerminating()
-    this.producerPause.release({ resume: false })
-
-    this.termination.cancelForceKillFallback()
-    this.shellReady.clearReadyTimer()
-    this.shellReady.reportUndeliveredStartupCommand()
-    this.shellReady.clearFlushGate()
-    this.termination.disposeSubprocessHandle()
-
-    this.output.broadcastExit(code, this.incarnationId)
-    this.onSessionExit?.(code)
+    handleSessionSubprocessExit({
+      code,
+      incarnationId: this.incarnationId,
+      output: this.output,
+      producerPause: this.producerPause,
+      termination: this.termination,
+      shellReady: this.shellReady,
+      startupIngress: this.startupIngress,
+      onSessionExit: this.onSessionExit
+    })
   }
 
   closeStartupQueryAuthority(): number {
