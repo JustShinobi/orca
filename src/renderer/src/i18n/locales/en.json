@@ -1035,7 +1035,7 @@
         "e52bed9264": "No checks reported yet",
         "90020cc1f3": "This pull request has no reported checks yet.",
         "ecffebc251": "No checks found",
-        "5dddefdf58": "Open in GitHub",
+        "checkOpenInBrowser": "Open in browser",
         "744197c84d": "No inline output is available for this check.",
         "08d072664d": "Jobs",
         "96d8f36798": "Annotations",
@@ -1183,7 +1183,15 @@
         "checkActionRequiredHint": "This check needs a manual action on GitHub (for example, approving the workflow run) before merging is unblocked.",
         "e15a8b77ef": "No inline details are available for this check.",
         "e45324fbed": "Failed to load check details.",
-        "dcb3c546fe": "Retry"
+        "dcb3c546fe": "Retry",
+        "85a2b66f54": "Open files on GitHub",
+        "86d84a17ca": "Add a review comment",
+        "d9fa90b625": "Failed to load diff.",
+        "4aecf121e7": "Close",
+        "8812225174": "Reopen",
+        "09d67a0f9b": "Failed to close pull request",
+        "88809e79db": "Failed to reopen pull request",
+        "00f55cc17b": "Repository access is unavailable for this pull request."
       },
       "GitLabItemDialog": {
         "65e784c1f1": "Reopen",
@@ -1491,6 +1499,9 @@
         "connectTimedOut": "Connection timed out. It may still be connecting in the background.",
         "connectingHost": "Connecting…",
         "connectHost": "Connect",
+        "setLocation": "Set project location",
+        "setLocationOnHost": "Set project location on {{host}}",
+        "setLocationTooltip": "Choose a folder or clone this project onto {{host}}.",
         "addHost": "Add host",
         "addHostHint": "Register another machine or Orca server",
         "addSshHost": "Add SSH host",
@@ -12989,6 +13000,15 @@
       },
       "new": {
         "workspace": {
+          "SetProjectLocationDialog": {
+            "title": "Set project location",
+            "description": "Choose where {{project}} lives on {{host}}.",
+            "browseFolder": "Browse folder",
+            "browseFolderHelp": "Use an existing checkout or folder on this host.",
+            "cloneFromUrl": "Clone from URL",
+            "cloneFromUrlHelp": "Clone this repository onto {{host}}.",
+            "saveLocation": "Set location"
+          },
           "SmartWorkspaceNameField": {
             "2a0d535f69": "Create new branch",
             "a44229ce4d": "as workspace name",

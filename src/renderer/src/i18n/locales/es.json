@@ -904,7 +904,7 @@
         "e52bed9264": "Aún no se reportaron checks",
         "90020cc1f3": "Este pull request aún no tiene checks reportados.",
         "ecffebc251": "No se encontraron checks",
-        "5dddefdf58": "Abrir en GitHub",
+        "checkOpenInBrowser": "Abrir en el navegador",
         "744197c84d": "No hay output inline disponible para este check.",
         "08d072664d": "Jobs",
         "96d8f36798": "Anotaciones",

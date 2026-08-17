@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useRpcClientContext, type RpcClientContextValue } from './client-context'
-import type { MobileConnectionPath } from './stable-logical-rpc-client'
 
 export function useReconnectAttempt(hostId: string | undefined): number {
   return useHostMetric(hostId, (context, id) => context.getReconnectAttempt(id), 0)
@@ -8,10 +7,6 @@ export function useReconnectAttempt(hostId: string | undefined): number {
 
 export function useLastConnectedAt(hostId: string | undefined): number | null {
   return useHostMetric(hostId, (context, id) => context.getLastConnectedAt(id), null)
-}
-
-export function usePendingConnectionPath(hostId: string | undefined): MobileConnectionPath | null {
-  return useHostMetric(hostId, (context, id) => context.getPendingPath(id), null)
 }
 
 function useHostMetric<T>(

@@ -76,7 +76,6 @@ export function RpcClientProvider({ children }: { children: ReactNode }) {
       primedHostsRef.current.delete(hostId)
     }
     entry?.unsubState()
-    entry?.unsubConnectionPath()
     storeRef.current.delete(hostId)
     entry?.client.close()
     notifyHostState(hostId, 'disconnected')
@@ -243,7 +242,6 @@ export function RpcClientProvider({ children }: { children: ReactNode }) {
       manualDemandRef.current.add(hostId)
       if (entry) {
         entry.unsubState()
-        entry.unsubConnectionPath()
         entry.client.close()
         storeRef.current.delete(hostId)
       }
@@ -262,10 +260,8 @@ export function RpcClientProvider({ children }: { children: ReactNode }) {
     [openEntry]
   )
 
-  const selectors = useMemo(
-    () => createHostClientSelectors(storeRef.current, pendingOpensRef.current),
-    []
-  )
+  const { getKnownState, getState, getReconnectAttempt, getLastConnectedAt, getActivePath } =
+    useMemo(() => createHostClientSelectors(storeRef.current, pendingOpensRef.current), [])
 
   const subscribeHostState = useCallback(
     (hostId: string, listener: (state: ConnectionState) => void) =>
@@ -322,7 +318,11 @@ export function RpcClientProvider({ children }: { children: ReactNode }) {
       refreshHostClient,
       forgetHostClient,
       disconnectHostClient,
-      ...selectors,
+      getState,
+      getKnownState,
+      getReconnectAttempt,
+      getLastConnectedAt,
+      getActivePath,
       subscribeHostState,
       getAllClients,
       subscribeAllHosts,
@@ -337,7 +337,11 @@ export function RpcClientProvider({ children }: { children: ReactNode }) {
       refreshHostClient,
       forgetHostClient,
       disconnectHostClient,
-      selectors,
+      getState,
+      getKnownState,
+      getReconnectAttempt,
+      getLastConnectedAt,
+      getActivePath,
       subscribeHostState,
       getAllClients,
       subscribeAllHosts,

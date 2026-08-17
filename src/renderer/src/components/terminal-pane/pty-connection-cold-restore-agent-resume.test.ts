@@ -1,6 +1,7 @@
 import type * as React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makePaneKey } from '../../../../shared/stable-pane-id'
+import { RESET_GRAPHIC_RENDITION } from '../../../../shared/terminal-mode-reset-profiles'
 import { flushAsyncTicks } from './pty-connection-test-async'
 import { UUID_RE } from './pty-connection-test-constants'
 import {
@@ -195,7 +196,10 @@ describe('connectPanePty', () => {
     await flushAsyncTicks(20)
     await new Promise((resolve) => setTimeout(resolve, 70))
 
-    expect(pane.terminal.write).toHaveBeenCalledWith('cold-payload', expect.any(Function))
+    expect(pane.terminal.write).toHaveBeenCalledWith(
+      `${RESET_GRAPHIC_RENDITION}cold-payload`,
+      expect.any(Function)
+    )
     expect(pane.terminal.write).not.toHaveBeenCalledWith(
       expect.stringContaining('--- session restored ---'),
       expect.any(Function)
@@ -286,7 +290,10 @@ describe('connectPanePty', () => {
     await flushAsyncTicks(20)
     await new Promise((resolve) => setTimeout(resolve, 70))
 
-    expect(pane.terminal.write).toHaveBeenCalledWith('cold-payload', expect.any(Function))
+    expect(pane.terminal.write).toHaveBeenCalledWith(
+      `${RESET_GRAPHIC_RENDITION}cold-payload`,
+      expect.any(Function)
+    )
     expect(transport.sendInput).not.toHaveBeenCalled()
     expect(transport.connect).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -361,7 +368,10 @@ describe('connectPanePty', () => {
     await flushAsyncTicks(20)
     await new Promise((resolve) => setTimeout(resolve, 70))
 
-    expect(pane.terminal.write).toHaveBeenCalledWith('cold-payload', expect.any(Function))
+    expect(pane.terminal.write).toHaveBeenCalledWith(
+      `${RESET_GRAPHIC_RENDITION}cold-payload`,
+      expect.any(Function)
+    )
     expect(pane.terminal.write).not.toHaveBeenCalledWith(
       expect.stringContaining('--- session restored ---'),
       expect.any(Function)
@@ -512,7 +522,10 @@ describe('connectPanePty', () => {
     await flushAsyncTicks(20)
     await new Promise((resolve) => setTimeout(resolve, 70))
 
-    expect(pane.terminal.write).toHaveBeenCalledWith('cold-payload', expect.any(Function))
+    expect(pane.terminal.write).toHaveBeenCalledWith(
+      `${RESET_GRAPHIC_RENDITION}cold-payload`,
+      expect.any(Function)
+    )
     expect(deps.onShowSessionRestoredBanner).toHaveBeenCalledWith(1, 'restored')
     expect(transport.sendInput).not.toHaveBeenCalled()
     expect(transport.connect).toHaveBeenCalledWith(
@@ -589,7 +602,10 @@ describe('connectPanePty', () => {
     await flushAsyncTicks(20)
     await new Promise((resolve) => setTimeout(resolve, 70))
 
-    expect(pane.terminal.write).toHaveBeenCalledWith('cold-payload', expect.any(Function))
+    expect(pane.terminal.write).toHaveBeenCalledWith(
+      `${RESET_GRAPHIC_RENDITION}cold-payload`,
+      expect.any(Function)
+    )
     expect(deps.onShowSessionRestoredBanner).not.toHaveBeenCalled()
     expect(transport.connect).not.toHaveBeenCalledWith(
       expect.objectContaining({ command: expect.stringContaining('resume') })

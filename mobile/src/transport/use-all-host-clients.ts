@@ -136,19 +136,10 @@ export function useAllHostClients(hostIds: string[], options?: UseAllHostClients
       client: RpcClient
       state: ConnectionState
       path: MobileConnectionPath
-      pendingPath: MobileConnectionPath | null
     }>((hostId) => {
       const client = clientsByHostId.get(hostId)
       return client
-        ? [
-            {
-              hostId,
-              client,
-              state: ctx.getState(hostId),
-              path: ctx.getActivePath(hostId),
-              pendingPath: ctx.getPendingPath(hostId)
-            }
-          ]
+        ? [{ hostId, client, state: ctx.getState(hostId), path: ctx.getActivePath(hostId) }]
         : []
     })
   }, [ctx, hostIds, tick])
