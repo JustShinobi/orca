@@ -18,21 +18,11 @@ export type ServePairingReadiness =
       guidance: string
     }
 
-export type ServePreviewReadiness = {
-  bindHost: string
-  port: number
-  /** Wildcard origin clients hit, e.g. `https://*.preview.example.com`. */
-  origin: string
-  auth: 'open' | 'token'
-  token: string | null
-}
-
 export type ServeReadiness = {
   runtimeId: string
   boundEndpoint: string | null
   advertisedEndpoint: string | null
   managedWslCliReconciliation: 'pending' | 'settled' | 'failed'
-  preview?: ServePreviewReadiness
   pairing: ServePairingReadiness
 }
 
@@ -87,7 +77,6 @@ export function renderServeReadiness(
       boundEndpoint: readiness.boundEndpoint,
       advertisedEndpoint: readiness.advertisedEndpoint,
       managedWslCliReconciliation: readiness.managedWslCliReconciliation,
-      ...(readiness.preview ? { preview: readiness.preview } : {}),
       pairing: readiness.pairing
     })
   }
@@ -100,14 +89,6 @@ function renderHumanReadiness(readiness: ServeReadiness): string {
     `Bound endpoint: ${readiness.boundEndpoint ?? 'websocket unavailable'}`,
     `Advertised endpoint: ${readiness.advertisedEndpoint ?? 'unavailable'}`
   ]
-  if (readiness.preview) {
-    lines.push(
-      `Preview proxy: ${readiness.preview.origin} → ${readiness.preview.bindHost}:${readiness.preview.port} (auth: ${readiness.preview.auth})`
-    )
-    if (readiness.preview.token) {
-      lines.push(`Preview token: ${readiness.preview.token}`)
-    }
-  }
   if (readiness.pairing.available) {
     if (readiness.pairing.webClientUrl) {
       lines.push(`Web client URL: ${readiness.pairing.webClientUrl}`)

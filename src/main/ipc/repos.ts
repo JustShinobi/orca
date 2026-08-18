@@ -369,8 +369,7 @@ async function addLocalRepoFromPath(
   return { repo, alreadyExisted: false }
 }
 
-/** Add an SSH-hosted Git repository or folder to the persisted project catalog. */
-export async function addRemoteRepoFromPath(
+async function addRemoteRepoFromPath(
   store: Store,
   args: {
     connectionId: string
@@ -1175,8 +1174,7 @@ async function resolveSshProjectGroupPath(connectionId: string, path: string): P
   return path
 }
 
-/** Scan a local or SSH-owned directory using the filesystem providers available to IPC callers. */
-export async function scanNestedReposForIpc(args: {
+async function scanNestedReposForIpc(args: {
   path: string
   connectionId?: string
   options?: unknown
@@ -1329,14 +1327,14 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
   ipcMain.removeHandler('sparsePresets:save')
   ipcMain.removeHandler('sparsePresets:remove')
 
+  // Why one shared reference: enrichment dedupes coalesced callers by callback identity, so a fresh
+  // closure per list call would stack up (and re-broadcast) for the length of a slow sweep.
+  const broadcastReposChanged = (): void => notifyReposChanged(mainWindow)
+
   ipcMain.handle('repos:list', () => {
-    enrichMissingRepoGitRemoteIdentities(store, {
-      onChanged: () => notifyReposChanged(mainWindow)
-    })
+    enrichMissingRepoGitRemoteIdentities(store, { onChanged: broadcastReposChanged })
     // Why: username resolution spawns git/gh, so keep it off this sync handler (issue #7225); it re-lists when values land.
-    enrichRepoGitUsernames(store, {
-      onChanged: () => notifyReposChanged(mainWindow)
-    })
+    enrichRepoGitUsernames(store, { onChanged: broadcastReposChanged })
     return store.getRepos()
   })
 
@@ -1347,9 +1345,7 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
   )
 
   ipcMain.handle('projects:list', () => {
-    enrichMissingRepoGitRemoteIdentities(store, {
-      onChanged: () => notifyReposChanged(mainWindow)
-    })
+    enrichMissingRepoGitRemoteIdentities(store, { onChanged: broadcastReposChanged })
     return store.getProjects()
   })
 
@@ -1363,9 +1359,7 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
   })
 
   ipcMain.handle('projectHostSetups:list', () => {
-    enrichMissingRepoGitRemoteIdentities(store, {
-      onChanged: () => notifyReposChanged(mainWindow)
-    })
+    enrichMissingRepoGitRemoteIdentities(store, { onChanged: broadcastReposChanged })
     return store.getProjectHostSetups()
   })
 

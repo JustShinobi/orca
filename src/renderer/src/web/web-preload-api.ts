@@ -962,6 +962,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       drop: () => {},
       dropByTabPrefix: () => {},
       retirePaneAuthority: () => {},
+      restorePaneAuthority: () => {},
       transferPaneAuthority: () => {}
     },
     mobile: {
@@ -2916,6 +2917,8 @@ function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
     onFocusTerminal: () => noopUnsubscribe,
     onFocusEditorTab: () => noopUnsubscribe,
     onCloseSessionTab: () => noopUnsubscribe,
+    onSessionTabCloseRequest: () => noopUnsubscribe,
+    respondSessionTabClose: () => {},
     onMoveSessionTab: () => noopUnsubscribe,
     onOpenFileFromMobile: () => noopUnsubscribe,
     onOpenDiffFromMobile: () => noopUnsubscribe,

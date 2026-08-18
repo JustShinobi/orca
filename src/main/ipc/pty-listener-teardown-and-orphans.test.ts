@@ -86,7 +86,7 @@ describe('registerPtyHandlers', () => {
           env: expect.objectContaining({
             SHELL: '/bin/zsh',
             ORCA_OPENCODE_CONFIG_DIR: '/tmp/orca-opencode-config',
-            ORCA_SHELL_READY_MARKER: '0',
+            ORCA_SHELL_FEATURES: 'overlay,history,markers',
             ZDOTDIR: '/tmp/orca-user-data/shell-ready/zsh'
           })
         })
@@ -436,7 +436,9 @@ describe('registerPtyHandlers', () => {
     await Promise.resolve()
 
     expect(killSpy).toHaveBeenCalled()
-    expect(runtime.onPtyExit).toHaveBeenCalledWith(spawnResult.id, -1, spawnResult.incarnationId)
+    expect(runtime.onPtyExit).toHaveBeenCalledWith(spawnResult.id, -1, spawnResult.incarnationId, {
+      cause: { kind: 'unknown', reason: 'stop_unverified' }
+    })
     const listed = await getLocalPtyProvider().listProcesses()
     expect(listed.some((info) => info.id === spawnResult.id)).toBe(false)
   })

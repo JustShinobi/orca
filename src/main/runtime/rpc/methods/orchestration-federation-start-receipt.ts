@@ -1,5 +1,4 @@
 import type { OrchestrationDb } from '../../orchestration/db'
-import { classifyDispatchInputRecovery } from '../../../../shared/agent-prompt-submission'
 import { isFederationEffectUnknown } from './orchestration-federation-effects'
 import type { WorkerSetupReceipt } from './orchestration-worker-topology'
 import type { OrchestrationWorkerLaunchReceipt } from './orchestration-worker-launch-preferences'
@@ -31,9 +30,6 @@ export function failFederatedAttachmentWithReceipt(args: {
     setup: args.setup,
     launch: args.launch,
     effects: JSON.parse(attachment.effects) as unknown[],
-    residualResources: JSON.parse(attachment.residual_resources) as unknown[],
-    ...(args.failedStage === 'dispatch_input'
-      ? { recovery: classifyDispatchInputRecovery(args.error) }
-      : {})
+    residualResources: JSON.parse(attachment.residual_resources) as unknown[]
   }
 }

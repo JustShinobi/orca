@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { OrchestrationDb } from './db'
 import { reconcileLifecycleMessage } from './lifecycle-reconciliation'
-import { buildBufferedNotSubmittedError } from '../../../shared/agent-prompt-submission'
 import { Coordinator } from './coordinator'
 import type { CoordinatorRuntime } from './coordinator-runtime-contract'
 import {
@@ -336,12 +335,14 @@ describe('Coordinator', () => {
       await new Promise((r) => {
         setTimeout(r, 100)
       })
+      const dispatch = db.getDispatchContext(task.id)
+      expect(dispatch).toBeDefined()
       db.insertMessage({
-        from: `term_${i === 0 ? 'a' : 'b'}`,
+        from: dispatch?.assignee_handle ?? 'missing-worker',
         to: 'coord',
         subject: `Failed attempt ${i + 1}`,
         type: 'escalation',
-        payload: JSON.stringify({ taskId: task.id })
+        payload: JSON.stringify({ taskId: task.id, dispatchId: dispatch!.id })
       })
     }
 
@@ -359,28 +360,6 @@ describe('Coordinator', () => {
     }
 
     const task = db.createTask({ spec: 'cannot dispatch' })
-    const coordinator = new Coordinator(db, runtime, {
-      spec: 'go',
-      coordinatorHandle: 'coord',
-      pollIntervalMs: 10
-    })
-
-    const result = await coordinator.run()
-
-    expect(result.status).toBe('failed')
-    expect(result.failedTasks).toContain(task.id)
-    expect(db.getTask(task.id)?.status).toBe('failed')
-  })
-
-  it('fails the dispatch when the prompt is buffered but never submitted', async () => {
-    db = new OrchestrationDb(':memory:')
-    const runtime = createMockRuntime()
-    runtime.terminals = [{ handle: 'term_a', worktreeId: 'wt1', connected: true, writable: true }]
-    runtime.sendTerminalAgentPrompt = async () => {
-      throw buildBufferedNotSubmittedError('idle')
-    }
-
-    const task = db.createTask({ spec: 'buffered but unsubmitted' })
     const coordinator = new Coordinator(db, runtime, {
       spec: 'go',
       coordinatorHandle: 'coord',
@@ -415,6 +394,8 @@ describe('Coordinator', () => {
     })
 
     // Worker sends decision gate
+    const dispatch = db.getDispatchContext(task.id)
+    expect(dispatch).toBeDefined()
     db.insertMessage({
       from: 'term_a',
       to: 'coord',
@@ -422,6 +403,7 @@ describe('Coordinator', () => {
       type: 'decision_gate',
       payload: JSON.stringify({
         taskId: task.id,
+        dispatchId: dispatch!.id,
         question: 'Proceed with destructive migration?',
         options: ['yes', 'no']
       })

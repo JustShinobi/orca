@@ -145,7 +145,7 @@ async function spawnAndPublishSession(
   if (opts.command && !subprocess.startupCommandDeliveredInShellArgs) {
     const submit = process.platform === 'win32' ? '\r' : '\n'
     // Why: only Orca-wrapped shells advertise the paste-safe startup barrier.
-    session.writeStartupCommand(
+    session.write(
       buildStartupCommandSubmission(opts.command, {
         submit,
         bracketedPasteSafe: shellReadySupported

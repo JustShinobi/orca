@@ -7,55 +7,81 @@ vi.mock('../selectors', () => ({ getTerminalHandle: vi.fn() }))
 import { printResult } from '../format'
 import { ORCHESTRATION_HANDLERS } from './orchestration'
 
-async function send(result: unknown): Promise<string> {
+async function formatSend(result: unknown): Promise<string> {
   callMock.mockReset().mockResolvedValueOnce({ result })
   await ORCHESTRATION_HANDLERS['orchestration send']({
     flags: new Map([
-      ['from', 'term_worker'],
-      ['to', 'term_coord'],
+      ['from', 'term_sender'],
+      ['to', 'term_recipient'],
       ['subject', 'ping']
     ]),
     client: { call: callMock },
-    cwd: '/tmp/repo',
+    cwd: '/workspace',
     json: false
   } as never)
-  const call = vi.mocked(printResult).mock.calls.at(-1)
-  const format = call?.[2] as (value: unknown) => string
-  return format(result)
+  const printCall = vi.mocked(printResult).mock.calls.at(-1)
+  const formatter = printCall?.[2] as (value: unknown) => string
+  return formatter(result)
 }
 
-it('prints the recipients a send could not reach', async () => {
-  const line = await send({
+it('prints a live terminal-only delivery limitation', async () => {
+  const line = await formatSend({
     message: { id: 'msg_1' },
     warnings: [
       {
-        code: 'recipient_reads_other_mailbox',
-        recipient: 'term_coord',
-        message: 'term_coord reads run:run_1, and that mailbox never returns handle mail.'
+        code: 'legacy_terminal_recipient',
+        recipient: 'term_recipient',
+        message: 'term_recipient is live now, but its mailbox is not restart-durable.'
       }
     ]
   })
 
   expect(line).toBe(
-    'Sent msg_1\nWarning: term_coord reads run:run_1, and that mailbox never returns handle mail.'
+    'Sent msg_1\nWarning: term_recipient is live now, but its mailbox is not restart-durable.'
   )
 })
 
-it('prints one warning line per unreachable fan-out recipient', async () => {
-  const line = await send({
-    messages: [{ id: 'msg_1' }, { id: 'msg_2' }],
-    recipients: 2,
+it('shows partial fan-out omissions without hiding delivered recipients', async () => {
+  const line = await formatSend({
+    messages: [{ id: 'msg_1' }],
+    recipients: 1,
     warnings: [
-      { code: 'recipient_reads_other_mailbox', recipient: 'term_coord', message: 'coord warning' },
-      { code: 'no_live_terminal', recipient: 'term_worker', message: 'worker warning' }
+      {
+        code: 'recipient_unreachable',
+        recipient: 'term_gone',
+        message: 'Terminal term_gone has no live pane or durable mailbox.'
+      }
     ]
   })
 
   expect(line).toBe(
-    'Sent 2 messages to 2 recipients\nWarning: coord warning\nWarning: worker warning'
+    'Sent 1 messages to 1 recipients\nWarning: Terminal term_gone has no live pane or durable mailbox.'
   )
 })
 
-it('leaves a clean receipt unchanged', async () => {
-  expect(await send({ message: { id: 'msg_1' } })).toBe('Sent msg_1')
+it('prints delivery limitations on relayed receipts', async () => {
+  const line = await formatSend({
+    relay: {
+      messageId: 'relay_1',
+      sequence: 1,
+      dispatchId: 'ctx_remote',
+      destination: 'worker',
+      accepted: true
+    },
+    warnings: [
+      {
+        code: 'legacy_terminal_recipient',
+        recipient: 'term_remote',
+        message: 'term_remote is reachable through a compatibility address.'
+      }
+    ]
+  })
+
+  expect(line).toBe(
+    'Queued relay_1 for worker Dispatch ctx_remote\nWarning: term_remote is reachable through a compatibility address.'
+  )
+})
+
+it('leaves a canonical receipt unchanged', async () => {
+  await expect(formatSend({ message: { id: 'msg_1' } })).resolves.toBe('Sent msg_1')
 })

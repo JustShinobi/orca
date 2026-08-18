@@ -12,8 +12,6 @@ export type SessionOptions = {
   subprocess: SubprocessHandle
   shellReadySupported: boolean
   shellReadyTimeoutMs?: number
-  /** Extra wait for a late ready marker before the startup command is written without proof. */
-  shellReadyLateMarkerGraceMs?: number
   historySeedChunks?: readonly string[]
   scrollback?: number
   wslDistro?: string

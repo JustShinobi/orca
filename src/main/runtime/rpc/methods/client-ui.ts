@@ -48,11 +48,6 @@ export const CLIENT_UI_METHODS: RpcMethod[] = [
     })
   }),
   defineMethod({
-    name: 'previewProxy.status',
-    params: null,
-    handler: (_params, { runtime }) => ({ status: runtime.getPreviewProxyStatus() })
-  }),
-  defineMethod({
     name: 'ui.get',
     params: null,
     handler: (_params, { runtime }) => ({ ui: runtime.getUIState() })

@@ -1,5 +1,4 @@
 import type { OrchestrationDb } from '../../orchestration/db'
-import { classifyDispatchInputRecovery } from '../../../../shared/agent-prompt-submission'
 import {
   isUnknownWorkerStartOutcome,
   type WorkerSetupReceipt
@@ -33,9 +32,6 @@ export function failWorkerStartWithReceipt(args: {
     launch: args.launch,
     effects: JSON.parse(worker.effects) as unknown[],
     residualResources: JSON.parse(worker.residual_resources) as unknown[],
-    ...(args.failedStage === 'dispatch_input'
-      ? { recovery: classifyDispatchInputRecovery(args.error) }
-      : {}),
     ...(unknown
       ? {
           nextCommands: [

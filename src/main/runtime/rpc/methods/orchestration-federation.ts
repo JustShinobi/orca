@@ -9,7 +9,6 @@ import {
   type FederationEffect
 } from './orchestration-federation-effects'
 import type { WorkerSetupReceipt } from './orchestration-worker-topology'
-import { dispatchInputEffectState } from '../../orchestration/worker-dispatch-stages'
 import {
   monitorFederatedSetup,
   persistFederatedReadinessStage,
@@ -226,7 +225,7 @@ export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
           effects
         })
         failedStage = 'dispatch_input'
-        const send = await runtime.sendTerminalAgentPrompt(
+        await runtime.sendTerminalAgentPrompt(
           terminalHandle,
           buildDispatchPreamble({
             taskId: params.taskId,
@@ -239,15 +238,13 @@ export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
             cliCommand: runtime.getTerminalOrchestrationCliCommand(terminalHandle)
           })
         )
-        // Why: an older remote runtime omits `submitted`; absence means unverified, not failed.
-        const submitted = send.submitted ?? 'unverified'
         effects.push({
           kind: 'dispatch_input',
           role: 'agent',
           id: terminalHandle,
-          state: dispatchInputEffectState(submitted)
+          state: 'accepted'
         })
-        const attachment = db.markRemoteAttachmentReady(params.dispatchId, effects, submitted)
+        const attachment = db.markRemoteAttachmentReady(params.dispatchId, effects)
         monitorFederatedSetup({ ...setupStage, runtime })
         return {
           dispatchId: params.dispatchId,

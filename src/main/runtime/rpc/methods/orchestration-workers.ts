@@ -1,4 +1,3 @@
-import { ORCHESTRATION_WORKER_START_DEFAULT_TIMEOUT_MS } from '../../../../shared/orchestration-worker-start-timeout'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import { buildDispatchPreamble } from '../../orchestration/preamble'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
@@ -21,13 +20,12 @@ import {
 } from './orchestration-worker-setup-gate'
 import { failWorkerStartWithReceipt } from './orchestration-worker-start-receipt'
 import { prepareLocalWorkerStart } from './orchestration-worker-start-validation'
-import { dispatchInputEffectState } from '../../orchestration/worker-dispatch-stages'
 
 export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'orchestration.workerStart',
     params: WorkerStartParams,
-    handler: async (params, { runtime, orchestrationMutation, signal }) => {
+    handler: async (params, { runtime, orchestrationMutation }) => {
       const db = runtime.getOrchestrationDb()
       const coordinatorPane = runtime.getTerminalPaneKey(params.from)
       const run = coordinatorPane ? db.getCurrentRunForPane(coordinatorPane) : undefined
@@ -103,7 +101,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         terminal: params.terminal ?? null,
         agent: agent ?? null,
         launch: launch.receipt,
-        timeoutMs: params.timeoutMs ?? ORCHESTRATION_WORKER_START_DEFAULT_TIMEOUT_MS,
+        timeoutMs: params.timeoutMs ?? 60_000,
         setup: createsWorktree ? (params.setup ?? 'run') : 'not_applicable',
         setupSource: createsWorktree
           ? params.setup
@@ -198,8 +196,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         failedStage = 'agent_readiness'
         const wait = await runtime.waitForTerminal(terminalHandle, {
           condition: 'tui-idle',
-          timeoutMs: params.timeoutMs ?? ORCHESTRATION_WORKER_START_DEFAULT_TIMEOUT_MS,
-          signal
+          timeoutMs: params.timeoutMs ?? 60_000
         })
         persistWorkerSetupWaitOutcome({ ...setupStage, wait })
         if (!wait.satisfied) {
@@ -234,16 +231,14 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
           devMode: params.devMode,
           cliCommand: runtime.getTerminalOrchestrationCliCommand(terminalHandle)
         })
-        const send = await runtime.sendTerminalAgentPrompt(terminalHandle, preamble)
-        // Why: an older remote runtime omits `submitted`; absence means unverified, not failed.
-        const submitted = send.submitted ?? 'unverified'
+        await runtime.sendTerminalAgentPrompt(terminalHandle, preamble)
         effects.push({
           kind: 'dispatch_input',
           role: 'agent',
           id: terminalHandle,
-          state: dispatchInputEffectState(submitted)
+          state: 'accepted'
         })
-        const worker = db.markWorkerDispatchReady(started.dispatch.id, effects, submitted)
+        const worker = db.markWorkerDispatchReady(started.dispatch.id, effects)
         monitorWorkerSetup({
           runtime,
           db,
@@ -260,7 +255,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
           stage: worker.stage,
           setup: setupReceipt,
           launch: launch.receipt,
-          timeoutMs: params.timeoutMs ?? ORCHESTRATION_WORKER_START_DEFAULT_TIMEOUT_MS,
+          timeoutMs: params.timeoutMs ?? 60_000,
           effects,
           residualResources: [],
           ...(terminalRevealWarning ? { warning: terminalRevealWarning } : {})

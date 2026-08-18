@@ -23,7 +23,6 @@ vi.mock('../ssh/ssh-port-forward', () => mocks.sshPortForward)
 vi.mock('../ssh/ssh-port-scanner', () => mocks.sshPortScanner)
 
 import type { SshTarget } from '../../shared/ssh-types'
-import { connectRegisteredSshTarget, registerSshHandlers } from './ssh'
 import { createSshIpcHarness } from './ssh-ipc-test-harness'
 
 const {
@@ -207,37 +206,5 @@ describe('SSH IPC handlers', () => {
       providerEpoch: expect.any(String),
       connectionGeneration: 0
     })
-  })
-
-  it('connects registered targets without a BrowserWindow', async () => {
-    const runtime = {
-      notifySshStateChanged: vi.fn()
-    }
-    registerSshHandlers(mockStore as never, () => null, runtime as never)
-    const target: SshTarget = {
-      id: 'ssh-1',
-      label: 'Headless Server Target',
-      host: 'example.com',
-      port: 22,
-      username: 'deploy'
-    }
-    const connectedState = {
-      targetId: 'ssh-1',
-      status: 'connected' as const,
-      error: null,
-      reconnectAttempt: 0
-    }
-    mockSshStore.getTarget.mockReturnValue(target)
-    mockConnectionManager.connect.mockResolvedValue({})
-    mockConnectionManager.getState.mockReturnValue(connectedState)
-
-    await expect(connectRegisteredSshTarget('ssh-1')).resolves.toMatchObject(connectedState)
-
-    expect(mockConnectionManager.connect).toHaveBeenCalledWith(target)
-    expect(runtime.notifySshStateChanged).toHaveBeenCalledWith(
-      'ssh-1',
-      expect.objectContaining(connectedState)
-    )
-    expect(mockWindow.webContents.send).not.toHaveBeenCalled()
   })
 })

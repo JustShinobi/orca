@@ -192,7 +192,7 @@ function entityCounts(db: OrchestrationDb): Record<string, number> {
 }
 
 function resultOf(response: RpcResponse): Record<string, unknown> {
-  expect(response.ok).toBe(true)
+  expect(response.ok, JSON.stringify(response)).toBe(true)
   if (!response.ok) {
     throw new Error(response.error.message)
   }
@@ -352,6 +352,9 @@ describe('orchestration runtime update settlement', () => {
 
   it('routes ordinary mail with the same attested authority without settling work', async () => {
     const harness = createUpdateHarness()
+    expect(harness.db.getRunMailboxOwnerIdsForHandle(COORDINATOR_HANDLE)).toEqual([
+      harness.adoptedRunId
+    ])
     const response = await harness.createDispatcher().dispatch(
       request(
         'orchestration.send',
@@ -368,10 +371,7 @@ describe('orchestration runtime update settlement', () => {
     )
 
     expect(resultOf(response)).toMatchObject({
-      message: { type: 'status', body: WORK_BYTES.toString('utf8') },
-      // Why: the pre-update coordinator handle has no live reader, so the receipt says so
-      // rather than refusing mail the adopted Run is meant to retain (#13363).
-      warnings: [expect.objectContaining({ code: 'no_live_terminal' })]
+      message: { type: 'status', body: WORK_BYTES.toString('utf8') }
     })
     expect(harness.db.getTask(harness.taskId)).toMatchObject({ status: 'dispatched' })
     expect(harness.db.getDispatchContextById(harness.dispatchId)).toMatchObject({

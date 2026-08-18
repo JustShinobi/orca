@@ -17,8 +17,7 @@ import type { HeadlessEmulator } from './headless-emulator'
 import type { SubprocessHandle } from './session-subprocess-handle'
 import type { ShellReadyState } from './types'
 
-export const SHELL_READY_TIMEOUT_MS = 15_000
-export const SHELL_READY_LATE_MARKER_GRACE_MS = 30_000
+const SHELL_READY_TIMEOUT_MS = 15_000
 // Why: Codex skips marker-gated command delivery; this only bounds older daemon/local paths that still report shell-ready for Codex.
 export const CODEX_SHELL_READY_TIMEOUT_MS = 300
 
@@ -28,7 +27,6 @@ export type SessionShellReadyBarrierDeps = {
   responderParser: HeadlessEmulator['responderParser']
   shellReadySupported: boolean
   shellReadyTimeoutMs: number | undefined
-  shellReadyLateMarkerGraceMs?: number
   installDeviceAttributesFilter(): void
   releaseDeviceAttributesFilter(): void
   acceptStartupIngress(data: string): void
@@ -42,18 +40,11 @@ export class SessionShellReadyBarrier {
   private shellStartupPid: number | null = null
   private promptReadinessProbe: ShellPromptReadinessProbe | null = null
   private readyTimer: ReturnType<typeof setTimeout> | null = null
-  private lateMarkerTimer: ReturnType<typeof setTimeout> | null = null
   private releaseDeviceAttributesResponder: (() => void) | null = null
   private preReadyStdinQueue: string[] = []
-  private heldStartupCommand: string | null = null
-  private readonly shellReadyLateMarkerGraceMs: number
   private readonly postReadyFlushGate: PostReadyFlushGate
 
   constructor(private readonly deps: SessionShellReadyBarrierDeps) {
-    this.shellReadyLateMarkerGraceMs =
-      deps.shellReadyLateMarkerGraceMs ??
-      (deps.shellReadyTimeoutMs === undefined ? SHELL_READY_LATE_MARKER_GRACE_MS : 0)
-
     if (deps.shellReadySupported) {
       this._state = 'pending'
       this.scanState = createShellStartupOutputScanState()
@@ -73,9 +64,7 @@ export class SessionShellReadyBarrier {
       this._state = 'unsupported'
     }
 
-    this.postReadyFlushGate = new PostReadyFlushGate(() =>
-      this.flushPreReadyQueue({ includeStartupCommand: true })
-    )
+    this.postReadyFlushGate = new PostReadyFlushGate(() => this.flushPreReadyQueue())
   }
 
   get state(): ShellReadyState {
@@ -111,20 +100,9 @@ export class SessionShellReadyBarrier {
     return true
   }
 
-  /** Holds the initial startup command until ready, or returns false if it should be written now. */
-  writeStartupCommand(data: string): boolean {
-    if (this._state === 'pending' && this.heldStartupCommand === null) {
-      this.heldStartupCommand = data
-      return true
-    }
-    return false
-  }
-
   ingestSubprocessData(data: string): void {
     let releaseStartupDeviceAttributes = false
-    // Why the scan state, not the 'pending' state: it outlives the deadline while a held startup
-    // command waits on a late marker, and the marker bytes must be stripped whenever it does.
-    if (this.scanState) {
+    if (this._state === 'pending' && this.scanState) {
       const scanned = scanShellStartupOutput(this.scanState, data)
       data = scanned.output
       if (scanned.shellPid) {
@@ -175,10 +153,6 @@ export class SessionShellReadyBarrier {
       clearTimeout(this.readyTimer)
       this.readyTimer = null
     }
-    if (this.lateMarkerTimer) {
-      clearTimeout(this.lateMarkerTimer)
-      this.lateMarkerTimer = null
-    }
   }
 
   /** Drops queued stdin and the flush gate; teardown does this, and dispose repeats it defensively. */
@@ -191,20 +165,9 @@ export class SessionShellReadyBarrier {
     this.postReadyFlushGate.clear()
   }
 
-  reportUndeliveredStartupCommand(): void {
-    if (this.heldStartupCommand === null) {
-      return
-    }
-    this.heldStartupCommand = null
-    console.warn(
-      `[daemon/session] ${this.deps.sessionId}: session ended before the shell-ready marker; its startup command was never delivered`
-    )
-  }
-
   dispose(): void {
     this.clearReadyTimer()
     this.disposePromptReadinessProbe()
-    this.reportUndeliveredStartupCommand()
     this.scanState = null
     this.clearPendingWrites()
   }
@@ -214,7 +177,7 @@ export class SessionShellReadyBarrier {
     this.scanState = null
     this.disposePromptReadinessProbe()
     this.clearReadyTimer()
-    if (this.preReadyStdinQueue.length === 0 && this.heldStartupCommand === null) {
+    if (this.preReadyStdinQueue.length === 0) {
       return
     }
     this.postReadyFlushGate.arm(postMarkerBytesObserved)
@@ -228,30 +191,8 @@ export class SessionShellReadyBarrier {
     this._state = 'timed_out'
     this.disposePromptReadinessProbe()
     this.releaseDeviceAttributes()
-    if (this.heldStartupCommand === null || this.shellReadyLateMarkerGraceMs <= 0) {
-      this.releaseHeldBytes()
-      this.flushPreReadyQueue({ includeStartupCommand: true })
-      return
-    }
-    // Why: keystrokes go through so the pane is usable, but the startup command keeps waiting.
-    this.flushPreReadyQueue({ includeStartupCommand: false })
-    this.lateMarkerTimer = setTimeout(() => {
-      this.onShellReadyLateMarkerGraceExpired()
-    }, this.shellReadyLateMarkerGraceMs)
-  }
-
-  private onShellReadyLateMarkerGraceExpired(): void {
-    this.lateMarkerTimer = null
-    if (this._state !== 'timed_out' || this.heldStartupCommand === null) {
-      return
-    }
-    console.warn(
-      `[daemon/session] ${this.deps.sessionId}: no shell-ready marker after ${
-        SHELL_READY_TIMEOUT_MS + this.shellReadyLateMarkerGraceMs
-      }ms; writing the startup command without proof the shell is reading it`
-    )
     this.releaseHeldBytes()
-    this.flushPreReadyQueue({ includeStartupCommand: true })
+    this.flushPreReadyQueue()
   }
 
   private onShellPromptReady(): void {
@@ -266,18 +207,9 @@ export class SessionShellReadyBarrier {
     this.releaseDeviceAttributes()
   }
 
-  private flushPreReadyQueue(
-    opts: { includeStartupCommand: boolean } = { includeStartupCommand: true }
-  ): void {
-    const startupCommand = opts.includeStartupCommand ? this.heldStartupCommand : null
-    if (startupCommand !== null) {
-      this.heldStartupCommand = null
-    }
+  private flushPreReadyQueue(): void {
     const queued = this.preReadyStdinQueue
     this.preReadyStdinQueue = []
-    if (startupCommand !== null) {
-      this.deps.subprocess.write(startupCommand)
-    }
     for (const data of queued) {
       this.deps.subprocess.write(data)
     }

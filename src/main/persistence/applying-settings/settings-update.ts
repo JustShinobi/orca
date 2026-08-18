@@ -63,9 +63,6 @@ export function updateSettings(
   if ('minimizeToTrayOnClose' in updates) {
     sanitizedUpdates.minimizeToTrayOnClose = updates.minimizeToTrayOnClose === true
   }
-  if ('autoSwitchRateLimitedAccounts' in updates) {
-    sanitizedUpdates.autoSwitchRateLimitedAccounts = updates.autoSwitchRateLimitedAccounts === true
-  }
   if ('showMenuBarIcon' in updates) {
     sanitizedUpdates.showMenuBarIcon = updates.showMenuBarIcon === true
   }

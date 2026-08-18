@@ -18,12 +18,7 @@ const CLI_TO_SERVE_FLAG = new Map([
 const CLI_TO_SERVE_VALUE_FLAG = new Map([
   ['--port', '--serve-port'],
   ['--pairing-address', '--serve-pairing-address'],
-  ['--project-root', '--serve-project-root'],
-  ['--preview-port', '--serve-preview-port'],
-  ['--preview-bind', '--serve-preview-bind'],
-  ['--preview-domain', '--serve-preview-domain'],
-  ['--preview-auth', '--serve-preview-auth'],
-  ['--preview-token', '--serve-preview-token']
+  ['--project-root', '--serve-project-root']
 ])
 
 /**
@@ -33,7 +28,9 @@ const CLI_TO_SERVE_VALUE_FLAG = new Map([
  */
 const VALUE_TAKING_FLAGS = new Set([
   ...CLI_TO_SERVE_VALUE_FLAG.keys(),
-  ...CLI_TO_SERVE_VALUE_FLAG.values(),
+  '--serve-port',
+  '--serve-pairing-address',
+  '--serve-project-root',
   '--user-data-dir',
   '--environment',
   '--pairing-code'

@@ -353,6 +353,7 @@ function TerminalPane(
   const {
     nativeChatTranscriptIsLocalReadable,
     sshReconnectEnvironmentId,
+    sshReconnectError,
     sshReconnectStatus,
     sshReconnectTargetId,
     sshReconnectTargetLabel,
@@ -3148,6 +3149,7 @@ function TerminalPane(
                 targetId={sshReconnectTargetId}
                 targetLabel={sshReconnectTargetLabel}
                 status={sshReconnectStatus}
+                error={sshReconnectError}
                 targetRemoved={sshReconnectTargetRemoved}
                 worktreeId={worktreeId}
                 sshOwnerEnvironmentId={sshReconnectEnvironmentId}
