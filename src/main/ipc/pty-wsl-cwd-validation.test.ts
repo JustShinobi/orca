@@ -8,6 +8,9 @@ import {
 import { setupPtyIpcSuite } from './pty-ipc-test-harness'
 import { _setWslCachesForTests } from '../wsl'
 import { registerPtyHandlers } from './pty'
+import { join } from 'node:path'
+// Why resolved rather than hardcoded: the wrapper tree is content-addressed.
+import { getShellReadyWrapperRoot } from '../providers/local-pty-shell-ready-wrapper-root'
 
 vi.mock('electron', () => import('./pty-ipc-mock-registry').then((m) => m.electronModuleMock()))
 vi.mock('fs', () => import('./pty-ipc-mock-registry').then((m) => m.fsModuleMock()))
@@ -351,8 +354,11 @@ describe('registerPtyHandlers', () => {
       })
       expect(shell).toBe('/bin/zsh')
       expect(args).toEqual(['-l'])
-      expect(options.env.ZDOTDIR).toBe('/tmp/orca-user-data/shell-ready/zsh')
-      expect(options.env.ORCA_ORIG_ZDOTDIR).toBe(process.env.HOME)
+      expect(options.env.ZDOTDIR).toBe(join(getShellReadyWrapperRoot(), 'zsh'))
+      // Why absent: this HOME holds no zsh startup file, so there is no user
+      // config dir to hand back and Orca must not invent one — the wrapper
+      // leaves ZDOTDIR unset, exactly as an unwrapped login zsh would.
+      expect(options.env.ORCA_ORIG_ZDOTDIR).toBeUndefined()
     } finally {
       Object.defineProperty(process, 'platform', {
         configurable: true,

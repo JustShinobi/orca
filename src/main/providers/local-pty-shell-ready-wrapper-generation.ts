@@ -4,71 +4,36 @@
  * Why: the wrappers emit an OSC 777 marker after startup files finish, which the
  * readiness scanner watches for before a startup command is written.
  */
-import {
-  buildZshStartupWrapperFiles,
-  type ZshStartupWrapperFiles,
-  type ZshStartupWrapperSpec
-} from '../zsh-startup-wrapper-builder'
+import { buildZshStartupHook } from '../zsh-startup-wrapper-builder'
 import { writeShellWrapperFiles } from '../shell-wrapper-file-writer'
-import { ZSH_WRAPPER_DIR_MARKER_CONTENT, ZSH_WRAPPER_DIR_MARKER_FILE } from '../shell-templates'
-import { getBashShellReadyRcfileContent } from './local-pty-shell-ready-bash-rcfile'
+import {
+  buildLocalShellReadyWrapperFiles,
+  getLocalZshWrapperSpec
+} from './local-pty-shell-ready-wrapper-fileset'
 import {
   getShellReadyWrapperRoot,
-  shellReadyWrappersExist,
-  SHELL_READY_MARKER_ESCAPED
+  shellReadyWrappersExist
 } from './local-pty-shell-ready-wrapper-root'
 
-let didEnsureShellReadyWrappers = false
-
-function getLocalZshWrapperSpec(zshDir: string): ZshStartupWrapperSpec {
-  return {
-    headerLabel: 'Orca zsh shell-ready wrapper',
-    zshDir,
-    zshenvStrategy: 'discover-user-zdotdir',
-    readyMarkerEscaped: SHELL_READY_MARKER_ESCAPED,
-    osc133CommandMarkers: true,
-    skipUserZshrcWhenHomeIsWrapperDir: true,
-    overlayRestoreComment:
-      "# Why: ~/.zshrc can export the user's default OpenCode config after spawn.",
-    restores: {
-      agentTeamsPath: true,
-      remoteCliBinDir: false,
-      codexHome: true,
-      codexLaunchPreflight: true
-    }
-  }
-}
-
-export function getZshShellReadyWrapperFiles(): ZshStartupWrapperFiles {
-  return buildZshStartupWrapperFiles(getLocalZshWrapperSpec(`${getShellReadyWrapperRoot()}/zsh`))
+export function getZshShellReadyWrapperFile(): string {
+  return buildZshStartupHook(getLocalZshWrapperSpec())
 }
 
 /** True when every wrapper file is present and non-empty afterwards. */
 export function ensureShellReadyWrappersAt(root = getShellReadyWrapperRoot()): boolean {
-  if (didEnsureShellReadyWrappers && shellReadyWrappersExist(root)) {
-    return true
+  // Why existence alone decides, with no per-process flag: the root is keyed by
+  // a hash of the exact bytes we would write, so a tree that is present and
+  // non-empty is a tree this build wrote. Rewriting it would replace a live file
+  // on the terminal-spawn path for no gain.
+  if (!shellReadyWrappersExist(root)) {
+    const written = writeShellWrapperFiles(buildLocalShellReadyWrapperFiles(root), '[shell-ready]')
+    if (!written || !shellReadyWrappersExist(root)) {
+      // Why no flag to reset: the next launch re-checks the files themselves, so
+      // a half-written tree is retried without any extra bookkeeping.
+      return false
+    }
   }
-  didEnsureShellReadyWrappers = true
 
-  const zshDir = `${root}/zsh`
-  const zsh = buildZshStartupWrapperFiles(getLocalZshWrapperSpec(zshDir))
-
-  const written = writeShellWrapperFiles(
-    [
-      [`${zshDir}/.zshenv`, zsh.zshenv],
-      [`${zshDir}/.zprofile`, zsh.zprofile],
-      [`${zshDir}/.zshrc`, zsh.zshrc],
-      [`${zshDir}/.zlogin`, zsh.zlogin],
-      [`${zshDir}/${ZSH_WRAPPER_DIR_MARKER_FILE}`, ZSH_WRAPPER_DIR_MARKER_CONTENT],
-      [`${root}/bash/rcfile`, getBashShellReadyRcfileContent()]
-    ],
-    '[shell-ready]'
-  )
-  if (!written || !shellReadyWrappersExist(root)) {
-    // Why reset: the next launch retries instead of trusting a half-written tree.
-    didEnsureShellReadyWrappers = false
-    return false
-  }
   return true
 }
 

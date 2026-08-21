@@ -26,6 +26,9 @@ Skills:
   skills install            Install bundled Orca skills globally via the community skills CLI
   skills update             Update already-installed Orca skills via the community skills CLI
 
+Hosts:
+  host list                 List targetable machines and how to name each one
+
 Accounts:
   account add               Add a managed Claude or Codex account on this Orca host
   account list              List managed Claude and Codex accounts on this Orca host
@@ -229,6 +232,7 @@ Common Commands:
   orca account list [--agent claude|codex] [--json]
   orca account select --agent claude|codex --id <accountId> [--json]
   orca account rm --agent claude|codex --id <accountId> [--json]
+  orca host list [--json]
   orca environment add --name <name> --pairing-code <code> [--json]
   orca environment list [--json]
   orca environment show --environment <selector> [--json]

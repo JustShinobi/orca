@@ -91,6 +91,7 @@ import {
 } from './runtime/runtime-rpc-startup-failure'
 import { resolveAdvertisedPairingEndpoint } from './runtime/pairing-endpoint'
 import { ServeReadinessPublisher } from './server/serve-readiness'
+import { isValidPreviewToken, resolvePreviewToken } from '../shared/preview-proxy-token'
 import { reserveServeStdoutForReadiness } from './server/serve-stdout-boundary'
 import { DesktopRelayService } from './runtime/relay/desktop-relay-service'
 import type { RelayBrokerStatus } from './runtime/relay/relay-session-broker'
@@ -1885,6 +1886,14 @@ const syntheticTitleSpinnerByPaneKey = new Map<
 >()
 let syntheticTitleSpinnerTimer: ReturnType<typeof setInterval> | null = null
 
+type ServePreviewOptions = {
+  port: number
+  bindHost: string
+  domain: string
+  auth: 'open' | 'token' | null
+  token: string | null
+}
+
 type ServeOptions = {
   json: boolean
   wsPort?: number
@@ -1893,6 +1902,7 @@ type ServeOptions = {
   mobilePairing: boolean
   recipeJson: boolean
   projectRoot: string | null
+  preview: ServePreviewOptions | null
 }
 
 function getServeOptions(argv = process.argv): ServeOptions {
@@ -1920,7 +1930,49 @@ function getServeOptions(argv = process.argv): ServeOptions {
     noPairing: argv.includes('--serve-no-pairing'),
     mobilePairing: argv.includes('--serve-mobile-pairing'),
     recipeJson: argv.includes('--serve-recipe-json'),
-    projectRoot: valueAfter('--serve-project-root')
+    projectRoot: valueAfter('--serve-project-root'),
+    preview: getServePreviewOptions({
+      rawPort: valueAfter('--serve-preview-port'),
+      bindHost: valueAfter('--serve-preview-bind'),
+      domain: valueAfter('--serve-preview-domain'),
+      rawAuth: valueAfter('--serve-preview-auth'),
+      token: valueAfter('--serve-preview-token')
+    })
+  }
+}
+
+function getServePreviewOptions(flags: {
+  rawPort: string | null
+  bindHost: string | null
+  domain: string | null
+  rawAuth: string | null
+  token: string | null
+}): ServePreviewOptions | null {
+  const { rawPort, bindHost, domain, rawAuth, token } = flags
+  if (!rawPort && !domain && !bindHost && !rawAuth && !token) {
+    return null
+  }
+  if (!rawPort || !domain) {
+    throw new Error('Preview proxy requires both --preview-port and --preview-domain.')
+  }
+  const port = Number(rawPort)
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(`Invalid --preview-port value: ${rawPort}`)
+  }
+  if (rawAuth && rawAuth !== 'open' && rawAuth !== 'token') {
+    throw new Error(`Invalid --preview-auth value: ${rawAuth} (use open or token)`)
+  }
+  const resolvedToken = resolvePreviewToken(token, process.env.ORCA_PREVIEW_TOKEN)
+  if (resolvedToken && !isValidPreviewToken(resolvedToken)) {
+    const source = token ? '--preview-token' : 'ORCA_PREVIEW_TOKEN'
+    throw new Error(`Invalid ${source} value: use 1-512 characters from A-Za-z0-9 . _ ~ -`)
+  }
+  return {
+    port,
+    bindHost: bindHost ?? '127.0.0.1',
+    domain,
+    auth: rawAuth === 'open' || rawAuth === 'token' ? rawAuth : null,
+    token: resolvedToken
   }
 }
 

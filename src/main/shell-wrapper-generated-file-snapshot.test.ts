@@ -13,7 +13,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ensureShellReadyWrappersAt } from './providers/local-pty-shell-ready-wrapper-generation'
-import { getShellLaunchConfig as getDaemonShellLaunchConfig } from './daemon/shell-ready'
+import {
+  getShellLaunchConfig as getDaemonShellLaunchConfig,
+  getShellReadyWrapperRoot as getDaemonShellReadyWrapperRoot
+} from './daemon/shell-ready'
 import { ensureOverlayRestoreWrappers } from '../relay/pty-shell-overlay-wrappers'
 import { getShellLaunchConfig as getLocalShellLaunchConfig } from './providers/local-pty-shell-ready'
 import { selectShellStartupFeatures } from './shell-startup-features'
@@ -28,18 +31,17 @@ const STARTUP_COMMAND_FEATURES = selectShellStartupFeatures({
   emitsStartupIdentity: true
 })
 
+// Why one zsh file: the wrapper hands ZDOTDIR back on its first lines, so zsh
+// reads .zprofile, .zshrc and .zlogin from the user's own directory.
 const WRAPPER_FILES = [
   ['zsh-zshenv', join('zsh', '.zshenv')],
-  ['zsh-zprofile', join('zsh', '.zprofile')],
-  ['zsh-zshrc', join('zsh', '.zshrc')],
-  ['zsh-zlogin', join('zsh', '.zlogin')],
   ['bash-rcfile', join('bash', 'rcfile')]
 ] as const
 
 const SNAPSHOT_DIR = join(__dirname, '__fixtures__', 'shell-wrapper-snapshots')
 
-// Why: the wrapper root is a temp dir per run, and the baked ZDOTDIR literal is
-// the only path-dependent byte in the output; pin it to a stable placeholder.
+// Why still normalized: the zsh hook no longer bakes a wrapper path at all, but
+// the bash rcfile can still carry one, and a temp root differs per run.
 function withStableRoot(content: string, root: string): string {
   return content.split(root).join('<WRAPPER_ROOT>')
 }
@@ -128,7 +130,7 @@ describePosix('generated shell wrapper files', () => {
   it('daemon wrappers', async () => {
     process.env.ORCA_USER_DATA_PATH = root
     getDaemonShellLaunchConfig('/bin/zsh', STARTUP_COMMAND_FEATURES)
-    await expectWrapperFiles('daemon', join(root, 'shell-ready'))
+    await expectWrapperFiles('daemon', getDaemonShellReadyWrapperRoot())
   })
 
   it('relay overlay wrappers', async () => {
@@ -149,7 +151,7 @@ describePosix('generated shell wrapper files', () => {
         process.env.ORCA_USER_DATA_PATH = root
         getDaemonShellLaunchConfig('/bin/zsh', STARTUP_COMMAND_FEATURES)
       },
-      (): string => join(root, 'shell-ready')
+      (): string => getDaemonShellReadyWrapperRoot()
     ],
     ['relay', (): void => void ensureOverlayRestoreWrappers(root), (): string => root]
   ])('%s wrappers write no shell global outside Orca’s namespace', (_transport, generate, dir) => {
