@@ -31,6 +31,7 @@ on:
 jobs:
   build:
     name: build e2e app
+    if: github.event_name != 'schedule' || github.repository == 'stablyai/orca'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
