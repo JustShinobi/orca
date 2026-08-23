@@ -1,6 +1,6 @@
-import { execFile } from 'node:child_process'
 import { isAbsolute, join, resolve } from 'node:path'
 import { toWindowsWslPath } from '../../shared/wsl-paths'
+import { runWslProcess } from '../wsl/wsl-runner'
 import type { SkillProviderRootOverrides } from './skill-provider-destinations'
 
 const PROVIDER_ROOT_MAX_LENGTH = 32_768
@@ -47,20 +47,24 @@ export function withClaudeSkillProviderRoot(
 
 type WslEnvironmentProbe = (distro: string) => Promise<string>
 
-function probeWslGrokHome(distro: string): Promise<string> {
-  return new Promise((resolveProbe, reject) => {
-    execFile(
-      'wsl.exe',
-      ['-d', distro, '--exec', 'sh', '-c', WSL_GROK_HOME_SCRIPT],
-      {
-        encoding: 'utf8',
-        timeout: WSL_ENV_PROBE_TIMEOUT_MS,
-        maxBuffer: WSL_ENV_PROBE_MAX_BYTES,
-        windowsHide: true
-      },
-      (error, stdout) => (error ? reject(error) : resolveProbe(stdout))
-    )
+async function probeWslGrokHome(distro: string): Promise<string> {
+  const result = await runWslProcess({
+    distro,
+    // 'none': the script runs its own `"$login_shell" -lc`, so asking the
+    // runner to probe first buys a second login shell and spends up to half
+    // the 8s budget before the -lc that actually reads GROK_HOME starts.
+    loginPath: 'none',
+    script: WSL_GROK_HOME_SCRIPT,
+    // POSIX (`case`, `exec`); declared because the payload is opaque here.
+    shell: 'sh',
+    timeoutMs: WSL_ENV_PROBE_TIMEOUT_MS,
+    maxOutputBytes: WSL_ENV_PROBE_MAX_BYTES
   })
+  // A timeout mid-write can leave a truncated but shape-valid absolute path.
+  if (result.code !== 0 || result.timedOut) {
+    return ''
+  }
+  return result.stdout
 }
 
 export async function resolveWslGrokSkillProviderRoot(
