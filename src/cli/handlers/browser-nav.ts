@@ -10,7 +10,12 @@ import type {
   BrowserWaitResult
 } from '../../shared/runtime-types'
 import type { CommandHandler } from '../dispatch'
-import { formatScreenshot, formatSnapshot, printResult } from '../format'
+import {
+  formatScreenshot,
+  formatSnapshot,
+  prepareBrowserScreenshotCliJsonResult,
+  printResult
+} from '../format'
 import {
   getOptionalPositiveIntegerFlag,
   getOptionalStringFlag,
@@ -38,7 +43,11 @@ export const BROWSER_NAV_HANDLERS: Record<string, CommandHandler> = {
       format: format === 'jpeg' ? 'jpeg' : undefined,
       ...target
     })
-    printResult(result, json, formatScreenshot)
+    printResult(
+      json ? prepareBrowserScreenshotCliJsonResult(result) : result,
+      json,
+      formatScreenshot
+    )
   },
   goto: async ({ flags, client, cwd, json }) => {
     const url = getRequiredStringFlag(flags, 'url')
@@ -130,6 +139,10 @@ export const BROWSER_NAV_HANDLERS: Record<string, CommandHandler> = {
       format,
       ...target
     })
-    printResult(result, json, (v) => `Full-page screenshot captured (${v.format})`)
+    printResult(
+      json ? prepareBrowserScreenshotCliJsonResult(result) : result,
+      json,
+      (v) => `Full-page screenshot captured (${v.format})`
+    )
   }
 }
