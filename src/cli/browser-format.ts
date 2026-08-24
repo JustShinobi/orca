@@ -1,4 +1,6 @@
 import { formatBase64PayloadByteCount } from './base64-payload-byte-count'
+import { exportScreenshotToTempFile } from './screenshot-temp-export'
+import type { RuntimeRpcSuccess } from './runtime-client'
 import type {
   BrowserProfileListResult,
   BrowserScreenshotResult,
@@ -16,7 +18,36 @@ export function formatSnapshot(result: BrowserSnapshotResult): string {
 }
 
 export function formatScreenshot(result: BrowserScreenshotResult): string {
-  return `Screenshot captured (${result.format}, ${formatBase64PayloadByteCount(result.data)})`
+  const detail = result.data
+    ? formatBase64PayloadByteCount(result.data)
+    : `saved to ${result.path ?? 'temporary file'}`
+  return `Screenshot captured (${result.format}, ${detail})`
+}
+
+export function prepareBrowserScreenshotCliJsonResult(
+  response: RuntimeRpcSuccess<BrowserScreenshotResult>
+): RuntimeRpcSuccess<BrowserScreenshotResult> {
+  const result = response.result
+  if (!result || typeof result.data !== 'string' || result.data.length === 0) {
+    return response
+  }
+  try {
+    const exported = exportScreenshotToTempFile({
+      fileStem: response.id,
+      data: result.data,
+      format: result.format,
+      tempDirEnvVar: 'ORCA_BROWSER_SCREENSHOT_TMPDIR',
+      tempDirName: 'orca-browser-screenshots'
+    })
+    return {
+      ...response,
+      result: { ...result, data: undefined, ...exported }
+    }
+  } catch {
+    // Why: temp-file export is an ergonomics optimization; keep inline screenshot
+    // data when disk, permissions, or path validation would otherwise fail --json.
+    return response
+  }
 }
 
 export function formatTabList(result: BrowserTabListResult): string {

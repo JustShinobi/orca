@@ -12,7 +12,8 @@ export {
   formatTabListWithProfiles,
   formatTabProfileClone,
   formatTabProfileShow,
-  formatTabShow
+  formatTabShow,
+  prepareBrowserScreenshotCliJsonResult
 } from './browser-format'
 
 export {

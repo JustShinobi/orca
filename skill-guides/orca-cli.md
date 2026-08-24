@@ -367,6 +367,7 @@ Browser rules:
 - Prefer `wait --text`, `--url`, `--selector`, or `--load` after async page changes instead of bare timeouts.
 - Less common workflows can use typed commands above or `orca exec --command "<agent-browser command>"` passthrough.
 - If `fill` or `type` fails on a custom input, try `orca focus --element @e1 --json` then `orca inserttext --text "text" --json`.
+- `screenshot --json` and `full-screenshot --json` save the image to a temp file and return `path` + `dataOmitted` (24h TTL) instead of inline base64; read `result.path`. Inline `result.data` only appears when the temp export fails. Pretty output never saves the image.
 
 Common recoveries:
 

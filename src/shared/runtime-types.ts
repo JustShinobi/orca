@@ -1018,8 +1018,13 @@ export type BrowserReloadResult = {
 }
 
 export type BrowserScreenshotResult = {
-  data: string
+  // The CLI may move the base64 payload into a temp file for --json output,
+  // mirroring computer-use screenshot export; data is absent when that happens.
+  data?: string
   format: 'png' | 'jpeg'
+  path?: string
+  dataOmitted?: boolean
+  expiresAt?: string
 }
 
 export type BrowserScreencastReadyResult = {
