@@ -2764,6 +2764,14 @@
             "5c8ce20be6": "如果这种情况持续存在，请",
             "cc6d997c65": "从此处重新启动终端守护进程以清除失效的守护进程状态。"
           },
+          "TerminalProcessExitOverlay": {
+            "capacityTitle": "已达到 Git Bash 控制台上限",
+            "capacityDetail": "Git Bash 已达到 128 个控制台的上限。关闭未使用的 Git Bash 终端，然后重新启动此终端。",
+            "failedTitle": "终端已退出",
+            "failedDetail": "Shell 进程以退出代码 {{code}} 结束。输出已保留。",
+            "close": "关闭",
+            "restart": "重新启动"
+          },
           "TerminalPane": {
             "ac112e9036": "删除标题",
             "f984ab2a30": "删除窗格标题：{{value0}}",
@@ -13649,6 +13657,10 @@
           "0e1de0358b": "月",
           "77e96bded6": "星期"
         },
+        "AutomationPromptDisclosure": {
+          "showLess": "收起",
+          "showMore": "显示更多"
+        },
         "AutomationDetail": {
           "007c8ad874": "提示词",
           "a1d52c2189": "使用范围",
@@ -14562,6 +14574,16 @@
     },
     "workspace": {
       "cleanup": {
+        "browse": {
+          "selectionWithheldOne": "当前筛选条件隐藏了 1 个已选工作区，已取消选择。",
+          "selectionWithheld": "当前筛选条件隐藏了 {{value0}} 个已选工作区，已取消选择。",
+          "selectAllCountOne": "选择 1 个通过安全检查的工作区",
+          "selectAllCount": "选择全部 {{value0}} 个通过安全检查的工作区"
+        },
+        "scan": {
+          "readyOne": "找到 1 个工作区。",
+          "readyMany": "找到 {{value0}} 个工作区。"
+        },
         "presentationFixtures": {
           "reviewAlphaCleanup": "评审 Alpha 清理"
         },

@@ -31,9 +31,26 @@ export class ElectronSecretStore implements SecretStore {
     // It round-trips, so sealing and unsealing genuinely work and must keep working —
     // reporting it unavailable would strand every credential already stored this way.
     // But it protects nothing, and reporting it as sealed is the actual lie.
-    if (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text') {
-      return 'Secrets are obfuscated with a built-in key, not protected by the OS keyring. Install and unlock gnome-keyring or kwallet, then restart Orca, to seal them properly.'
-    }
+    return describeLinuxBackendGap()
+  }
+}
+
+// Electron omits getSelectedStorageBackend at runtime outside Linux despite its type declaration.
+function describeLinuxBackendGap(): string | null {
+  if (process.platform !== 'linux') {
     return null
   }
+  const probe = (safeStorage as Partial<typeof safeStorage>).getSelectedStorageBackend
+  if (typeof probe !== 'function') {
+    return null
+  }
+  let backend: string
+  try {
+    backend = probe.call(safeStorage)
+  } catch {
+    return null
+  }
+  return backend === 'basic_text'
+    ? 'Secrets are obfuscated with a built-in key, not protected by the OS keyring. Install and unlock gnome-keyring or kwallet, then restart Orca, to seal them properly.'
+    : null
 }

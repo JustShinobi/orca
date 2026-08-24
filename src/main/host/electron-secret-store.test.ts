@@ -63,6 +63,37 @@ describe('ElectronSecretStore', () => {
       expect(safeStorageMock.getSelectedStorageBackend).not.toHaveBeenCalled()
     })
 
+    it('does not throw when the Linux-only backend probe is absent', () => {
+      // Delete from the live mock because the imported module retains its object reference.
+      const probe = safeStorageMock.getSelectedStorageBackend
+      // @ts-expect-error deleting a required member is the condition under test
+      delete safeStorageMock.getSelectedStorageBackend
+      try {
+        withPlatform('linux', () => {
+          expect(() => new ElectronSecretStore().describeProtectionGap()).not.toThrow()
+          expect(new ElectronSecretStore().describeProtectionGap()).toBeNull()
+        })
+      } finally {
+        safeStorageMock.getSelectedStorageBackend = probe
+      }
+    })
+
+    it('reports no gap when the backend probe throws', () => {
+      safeStorageMock.getSelectedStorageBackend.mockImplementation(() => {
+        throw new Error('backend unavailable')
+      })
+      withPlatform('linux', () => {
+        expect(new ElectronSecretStore().describeProtectionGap()).toBeNull()
+      })
+    })
+
+    it('reports no gap for an unknown backend rather than guessing', () => {
+      safeStorageMock.getSelectedStorageBackend.mockReturnValue('unknown')
+      withPlatform('linux', () => {
+        expect(new ElectronSecretStore().describeProtectionGap()).toBeNull()
+      })
+    })
+
     it('reports the missing-keyring gap before considering the backend', () => {
       safeStorageMock.isEncryptionAvailable.mockReturnValue(false)
       withPlatform('linux', () => {

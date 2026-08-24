@@ -64,6 +64,7 @@ import {
   clearWebSessionFocusIntent,
   clearWebSessionFocusIntentsForOwner,
   peekWebSessionFocusIntent,
+  resolveWebSessionSiblingVisibleTabId,
   resolveWebSessionVisibleTabId
 } from './web-session-focus-intent'
 import {
@@ -2919,6 +2920,16 @@ function applyWebSessionTabsSnapshotWithContext(
     worktreeId,
     nextUnifiedTabs ?? []
   )
+  const activeGroupId = state.activeGroupIdByWorktree[worktreeId]
+  // Why: Open Preview to the Side can activate an empty reserved group before the host
+  // browser lands. A snapshot that still has the host terminal active must not treat
+  // that emptiness as a terminal focus change.
+  const reservedEmptyPreviewFallbackTabId =
+    currentVisibleUnifiedTabId == null &&
+    activeGroupId != null &&
+    isWebSessionBrowserPlacementGroupReserved({ worktreeId, groupId: activeGroupId })
+      ? resolveWebSessionSiblingVisibleTabId(state, worktreeId, nextUnifiedTabs ?? [])
+      : null
   // Why: a client-initiated activation also drives the visible unified tab, overriding the sticky current-visible tab.
   const intentUnifiedTabId = honorSnapshotActiveFocus
     ? navigationIntentTab?.type === 'browser'
@@ -2932,6 +2943,7 @@ function applyWebSessionTabsSnapshotWithContext(
   const nextActiveUnifiedTabId =
     intentUnifiedTabId ??
     currentVisibleUnifiedTabId ??
+    reservedEmptyPreviewFallbackTabId ??
     (snapshot.activeTabType === 'browser'
       ? (activeMirroredBrowserTabId ??
         mirroredBrowserTabs[0]?.unifiedTab.id ??
