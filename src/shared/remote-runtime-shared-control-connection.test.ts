@@ -7,6 +7,7 @@ import {
   serializeRemoteRuntimeRpcRequest
 } from './remote-runtime-memory-limits'
 import { getRemoteRuntimeRequestAdmissionEvidence } from './remote-runtime-prepared-request-admission'
+import { remoteRuntimeClientCapabilities } from './remote-runtime-client-capabilities'
 import { RemoteRuntimeSharedControlConnection } from './remote-runtime-shared-control-connection'
 import * as sharedControlProtocol from './remote-runtime-shared-control-protocol'
 import {
@@ -14,7 +15,6 @@ import {
   createSharedControlTestServer as createServer
 } from './remote-runtime-shared-control-test-server'
 import { isRuntimeSubscriptionReplayResponse } from './runtime-subscription-replay'
-import * as protocolVersion from './protocol-version'
 
 const TEST_PROJECT_PATH = path.join('tmp', 'project')
 afterEach(closeSharedControlTestServers)
@@ -33,13 +33,7 @@ describe('RemoteRuntimeSharedControlConnection', () => {
     expect(server.auths).toContainEqual({
       type: 'e2ee_auth',
       deviceToken: 'device-token',
-      clientCapabilities: [
-        protocolVersion.SESSION_TAB_CLOSE_INTENT_RUNTIME_CAPABILITY,
-        protocolVersion.AGENT_SESSION_BOUNDARY_RUNTIME_CAPABILITY,
-        protocolVersion.SKILL_INSTALL_RESULT_V2_CAPABILITY,
-        protocolVersion.WORKTREE_VISIBILITY_DEFAULTS_RUNTIME_CAPABILITY,
-        protocolVersion.WORKTREE_VISIBILITY_SOURCE_DEFAULTS_RUNTIME_CAPABILITY
-      ]
+      clientCapabilities: remoteRuntimeClientCapabilities()
     })
     expect(server.requests.map((request) => request.method)).toEqual([
       'worktree.ps',

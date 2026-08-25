@@ -5,7 +5,7 @@ import type { Page } from '@stablyai/playwright-test'
 import { PROTOCOL_VERSION } from '../../src/main/daemon/types'
 import { toWebTerminalSurfaceTabId } from '../../src/shared/terminal-surface-id'
 import { expect, test } from './helpers/orca-app'
-import { createRestartableHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
+import { launchHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
 import { createPairedWebClientUrl } from './helpers/paired-web-client-url'
 import { getTerminalContent, waitForActivePanePtyId } from './helpers/terminal'
 
@@ -103,20 +103,16 @@ test('reattaches a hidden terminal in the same browser document after headless s
   testRepoPath
 }) => {
   test.setTimeout(240_000)
-  const session = await createRestartableHeadlessPairedRuntimeHost()
-  const firstHost = await session.start().catch(async (error) => {
-    await session.dispose()
-    throw error
-  })
+  const host = await launchHeadlessPairedRuntimeHost({ pinnedServePort: true })
   const context = await browser.newContext({ ignoreHTTPSErrors: true })
   const page = await context.newPage()
   try {
-    if (!firstHost.offer.webClientUrl) {
+    if (!host.offer.webClientUrl) {
       throw new Error('Headless serve did not publish a paired Web client URL')
     }
-    await firstHost.client.call('repo.add', { path: testRepoPath, kind: 'git' })
+    await host.client.call('repo.add', { path: testRepoPath, kind: 'git' })
     await page.goto(
-      createPairedWebClientUrl(firstHost.offer.webClientUrl, {
+      createPairedWebClientUrl(host.offer.webClientUrl, {
         terminalParkingDelayMs: 180_000
       })
     )
@@ -182,24 +178,25 @@ test('reattaches a hidden terminal in the same browser document after headless s
       )
       .toBe(true)
 
-    const daemonPid = readDaemonPid(session.userDataDir)
-    await session.stop()
-    await expect
-      .poll(
-        () =>
-          page.evaluate((tabId) => {
-            const pane = window.__paneManagers?.get(tabId)?.getPanes?.()[0]
-            return pane?.container?.dataset?.ptyRecoveryState ?? null
-          }, target.webTabId),
-        {
-          timeout: 90_000,
-          message: 'Hidden target terminal never reached the bounded disconnected state'
-        }
-      )
-      .toBe('disconnected')
-
-    await session.start()
-    expect(readDaemonPid(session.userDataDir)).toBe(daemonPid)
+    const daemonPid = readDaemonPid(host.userDataDir)
+    await host.restartServeProcess({
+      betweenProcesses: async () => {
+        await expect
+          .poll(
+            () =>
+              page.evaluate((tabId) => {
+                const pane = window.__paneManagers?.get(tabId)?.getPanes?.()[0]
+                return pane?.container?.dataset?.ptyRecoveryState ?? null
+              }, target.webTabId),
+            {
+              timeout: 90_000,
+              message: 'Hidden target terminal never reached the bounded disconnected state'
+            }
+          )
+          .toBe('disconnected')
+      }
+    })
+    expect(readDaemonPid(host.userDataDir)).toBe(daemonPid)
     expect(page.isClosed()).toBe(false)
     expect(
       await page.evaluate(() => document.documentElement.dataset.serveRestartSentinel ?? null)
@@ -247,6 +244,6 @@ test('reattaches a hidden terminal in the same browser document after headless s
       .toContain(`LIVE:target:${marker}`)
   } finally {
     await context.close().catch(() => undefined)
-    await session.dispose()
+    await host.dispose()
   }
 })

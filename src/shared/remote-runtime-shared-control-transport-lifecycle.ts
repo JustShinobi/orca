@@ -1,6 +1,7 @@
 import type WebSocket from 'ws'
 import type { PairingOffer } from './pairing'
 import type { RemoteRuntimeClientError } from './remote-runtime-client-error'
+import { remoteRuntimeClientCapabilities } from './remote-runtime-client-capabilities'
 import { openSharedControlSocket } from './remote-runtime-shared-control-open'
 import { handleSharedControlTextFrame } from './remote-runtime-shared-control-frame-handler'
 import {
@@ -93,6 +94,7 @@ export function handleIncomingSharedControlFrame(args: {
     sharedKey: args.sharedKey,
     environmentId: args.options.environmentId,
     deviceToken: args.pairing.deviceToken,
+    clientCapabilities: remoteRuntimeClientCapabilities(args.options.clientCapabilities),
     pendingRequests: args.pendingRequests,
     subscriptions: args.subscriptions,
     retiredRequestIds: args.retiredRequestIds,

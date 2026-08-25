@@ -368,12 +368,14 @@ Browser rules:
 - Less common workflows can use typed commands above or `orca exec --command "<agent-browser command>"` passthrough.
 - If `fill` or `type` fails on a custom input, try `orca focus --element @e1 --json` then `orca inserttext --text "text" --json`.
 - `screenshot --json` and `full-screenshot --json` save the image to a temp file and return `path` + `dataOmitted` (24h TTL) instead of inline base64; read `result.path`. Inline `result.data` only appears when the temp export fails. Pretty output never saves the image.
+- Client-hosted pages have interactive-session affinity: the page renders in the paired desktop's own browser engine, so every command against it needs that desktop online and returns `browser_host_unavailable` when it is closed, asleep, or disconnected. Server-hosted pages keep running with no desktop attached, so prefer server placement for long-running or unattended browser automation.
 
 Common recoveries:
 
 - `browser_no_tab`: open a tab with `orca tab create --url <url> --json`.
 - `browser_stale_ref`: run `orca snapshot --json` and retry with fresh refs.
 - `browser_tab_not_found`: run `orca tab list --json` before switching or closing.
+- `browser_host_unavailable`: the desktop hosting that page is offline. Bring it back, or create the page for server placement when the work must survive without an interactive session.
 
 ## Next Action
 

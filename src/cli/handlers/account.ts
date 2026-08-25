@@ -1,26 +1,15 @@
-import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import type { CommandHandler, HandlerContext } from '../dispatch'
 import { printResult } from '../format'
 import { RuntimeClientError } from '../runtime-client'
-import { stripElectronRunAsNode } from '../runtime/launch'
 import {
   deleteActiveClaudeKeychainCredentialsStrict,
   readActiveClaudeKeychainCredentialsStrict,
   writeActiveClaudeKeychainCredentials
 } from '../../main/claude-accounts/keychain'
-import {
-  getVersionManagerBinPaths,
-  resolveCliCommand
-} from '../../shared/node-cli-command-resolution'
-import {
-  getSpawnArgsForWindows,
-  UnsafeWindowsBatchArgumentsError,
-  WINDOWS_BATCH_UNSAFE_CHARACTERS_LABEL
-} from '../../shared/windows-batch-spawn'
 import { ACCOUNT_IMPORT_RUNTIME_CAPABILITY } from '../../shared/protocol-version'
 import type {
   RuntimeAccountProvider,
@@ -39,91 +28,11 @@ import {
   formatAccountsList
 } from '../accounts-format'
 import { addAccountRemote } from './account-remote-login'
+import { runAgentLoginInTerminal } from './account-terminal-login'
 import {
   type InteractiveLoginSession,
   withInteractiveLoginCleanup
 } from './interactive-login-interruption'
-
-function addAgentNodePaths(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const pathKey =
-    process.platform === 'win32' && env.Path !== undefined && env.PATH === undefined
-      ? 'Path'
-      : 'PATH'
-  const currentEntries = (env[pathKey] ?? '').split(delimiter).filter(Boolean)
-  const existing = new Set(currentEntries)
-  const missing = getVersionManagerBinPaths().filter((entry) => !existing.has(entry))
-  if (missing.length > 0) {
-    env[pathKey] = [...missing, ...currentEntries].join(delimiter)
-  }
-  return env
-}
-
-/**
- * Runs the real agent login attached to the user's terminal so the OAuth
- * URL/device-code prompt is visible and the code can be pasted back — the desktop
- * GUI flow drives this via a browser Orca can't reach on a headless host.
- */
-async function runAgentLoginInTerminal(
-  command: string,
-  args: string[],
-  extraEnv: Record<string, string>,
-  json: boolean,
-  session: InteractiveLoginSession
-): Promise<void> {
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    const resolvedCommand = resolveCliCommand(command)
-    let spawnCmd: string
-    let spawnArgs: string[]
-    try {
-      ;({ spawnCmd, spawnArgs } = getSpawnArgsForWindows(resolvedCommand, args))
-    } catch (error) {
-      // Why: the bare sentinel message reaches the user verbatim otherwise, with
-      // nothing naming the path or the characters that made it unspawnable.
-      rejectPromise(
-        error instanceof UnsafeWindowsBatchArgumentsError
-          ? new RuntimeClientError(
-              'invalid_environment',
-              `Cannot run \`${command}\` from "${resolvedCommand}": the path contains characters ` +
-                `cmd.exe would reinterpret. Install it somewhere without ` +
-                `${WINDOWS_BATCH_UNSAFE_CHARACTERS_LABEL} in the path.`
-            )
-          : error
-      )
-      return
-    }
-    const env = addAgentNodePaths({ ...stripElectronRunAsNode(process.env), ...extraEnv })
-    const child = spawn(spawnCmd, spawnArgs, {
-      // Why: JSON mode reserves stdout for the response envelope while keeping
-      // the interactive login attached to the user's terminal via stderr.
-      stdio: ['inherit', json ? process.stderr : 'inherit', 'inherit'],
-      env
-    })
-    session.child = child
-    child.once('error', (error) =>
-      rejectPromise(
-        new RuntimeClientError(
-          'internal',
-          `Could not launch \`${command}\`. Is it installed and on PATH? (${
-            error instanceof Error ? error.message : String(error)
-          })`
-        )
-      )
-    )
-    child.once('exit', (code) => {
-      session.child = null
-      if (code === 0) {
-        resolvePromise()
-        return
-      }
-      rejectPromise(
-        new RuntimeClientError(
-          'internal',
-          `\`${command} ${args.join(' ')}\` exited with code ${code ?? 'null'}.`
-        )
-      )
-    })
-  })
-}
 
 async function cleanupClaudeLoginArtifacts(
   configDir: string,

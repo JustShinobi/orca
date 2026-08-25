@@ -1,6 +1,7 @@
 import type { RuntimeRpcResponse } from './runtime-rpc-envelope'
 import type { RemoteRuntimeClientError } from './remote-runtime-client-error'
 import type { RemoteRuntimePreparedRequest } from './remote-runtime-prepared-request-admission'
+import type { RuntimeCapability } from './protocol-version'
 import type { RemoteRuntimeSocketLivenessOptions } from './remote-runtime-socket-liveness'
 
 export type SharedControlConnectionState =
@@ -11,6 +12,7 @@ export type SharedControlConnectionState =
 
 export type RemoteRuntimeSharedControlConnectionOptions = {
   environmentId?: string
+  clientCapabilities?: readonly RuntimeCapability[]
   reconnectStableResetMs?: number
   liveness?: RemoteRuntimeSocketLivenessOptions
   sessionProbeIntervalMs?: number
