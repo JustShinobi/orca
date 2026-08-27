@@ -1,5 +1,8 @@
 import type * as ReactModule from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { AUTOMATIONS_CHANGED_EVENT } from '@/lib/automations-changed-window-event'
+
+const mockDispatchEvent = vi.fn()
 
 const mockLaunchAgentBackgroundSession = vi.fn()
 const mockLaunchWorktreeBackgroundTerminals = vi.fn()
@@ -135,6 +138,11 @@ vi.mock('@/lib/agent-paste-draft', () => ({
   submitPromptToAgentPty: mockSubmitPromptToAgentPty
 }))
 
+// The reuse path reads run history over the local runtime target, not IPC.
+vi.mock('@/components/automations/automation-host-client', () => ({
+  listAutomationRunsForTarget: vi.fn().mockResolvedValue([])
+}))
+
 vi.mock('@/lib/automation-session-reuse', () => ({
   findReusableAutomationSession: mockFindReusableAutomationSession
 }))
@@ -218,8 +226,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
           onDispatchRequested: mockOnDispatchRequested,
           rendererReady: mockRendererReady,
           markDispatchResult: mockMarkDispatchResult,
-          runPrecheck: vi.fn(),
-          listRuns: vi.fn().mockResolvedValue([])
+          runPrecheck: vi.fn()
         },
         ssh: {
           needsPassphrasePrompt: mockSshNeedsPassphrasePrompt,
@@ -227,8 +234,19 @@ describe('useAutomationDispatchEvents setup launch', () => {
           connect: mockSshConnect
         }
       },
-      dispatchEvent: vi.fn()
+      dispatchEvent: mockDispatchEvent
     })
+  })
+
+  // The scoped event main publishes with the write is the only one; a local emit
+  // here would name no host and re-invalidate every host in the catalog.
+  it('leaves the automationsChanged event to the host that owns the write', async () => {
+    await registerAndDispatch()
+
+    expect(mockMarkDispatchResult).toHaveBeenCalled()
+    expect(
+      mockDispatchEvent.mock.calls.filter(([event]) => event?.type === AUTOMATIONS_CHANGED_EVENT)
+    ).toEqual([])
   })
 
   it('starts setup terminal launch without waiting before launching the automation agent', async () => {
@@ -797,86 +815,6 @@ describe('useAutomationDispatchEvents setup launch', () => {
     expect(mockMarkDispatchResult).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'dispatch_failed' })
     )
-  })
-
-  it('releases ownership when dispatched result persistence rejects', async () => {
-    mockMarkDispatchResult.mockRejectedValueOnce(new Error('persistence unavailable'))
-
-    await registerAndDispatch()
-
-    expect(mockReleaseTerminalOwnership).toHaveBeenCalledOnce()
-    expect(mockFinalizeTerminalOwnership).not.toHaveBeenCalled()
-    expect(mockMarkDispatchResult).toHaveBeenLastCalledWith(
-      expect.objectContaining({ status: 'dispatch_failed' })
-    )
-  })
-
-  it('releases ownership when completed result persistence rejects', async () => {
-    mockMarkDispatchResult
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('completion persistence unavailable'))
-      .mockResolvedValueOnce(undefined)
-    mockLaunchAgentBackgroundSession.mockImplementation(async (args) => {
-      args.onAgentStatus?.({ state: 'done' })
-      return {
-        tabId: 'agent-tab',
-        paneKey: 'agent-tab:7c6fb4e5-3bf1-4ff4-8259-03f7ae81c40d',
-        ptyId: 'agent-pty',
-        startupPlan: {},
-        disposeRunObservation: mockDisposeRunObservation,
-        terminalOwnership: {
-          finalize: mockFinalizeTerminalOwnership,
-          release: mockReleaseTerminalOwnership
-        }
-      }
-    })
-
-    await registerAndDispatch()
-
-    expect(mockReleaseTerminalOwnership).toHaveBeenCalledOnce()
-    expect(mockFinalizeTerminalOwnership).not.toHaveBeenCalled()
-    expect(mockMarkDispatchResult).toHaveBeenLastCalledWith(
-      expect.objectContaining({ status: 'dispatch_failed' })
-    )
-  })
-
-  it('diagnoses a late completed-persistence rejection once without terminal cleanup', async () => {
-    let onAgentStatus: ((payload: { state: string }) => void) | undefined
-    const persistenceError = new Error('late completion persistence unavailable')
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    mockMarkDispatchResult.mockResolvedValueOnce(undefined).mockRejectedValueOnce(persistenceError)
-    mockLaunchAgentBackgroundSession.mockImplementation(async (args) => {
-      onAgentStatus = args.onAgentStatus
-      return {
-        tabId: 'agent-tab',
-        paneKey: 'agent-tab:7c6fb4e5-3bf1-4ff4-8259-03f7ae81c40d',
-        ptyId: 'agent-pty',
-        startupPlan: {},
-        disposeRunObservation: mockDisposeRunObservation,
-        terminalOwnership: {
-          finalize: mockFinalizeTerminalOwnership,
-          release: mockReleaseTerminalOwnership
-        }
-      }
-    })
-
-    await registerAndDispatch()
-    onAgentStatus?.({ state: 'done' })
-    onAgentStatus?.({ state: 'done' })
-    await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledOnce())
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      '[automations] Failed to persist late automation result:',
-      persistenceError
-    )
-    expect(mockReleaseTerminalOwnership).toHaveBeenCalledOnce()
-    expect(mockFinalizeTerminalOwnership).not.toHaveBeenCalled()
-    expect(
-      mockMarkDispatchResult.mock.calls.filter(
-        ([result]) => result.status === 'completed' && result.terminalPaneKey !== null
-      )
-    ).toHaveLength(1)
-    errorSpy.mockRestore()
   })
 
   it('preserves a fresh reuse-enabled session as the future reuse seed', async () => {

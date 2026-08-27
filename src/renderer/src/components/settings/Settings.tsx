@@ -1298,7 +1298,9 @@ function Settings(): React.JSX.Element {
                   )}
                   searchEntries={getSectionSearchEntries('orchestration')}
                 >
-                  {isSectionMounted('orchestration') ? <OrchestrationPane /> : null}
+                  {isSectionMounted('orchestration') ? (
+                    <OrchestrationPane settings={settings} updateSettings={updateSettings} />
+                  ) : null}
                 </SettingsSection>
 
                 {linearConnected ? (

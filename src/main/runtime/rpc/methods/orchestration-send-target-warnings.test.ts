@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RpcContext } from '../core'
 import { createOrchestrationRpcHarness } from './orchestration-rpc-test-harness'
 import type { OrchestrationDb } from '../../orchestration/db'
+import { createRootDispatch } from '../../orchestration/db/root-dispatch-test-fixture'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { RuntimeTerminalSummary } from '../../../../shared/runtime-types'
 
@@ -70,7 +71,7 @@ describe('orchestration RPC send target warnings', () => {
   it('accepts an active Dispatch assignee without a pane and warns that nothing is live', async () => {
     setup(false)
     const task = db.createTask({ spec: 'work with no resolvable pane' })
-    db.createDispatchContext(task.id, 'term_worker')
+    createRootDispatch(db, task.id, 'term_worker')
     vi.spyOn(runtime, 'deliverPendingMessagesForHandle').mockImplementation(() => {})
 
     const result = (await call('orchestration.send', {
@@ -90,7 +91,7 @@ describe('orchestration RPC send target warnings', () => {
   it('warns that a live worker reads its Dispatch mailbox, not its handle', async () => {
     setup()
     const task = db.createTask({ spec: 'work' })
-    const dispatch = db.createDispatchContext(task.id, 'term_worker', 'tab_worker:leaf_worker')
+    const dispatch = createRootDispatch(db, task.id, 'term_worker', 'tab_worker:leaf_worker')
     vi.spyOn(runtime, 'getTerminalPaneKey').mockImplementation((handle) =>
       handle === 'term_coord' ? coordinatorPaneKey : 'tab_worker:leaf_worker'
     )
@@ -179,7 +180,7 @@ describe('orchestration RPC send target warnings', () => {
       makeSummary('term_worker', { tabId: 'tab_worker', leafId: 'leaf_worker' })
     ])
     const task = db.createTask({ spec: 'work' })
-    const dispatch = db.createDispatchContext(task.id, 'term_worker', 'tab_worker:leaf_worker')
+    const dispatch = createRootDispatch(db, task.id, 'term_worker', 'tab_worker:leaf_worker')
     const panes: Record<string, string> = {
       term_coord: coordinatorPaneKey,
       term_worker: 'tab_worker:leaf_worker',

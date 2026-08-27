@@ -425,6 +425,7 @@ jobs:
             src/main/zsh-wrapper-version-mismatch.live-shell.test.ts \
             src/renderer/src/components/terminal-pane/fish-color-scheme-child-stdin.node-pty.test.ts \
             src/shared/fish-query-reply-child-stdin.node-pty.test.ts \
+            src/shared/pty-reply-echo-shapes.node-pty.test.ts \
             src/shared/startup-shell-portability.live-shell.test.ts \
             src/shared/posix-command-path-lookup.test.ts
 
@@ -470,6 +471,7 @@ jobs:
             --exclude=src/main/zsh-wrapper-version-mismatch.live-shell.test.ts \
             --exclude=src/renderer/src/components/terminal-pane/fish-color-scheme-child-stdin.node-pty.test.ts \
             --exclude=src/shared/fish-query-reply-child-stdin.node-pty.test.ts \
+            --exclude=src/shared/pty-reply-echo-shapes.node-pty.test.ts \
             --exclude=src/shared/startup-shell-portability.live-shell.test.ts \
             --exclude=src/shared/posix-command-path-lookup.test.ts \
             --exclude=tests/e2e/cross-version-wire/** \
@@ -710,6 +712,7 @@ jobs:
           src/main/wsl/wsl-w1-w3-contract.test.ts
           src/shared/source-scan/source-tree-scan.test.ts
           src/main/cli/wsl-cli-powershell-boundary.test.ts
+          src/main/cursor/hook-service.test.ts
           src/main/orca-profiles/profile-index-store.test.ts
           src/main/runtime/repo-worktree-admin-fingerprint.test.ts
           src/main/runtime/worktree-scan-admin-fingerprint-gate.test.ts

@@ -19,7 +19,8 @@ import type {
   SshConfigHostResolution,
   SshRepoReadoption,
   SshTarget,
-  SshTargetAddResult
+  SshTargetAddResult,
+  SshTargetCreateInput
 } from '../../../../shared/ssh-types'
 import { isDuplicateSshTargetAlias } from './ssh-target-duplicate'
 import {
@@ -30,7 +31,7 @@ import {
 
 type SshApi = {
   listTargets: () => Promise<SshTarget[]>
-  addTarget: (args: { target: Omit<SshTarget, 'id'> }) => Promise<SshTargetAddResult>
+  addTarget: (args: { target: SshTargetCreateInput }) => Promise<SshTargetAddResult>
   listConfigHosts: (args?: SshConfigHostListArgs) => Promise<SshConfigHostListResult>
   resolveConfigHost: (args: { alias: string }) => Promise<SshConfigHostResolution | null>
   importConfig: (args?: { reAdopt?: boolean }) => Promise<{
