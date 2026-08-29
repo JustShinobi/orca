@@ -111,9 +111,7 @@ export class RemoteRuntimeSharedControlConnection {
     this.intentionallyClosed = true
     this.socketGeneration.invalidate()
     this.reconnect.clear()
-    Array.from(this.subscriptions.values()).forEach((s) => {
-      this.closeSubscription(s.requestId)
-    })
+    this.subscriptions.forEach((s) => this.closeSubscription(s.requestId))
     this.closeSocket(error)
   }
 
@@ -209,9 +207,7 @@ export class RemoteRuntimeSharedControlConnection {
       setState: (state) => {
         this.state = state
       },
-      handleSocketClosed: (error, gen) => {
-        this.handleSocketClosed(error, gen)
-      },
+      handleSocketClosed: (error, gen) => this.handleSocketClosed(error, gen),
       sendEncrypted: (payload) => this.sendEncrypted(payload),
       readyStableReset: this.readyStableReset,
       sessionProbe: this.sessionProbe,
@@ -219,13 +215,11 @@ export class RemoteRuntimeSharedControlConnection {
       getSocket: () => this.ws,
       setLastConnectedAt: (ts) => {
         this.lastConnectedAt = ts
+        // Why cleared here: these describe the attempt that just succeeded's predecessor.
+        this.lastError = this.lastClose = null
       },
-      replaySubscriptions: () => {
-        this.replaySubscriptions()
-      },
-      reconcileSubscriptionLifecycle: () => {
-        this.reconcileSubscriptionLifecycle()
-      }
+      replaySubscriptions: () => this.replaySubscriptions(),
+      reconcileSubscriptionLifecycle: () => this.reconcileSubscriptionLifecycle()
     })
   }
 

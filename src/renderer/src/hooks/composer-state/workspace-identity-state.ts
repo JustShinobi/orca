@@ -101,6 +101,8 @@ export function useWorkspaceIdentityState(input: WorkspaceIdentityStateInput) {
     initialLinearBranchName
   )
 
+  const [parentWorktreeId, setParentWorktreeId] = useState<string | null>(null)
+
   const [branchNameOverridePreservesNameEdits, setBranchNameOverridePreservesNameEdits] = useState(
     Boolean(initialLinearBranchName)
   )
@@ -200,6 +202,8 @@ export function useWorkspaceIdentityState(input: WorkspaceIdentityStateInput) {
     setCompareBaseRef,
     branchNameOverride,
     setBranchNameOverride,
+    parentWorktreeId,
+    setParentWorktreeId,
     branchNameOverridePreservesNameEdits,
     setBranchNameOverridePreservesNameEdits,
     smartNameMode,

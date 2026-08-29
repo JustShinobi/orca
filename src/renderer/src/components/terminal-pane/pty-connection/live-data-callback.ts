@@ -167,11 +167,7 @@ export function bindLiveDataCallback(session: ConnectPanePtySession): void {
       session.schedulePendingStartupCommandDelivery()
       return
     }
-    if (pendingForegroundQuery?.statelessQueryData) {
-      session.writePtyOutputToXterm(pendingForegroundQuery.statelessQueryData, true, {
-        hiddenStartupRendererQuery: true
-      })
-    }
+    // Keep source order aligned with sibling producers; xterm's async write buffer made the old inversion latent.
     if (pendingForegroundQuery?.oscColorQueryData) {
       sendTerminalOscColorQueryReplies(
         pendingForegroundQuery.oscColorQueryData,
@@ -179,6 +175,11 @@ export function bindLiveDataCallback(session: ConnectPanePtySession): void {
         // Why: OSC color reply sent immediately so the remote debounce can't delay it past the program's read window (#7329).
         session.sendDesktopQueryReplyImmediate
       )
+    }
+    if (pendingForegroundQuery?.statelessQueryData) {
+      session.writePtyOutputToXterm(pendingForegroundQuery.statelessQueryData, true, {
+        hiddenStartupRendererQuery: true
+      })
     }
     const restoreAppliesToCurrentPty =
       session.hiddenOutputRestorePtyId !== null &&
