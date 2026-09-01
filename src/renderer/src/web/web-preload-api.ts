@@ -6,7 +6,6 @@ import {
   createGrokAccountsApi,
   createMiniMaxCredentialsApi
 } from './preload-api/web-agent-accounts-api'
-import { createAgentHooksApi } from './preload-api/web-agent-hooks-api'
 import { createWebAgentStatusApi } from './preload-api/web-agent-status-api'
 import { createWebAiVaultApi } from './preload-api/web-ai-vault-api'
 import { createWebAppApi } from './preload-api/web-app-api'
@@ -113,7 +112,6 @@ function createWebPreloadApi(): Partial<PreloadApi> {
     codexAccounts: createAccountsApi(),
     claudeAccounts: createAccountsApi(),
     cli: createCliApi(),
-    agentHooks: createAgentHooksApi(),
     macosTccPrompts: createMacosTccPromptsApi(),
     codexConfigSync: {
       status: () =>

@@ -23,10 +23,16 @@ const STATUS_ACTIVITY_DEBOUNCE_MS = 125
 const STATUS_ACTIVITY_MIN_GAP_MS = 3000
 // Why: status scans and remote conflict probes can take longer than their
 // timers; duration-aware spacing prevents a slow task from running nonstop.
-const SLOW_GIT_POLL_BACKOFF = {
-  idleMultiplier: 5,
+export const SLOW_GIT_POLL_BACKOFF = {
+  idleMultiplier: 1,
   changeSignalMultiplier: 1,
   maxIntervalMs: 5 * 60_000
+}
+
+export function admissionTierForGitStatusRefreshReason(
+  reason: GitStatusRefreshReason
+): 'status' | 'background' {
+  return reason === 'safety' ? 'background' : 'status'
 }
 
 export function useGitStatusPolling(options: { enabled?: boolean } = {}): void {
@@ -158,6 +164,7 @@ export function useGitStatusPolling(options: { enabled?: boolean } = {}): void {
             fetchUpstreamStatus
           },
           request: {
+            admissionTier: admissionTierForGitStatusRefreshReason(request.reason),
             ...(request.reason === 'safety' ? { reuseLineStats: true } : {}),
             signal: request.signal,
             shouldApply: request.shouldApply,

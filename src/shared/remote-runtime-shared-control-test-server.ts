@@ -17,6 +17,7 @@ export type SharedControlTestServer = {
   connectionCount: () => number
   endActiveSubscriptions: () => void
   flushDelayedResponses: () => void
+  closeClients: () => void
 }
 
 export type SharedControlTestServerOptions = {
@@ -168,7 +169,8 @@ export async function createSharedControlTestServer(
     auths,
     connectionCount: () => connectionCount,
     endActiveSubscriptions: () => subscriptionEnds.splice(0).forEach((send) => send()),
-    flushDelayedResponses: () => delayedResponses.splice(0).forEach((send) => send())
+    flushDelayedResponses: () => delayedResponses.splice(0).forEach((send) => send()),
+    closeClients: () => wss.clients.forEach((client) => client.close(4001, 'test close'))
   }
 }
 

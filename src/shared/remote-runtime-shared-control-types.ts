@@ -10,15 +10,6 @@ export type SharedControlConnectionState =
   | 'awaiting_authenticated'
   | 'ready'
 
-export type RemoteRuntimeSharedControlConnectionOptions = {
-  environmentId?: string
-  clientCapabilities?: readonly RuntimeCapability[]
-  reconnectStableResetMs?: number
-  liveness?: RemoteRuntimeSocketLivenessOptions
-  sessionProbeIntervalMs?: number
-  sessionProbeTimeoutMs?: number
-}
-
 export type SharedControlPendingRequest<TResult> = {
   method: string
   resolve: (response: RuntimeRpcResponse<TResult>) => void
@@ -81,4 +72,16 @@ export type RemoteRuntimeSharedConnectionDiagnostics = {
   lastConnectedAt: number | null
   lastClose: { code: number; reason: string } | null
   lastError: string | null
+}
+export type RemoteRuntimeSharedControlConnectionOptions = {
+  environmentId?: string
+  clientCapabilities?: readonly RuntimeCapability[]
+  isManuallyDisconnected?: () => boolean
+  isCapabilityPaused?: () => boolean
+  /** Publishes local transport diagnostics after a meaningful state transition. */
+  onDiagnosticsChanged?: (diagnostics: RemoteRuntimeSharedConnectionDiagnostics) => void
+  reconnectStableResetMs?: number
+  liveness?: RemoteRuntimeSocketLivenessOptions
+  sessionProbeIntervalMs?: number
+  sessionProbeTimeoutMs?: number
 }

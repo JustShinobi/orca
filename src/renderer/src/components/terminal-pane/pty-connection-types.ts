@@ -12,11 +12,12 @@ import type {
   AgentProviderSessionMetadata,
   SleepingAgentLaunchConfig
 } from '../../../../shared/agent-session-resume'
+import type { AutoSwitchRateLimitAgent } from '../../../../shared/agent-rate-limit-detection'
 import type { TerminalKittyKeyboardModeTracker } from '../../../../shared/terminal-kitty-keyboard-mode-tracker'
 import type { PtyTransportRecoveryState } from './pty-transport-types'
 import type { SessionOptionValue } from '../../../../shared/native-chat-session-options'
 import type { DirectSshPaneRetryAttemptId } from '@/store/slices/direct-ssh-terminal-recovery'
-import type { AutoSwitchRateLimitAgent } from '../../../../shared/agent-rate-limit-detection'
+import type { PtyPreconnectInputEntry } from './pty-preconnect-input-buffer'
 
 export type PtyPaneStartup = {
   command: string
@@ -56,6 +57,14 @@ export type PtyConnectionDeps = {
   tabId: string
   worktreeId: string
   cwd?: string
+  /** Delays a fresh split's spawn without delaying its renderer pane. */
+  cwdPromise?: Promise<string>
+  /** Input handed off from a predecessor mount of the same deferred split. */
+  preconnectInput?: readonly PtyPreconnectInputEntry[]
+  /** Captures newly retained input for a remount-safe deferred split handoff. */
+  onPreconnectInput?: (input: PtyPreconnectInputEntry) => void
+  /** Releases a deferred split's detach fence when its initial spawn yields no PTY. */
+  onDeferredCwdSpawnFailed?: () => void
   startup?: PtyPaneStartup
   restoredLeafId?: string | null
   restoredPtyIdByLeafId?: Record<string, string>
@@ -73,13 +82,10 @@ export type PtyConnectionDeps = {
   restoredViewportBlankingPanesRef?: RestoredViewportBlankingPanesRef
   isActiveRef: React.RefObject<boolean>
   isVisibleRef: React.RefObject<boolean>
-  onPtyExitRef: React.RefObject<(ptyId: string) => void>
+  onPtyExitRef: React.RefObject<(ptyId: string, exitCode?: number) => void>
   onAgentExitedRef: React.RefObject<(leafId: string) => void>
   onPtyErrorRef?: React.RefObject<(paneId: number, message: string) => void>
-  onPaneProcessDied?: (processExit: PaneProcessExit) => void
-  onPtyRecoveryStateRef?: React.RefObject<
-    (paneId: number, state: PtyTransportRecoveryState | null) => void
-  >
+  onPtyErrorClearedRef?: React.RefObject<(paneId: number, message?: string) => void>
   onAgentRateLimitDetected?: (event: {
     paneId: number
     paneKey: string
@@ -87,6 +93,10 @@ export type PtyConnectionDeps = {
     agent: AutoSwitchRateLimitAgent
     providerSession: AgentProviderSessionMetadata
   }) => void
+  onPaneProcessDied?: (processExit: PaneProcessExit) => void
+  onPtyRecoveryStateRef?: React.RefObject<
+    (paneId: number, state: PtyTransportRecoveryState | null) => void
+  >
   clearTabPtyId: (tabId: string, ptyId: string) => void
   /** Set only on the pane carrying the tab's queued startup command; called once its own fresh
    *  spawn exists, which is the first moment a live shell exists to receive it. Not proof of
@@ -124,7 +134,15 @@ export type PtyConnectionDeps = {
   }) => void
   setCacheTimerStartedAt: (key: string, ts: number | null) => void
   syncPanePtyLayoutBinding: (paneId: number, ptyId: string | null) => void
+  /** Stable-leaf variant for async callbacks that may outlive a PaneManager instance. */
+  syncPanePtyLayoutBindingForLeaf?: (
+    leafId: string,
+    ptyId: string | null,
+    sourcePaneId: number
+  ) => void
   clearExitedPanePtyLayoutBinding: (paneId: number, exitedPtyId: string) => void
+  /** Stable-leaf variant for async exit callbacks that may outlive a PaneManager instance. */
+  clearExitedPanePtyLayoutBindingForLeaf?: (leafId: string, exitedPtyId: string) => void
   /** Settles the captured one-shot startup only after this pane owns a concrete PTY. */
   onStartupBound?: () => void
   deferPtyInput?: (paneId: number, data: string, forward: (data: string) => void) => void
