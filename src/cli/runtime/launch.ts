@@ -1,5 +1,4 @@
 import { spawn as spawnProcess, type SpawnOptions } from 'node:child_process'
-import { resolve } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import {
   SERVE_UPDATE_HANDOFF_PATH_ENV,
@@ -17,6 +16,15 @@ import {
   superviseForegroundServe
 } from './serve-update-supervisor'
 import { RuntimeClientError } from './types'
+import {
+  getExecutableAppArgs,
+  getExecutableSpawnOptions,
+  resolveAppRoot,
+  resolveForegroundOrcaExecutable,
+  stripElectronRunAsNode
+} from './app-executable-resolution'
+
+export { stripElectronRunAsNode } from './app-executable-resolution'
 
 const IGNORED_NON_RECIPE_STDOUT = '[serve] ignored non-recipe stdout'
 
@@ -29,7 +37,7 @@ export function launchOrcaApp(): void {
 
   const overrideExecutable = process.env.ORCA_APP_EXECUTABLE
   if (typeof overrideExecutable === 'string' && overrideExecutable.trim().length > 0) {
-    spawnDetached(overrideExecutable, getExecutableAppArgs(), {
+    spawnDetached(overrideExecutable, getExecutableAppArgs(overrideExecutable), {
       ...getExecutableSpawnOptions(overrideExecutable),
       env: stripElectronRunAsNode(process.env)
     })
@@ -50,7 +58,7 @@ export function launchOrcaApp(): void {
       }
     }
 
-    spawnDetached(process.execPath, [], {
+    spawnDetached(process.execPath, getExecutableAppArgs(process.execPath), {
       env: stripElectronRunAsNode(process.env)
     })
     return
@@ -91,10 +99,7 @@ export function serveOrcaApp(
   } = {}
 ): Promise<number> {
   const executable = resolveForegroundOrcaExecutable()
-  const childArgs = [...getExecutableAppArgs()]
-  if (process.env.ORCA_APPIMAGE_NO_SANDBOX === '1') {
-    childArgs.push('--no-sandbox')
-  }
+  const childArgs = [...getExecutableAppArgs(executable)]
   childArgs.push('--serve')
   if (args.json) {
     childArgs.push('--serve-json')
@@ -141,7 +146,6 @@ export function serveOrcaApp(
       ? getServeUpdateHandoffPath(getDefaultUserDataPath())
       : null
   const childEnv = stripElectronRunAsNode(process.env)
-  delete childEnv.ORCA_APPIMAGE_NO_SANDBOX
   if (handoffPath) {
     childEnv[SERVE_UPDATE_HANDOFF_PATH_ENV] = handoffPath
   }
@@ -274,39 +278,4 @@ function waitForRecipeJson(child: ReturnType<typeof spawnProcess>): Promise<numb
     // stdio closes so a last recipe chunk is not mistaken for missing output.
     child.once('close', onClose)
   })
-}
-
-function getExecutableAppArgs(): string[] {
-  return process.env.ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT === '1' ? [resolveAppRoot()] : []
-}
-
-function getExecutableSpawnOptions(executable: string): Pick<SpawnOptions, 'shell'> {
-  return process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(executable) ? { shell: true } : {}
-}
-
-function resolveAppRoot(): string {
-  // Why: dev-mode resource resolution in the Electron child may consult
-  // process.cwd(). Pin it to the app root so `orca serve` behaves the same
-  // regardless of the shell directory it was launched from.
-  return resolve(__dirname, '../../..')
-}
-
-function resolveForegroundOrcaExecutable(): string {
-  const overrideExecutable = process.env.ORCA_APP_EXECUTABLE
-  if (typeof overrideExecutable === 'string' && overrideExecutable.trim().length > 0) {
-    return overrideExecutable
-  }
-  if (process.env.ELECTRON_RUN_AS_NODE === '1') {
-    return process.execPath
-  }
-  throw new RuntimeClientError(
-    'runtime_serve_failed',
-    'Could not determine how to start Orca server. Set ORCA_APP_EXECUTABLE to the Orca executable.'
-  )
-}
-
-export function stripElectronRunAsNode(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const next = { ...env }
-  delete next.ELECTRON_RUN_AS_NODE
-  return next
 }

@@ -4,8 +4,8 @@ const maxOldSpaceSizeMb = 4096
 const minOldSpaceSizeMb = 2048
 const reservedSystemMemoryMb = 1024
 
-const maxTypecheckOldSpaceSizeMb = 2560
-const minTypecheckOldSpaceSizeMb = 1536
+const maxTypecheckOldSpaceSizeMb = 4096
+const minTypecheckOldSpaceSizeMb = 2048
 const reservedTypecheckSystemMemoryMb = 2048
 
 export function getBuildOldSpaceSizeMb(totalMemoryBytes = os.totalmem()) {

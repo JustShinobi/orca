@@ -1,6 +1,7 @@
 import { runBestEffortAgentBackgroundCleanups } from '@/lib/agent-background-session-cleanup'
 import { callRuntimeRpc, type RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import { subscribeToRuntimeTerminalData } from '@/runtime/runtime-terminal-stream'
+import { runtimeWaitExitCode } from '@/lib/agent-background-session-exit'
 
 type RemoteRunObservationArgs = {
   settings: Parameters<typeof subscribeToRuntimeTerminalData>[0]
@@ -54,7 +55,7 @@ export function createAgentBackgroundRunObservation(): AgentBackgroundRunObserva
         { terminal: args.terminal, for: 'exit' },
         { timeoutMs: 24 * 60 * 60 * 1000, signal: exitWaitController.signal }
       )
-        .then((result) => args.onExit(result.wait.exitCode ?? 0))
+        .then((result) => args.onExit(runtimeWaitExitCode(result.wait)))
         .catch(() => {})
     },
     setDataUnsubscribe: (unsubscribe) => {

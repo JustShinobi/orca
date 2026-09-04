@@ -65,12 +65,10 @@ export async function createSharedControlTestServer(
   const subscriptionEnds: (() => void)[] = []
   let connectionCount = 0
   let closedAfterFirstStreamingResponse = false
-  // Why: bind loopback-specific, not wildcard — on macOS another process binding
-  // 127.0.0.1 on the same ephemeral port would shadow a wildcard listener and
-  // hijack the tests' connections (observed with a running Orca app's browser bridge).
+  // host must match the 127.0.0.1 clients dial: a wildcard bind lets a foreign loopback listener claim the port and answer here.
   const wss = new WebSocketServer({
-    port: 0,
     host: '127.0.0.1',
+    port: 0,
     autoPong: options.disableAutoPong !== true
   })
   servers.push(wss)

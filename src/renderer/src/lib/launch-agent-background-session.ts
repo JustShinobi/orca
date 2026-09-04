@@ -38,6 +38,7 @@ import {
 } from '@/lib/adopt-agent-background-session-tab'
 import { createBackgroundAgentStatusConsumer } from '@/lib/background-agent-status-consumer'
 import { isWslUncPath } from '../../../shared/wsl-paths'
+import { settleTabPtyBinding } from '@/lib/agent-background-session-exit'
 
 export async function launchAgentBackgroundSession(
   args: LaunchAgentBackgroundSessionArgs
@@ -141,7 +142,7 @@ export async function launchAgentBackgroundSession(
     runObservation.dispose()
     sshStartupDelivery.clear()
     if (tab) {
-      useAppStore.getState().clearTabPtyId(tab.id, exitPtyId)
+      settleTabPtyBinding(tab.id, exitPtyId, code)
     }
     useAppStore.getState().clearAgentLaunchConfig(paneKey)
     onExit?.(exitPtyId, code)
