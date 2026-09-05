@@ -33,6 +33,7 @@ import {
   WORKTREE_SECTION_HEADER_PADDING_LEFT
 } from './indentation'
 import { FolderPathStatusIndicator } from './FolderPathStatusIndicator'
+import { RepoScanUnavailableIndicator } from './RepoScanUnavailableIndicator'
 import {
   ProjectGroupCreateWorkspaceButton,
   ProjectGroupHeaderMenu
@@ -348,6 +349,7 @@ export function renderWorktreeSectionHeaderRow(args: {
               </div>
               <RepoForkIndicator upstream={row.repo?.upstream} />
               <FolderPathStatusIndicator status={projectGroupPathStatus} />
+              {isRepoHeader ? <RepoScanUnavailableIndicator repo={row.repo!} /> : null}
             </div>
           </div>
         </div>

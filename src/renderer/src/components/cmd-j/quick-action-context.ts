@@ -6,12 +6,19 @@ import { getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runti
 import { selectRuntimeAwareSshStatus } from '@/store/slices/runtime-environment-ssh'
 import { isPairedWebClientWindow } from '@/lib/desktop-window-chrome'
 import { getClientCreationActionPolicy } from '@/lib/client-creation-action-policy'
+import {
+  canRunNativeChatSplitTarget,
+  resolveActiveNativeChatSplitTarget,
+  runActiveNativeChatSplit
+} from '@/components/native-chat/native-chat-layout-actions'
+import type { NativeChatSplitDirection } from '@/components/native-chat/native-chat-split-shortcut'
 
 export type CmdJUnavailableReason =
   | 'loading'
   | 'no-active-workspace'
   | 'ssh-disconnected'
   | 'no-active-group'
+  | 'no-active-chat'
   | 'client-action-unsupported'
 
 export type CmdJQuickActionAvailability =
@@ -38,6 +45,8 @@ export type CmdJQuickActionContext = {
   openCreateWorkspace: () => void
   deleteActiveWorkspace: () => void
   openAddQuickCommand: () => void
+  canSplitActiveChat?: boolean
+  splitActiveChat?: (direction: NativeChatSplitDirection) => boolean
 }
 
 export function resolveCmdJActiveGroupId(
@@ -172,6 +181,10 @@ export function buildCmdJQuickActionContext(args: {
   const managedBrowserCreationEnabled =
     getClientCreationActionPolicy(args.state, activeWorktreeId)['managed-browser'].state ===
     'enabled'
+  const activeChatTarget =
+    args.state.activeView === 'terminal'
+      ? resolveActiveNativeChatSplitTarget(args.state, activeWorktreeId, activeGroupId)
+      : null
 
   return {
     activeView: args.state.activeView,
@@ -187,7 +200,10 @@ export function buildCmdJQuickActionContext(args: {
     openNewTerminalTab: args.openNewTerminalTab,
     openCreateWorkspace: args.openCreateWorkspace,
     deleteActiveWorkspace: args.deleteActiveWorkspace,
-    openAddQuickCommand: args.openAddQuickCommand
+    openAddQuickCommand: args.openAddQuickCommand,
+    canSplitActiveChat: canRunNativeChatSplitTarget(args.state, activeChatTarget),
+    splitActiveChat: (direction) =>
+      runActiveNativeChatSplit(activeWorktreeId, activeGroupId, direction)
   }
 }
 
@@ -204,6 +220,8 @@ export function getUnavailableQuickActionMessage(
       return `Can't ${actionTitle.toLowerCase()} — workspace is disconnected.`
     case 'no-active-group':
       return `Can't ${actionTitle.toLowerCase()} — no tab group is available.`
+    case 'no-active-chat':
+      return `Can't ${actionTitle.toLowerCase()} — no movable chat is active.`
     case 'client-action-unsupported':
       return `Can't ${actionTitle.toLowerCase()} — this client and runtime do not support it.`
   }

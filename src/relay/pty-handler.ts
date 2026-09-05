@@ -10,11 +10,11 @@ import type { RelayDispatcher, RequestContext } from './dispatcher'
 import {
   resolveDefaultShell,
   resolveProcessCwd,
-  processHasChildren,
   getForegroundProcessName,
   isProcessAlive,
   listShellProfiles
 } from './pty-shell-utils'
+import { inspectPtyChildProcesses, processHasChildren } from './pty-child-process-inspection'
 import { getRelayShellLaunchConfig, isRelayWslShell } from './pty-shell-launch'
 import { RetiredPaneSurfaceRegistry } from './retired-pane-surfaces'
 import { addWslEnvKeys } from '../shared/wsl-env'
@@ -55,6 +55,7 @@ import {
 import { isTuiAgent } from '../shared/tui-agent-config'
 import type { TuiAgent } from '../shared/tui-agent'
 import { forceKillPosixPtyProcessGroups } from '../main/pty/posix-pty-process-groups'
+import type { PtyChildProcessVerdict } from '../shared/terminal-process-inspection'
 import { terminatePtyJob } from '../main/windows/windows-pty-job'
 import { stripInheritedBuildModeEnv } from '../main/pty/build-mode-env'
 import { stripLegacyTerminalShimEnv } from '../main/pty/legacy-terminal-shim-dir'
@@ -2610,6 +2611,7 @@ export class PtyHandler {
   private async inspectProcess(params: Record<string, unknown>): Promise<{
     foregroundProcess: string | null
     hasChildProcesses: boolean
+    childProcessEvidence?: PtyChildProcessVerdict
     foregroundProcessEvidence?: RemoteForegroundEvidence
   }> {
     pruneRetiredPtyIncarnations(this.retiredIncarnations)
@@ -2661,6 +2663,9 @@ export class PtyHandler {
       }
     }
     let rows: readonly ProcessTableRow[] | null = null
+    // Set only when the budgeted evidence read gave up, so the compatibility fields below do not
+    // turn around and ask the same unreadable table again with no budget at all.
+    let tableUnavailable = false
     let evidence: RemoteForegroundEvidence | undefined
     if (process.platform === 'win32') {
       // Why SSH-to-Windows is always unverifiable: POSIX has a real foreground primitive
@@ -2699,6 +2704,7 @@ export class PtyHandler {
           rows
         )
       } catch {
+        tableUnavailable = true
         evidence = {
           authorityGeneration: this.ptyIdMintEpoch,
           observationEpoch: ++this.foregroundEvidenceEpoch,
@@ -2716,14 +2722,34 @@ export class PtyHandler {
       evidence?.verdict === 'live'
         ? (evidence.processName ?? managed.pty.process) || null
         : managed.pty.process || null
+    // Derive child liveness from the same capture; do not fork a second process-table probe for
+    // each field/pane in an event burst.
+    //
+    // Why Windows is gated on the caller asking: this is the one field whose Windows answer costs
+    // a process-table read, and `inspectProcess` is the polled path (750ms/2000ms per tracked
+    // pane). A relay host has no `@vscode/windows-process-tree`, so the read falls back to the
+    // 1.36s CIM scan, and polling that would reinstate exactly the fork storm the shared table
+    // exists to prevent (#15209, #15036). Close and cleanup decisions ask for the scan by name;
+    // a poll gets the honest `unverifiable` instead of a fabricated negative.
+    // Why `tableUnavailable` first: it means the budgeted evidence read already gave up. Without
+    // this arm `inspectPtyChildProcesses` re-enters `getProcessTableSnapshot()` and joins the very
+    // capture this call just abandoned, blocking for all of it and spending the whole latency the
+    // budget exists to avoid. The destructive `pty.hasChildProcesses` RPC keeps its fresh probe.
+    const childProcessEvidence: PtyChildProcessVerdict = rows
+      ? rows.some((row) => row.ppid === managed.pty.pid)
+        ? 'children'
+        : 'no-children'
+      : tableUnavailable
+        ? 'unverifiable'
+        : process.platform === 'win32' && params.scanChildProcesses !== true
+          ? 'unverifiable'
+          : await inspectPtyChildProcesses(managed.pty.pid)
     return {
       foregroundProcess,
-      // Derive child liveness from the same capture; do not fork a second
-      // process-table probe for each field/pane in an event burst. Windows
-      // has no evidence capture, so preserve the compatibility child probe.
-      hasChildProcesses: rows
-        ? rows.some((row) => row.ppid === managed.pty.pid)
-        : await processHasChildren(managed.pty.pid),
+      // `unverifiable` keeps spelling itself `false` on the compatibility field, which is what
+      // every client too old to read the verdict receives.
+      hasChildProcesses: childProcessEvidence === 'children',
+      childProcessEvidence,
       ...(evidence ? { foregroundProcessEvidence: evidence } : {})
     }
   }
@@ -2742,6 +2768,10 @@ export class PtyHandler {
     // process-table work on the host.
     const includeForegroundProcessEvidence = params.includeForegroundProcessEvidence !== false
     let evidenceRows: readonly ProcessTableRow[] | null = null
+    // Same reason as `inspectProcess`: once the budgeted read has given up, the per-PTY title
+    // fallback below must not re-enter the same capture without a budget -- and here it would do
+    // so once per managed PTY.
+    let evidenceTableUnavailable = false
     let evidenceResults: BatchedForegroundProcessResult[] = []
     const evidenceEpoch = ++this.foregroundEvidenceEpoch
     // Worst-case capture time for the snapshot below, not the instant its await settled: the
@@ -2767,6 +2797,7 @@ export class PtyHandler {
       } catch {
         // An unreadable capture is represented as unverifiable evidence below;
         // existing inventory fields remain available for old clients.
+        evidenceTableUnavailable = true
       }
     }
     for (const [entryIndex, [id, managed]] of managedEntries.entries()) {
@@ -2781,7 +2812,7 @@ export class PtyHandler {
       const title =
         (evidenceRows
           ? (evidenceResults[entryIndex]?.processName ?? managed.pty.process ?? null)
-          : includeForegroundProcessEvidence
+          : includeForegroundProcessEvidence && !evidenceTableUnavailable
             ? await getForegroundProcessName(managed.pty.pid, managed.pty.process || null)
             : managed.pty.process || null) || 'shell'
       const foregroundProcessEvidence =
