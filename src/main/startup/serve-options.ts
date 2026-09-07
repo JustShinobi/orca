@@ -3,6 +3,14 @@ import {
   getServeOptionValidationError
 } from '../../shared/serve-option-validation'
 
+export type ServePreviewOptions = {
+  port: number
+  bindHost: string
+  domain: string
+  auth?: 'open' | 'token'
+  token?: string | null
+}
+
 export type ServeOptions = {
   json: boolean
   wsPort?: number
@@ -11,6 +19,7 @@ export type ServeOptions = {
   mobilePairing: boolean
   recipeJson: boolean
   projectRoot: string | null
+  preview?: ServePreviewOptions | null
 }
 
 function optionsBeforeTerminator(argv: readonly string[]): readonly string[] {
@@ -106,6 +115,39 @@ export function getServeOptions(argv: readonly string[]): ServeOptions {
     wsPort = parsedPort
   }
 
+  const preview = getServePreviewOptions({
+    rawPort: valueAfter(
+      optionsArgv,
+      ['--serve-preview-port', '--preview-port'],
+      false,
+      '--serve-preview-port'
+    ),
+    bindHost: valueAfter(
+      optionsArgv,
+      ['--serve-preview-bind', '--preview-bind'],
+      false,
+      '--serve-preview-bind'
+    ),
+    domain: valueAfter(
+      optionsArgv,
+      ['--serve-preview-domain', '--preview-domain'],
+      false,
+      '--serve-preview-domain'
+    ),
+    rawAuth: valueAfter(
+      optionsArgv,
+      ['--serve-preview-auth', '--preview-auth'],
+      false,
+      '--serve-preview-auth'
+    ),
+    token: valueAfter(
+      optionsArgv,
+      ['--serve-preview-token', '--preview-token'],
+      false,
+      '--serve-preview-token'
+    )
+  })
+
   const options: ServeOptions = {
     // The CLI uses `flags.has('json')`, so even `--json=false` enables JSON output.
     json: hasFlag(optionsArgv, ['--serve-json', '--json']),
@@ -124,11 +166,42 @@ export function getServeOptions(argv: readonly string[]): ServeOptions {
       ['--serve-project-root', '--project-root'],
       false,
       '--serve-project-root'
-    )
+    ),
+    ...(preview ? { preview } : {})
   }
   const validationError = getServeOptionValidationError(options)
   if (validationError) {
     throw new Error(validationError)
   }
   return options
+}
+
+function getServePreviewOptions(flags: {
+  rawPort: string | null
+  bindHost: string | null
+  domain: string | null
+  rawAuth: string | null
+  token: string | null
+}): ServePreviewOptions | null {
+  const { rawPort, bindHost, domain, rawAuth, token } = flags
+  if (!rawPort && !domain && !bindHost && !rawAuth && !token) {
+    return null
+  }
+  if (!rawPort || !domain) {
+    throw new Error('Preview proxy requires both --preview-port and --preview-domain.')
+  }
+  const port = Number(rawPort)
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(`Invalid --preview-port value: ${rawPort}`)
+  }
+  if (rawAuth && rawAuth !== 'open' && rawAuth !== 'token') {
+    throw new Error(`Invalid --preview-auth value: ${rawAuth} (use open or token)`)
+  }
+  return {
+    port,
+    bindHost: bindHost ?? '127.0.0.1',
+    domain,
+    auth: rawAuth as 'open' | 'token' | undefined,
+    token
+  }
 }

@@ -3,6 +3,7 @@ import { ACCOUNT_HANDLERS } from './account'
 import { ACCOUNT_COMMAND_SPECS } from '../specs/account'
 import type { HandlerContext } from '../dispatch'
 import type { RateLimitState } from '../../shared/rate-limit-types'
+import { createEmptyRateLimitState } from '../../shared/rate-limit-state-factory'
 
 function accountState(email: string) {
   return {
@@ -13,23 +14,7 @@ function accountState(email: string) {
 }
 
 function rateLimitState(overrides: Partial<RateLimitState> = {}): RateLimitState {
-  return {
-    claude: null,
-    codex: null,
-    gemini: null,
-    opencodeGo: null,
-    kimi: null,
-    antigravity: null,
-    minimax: null,
-    grok: null,
-    minimaxCookieConfigured: false,
-    grokAuthConfigured: false,
-    claudeTarget: { runtime: 'host', wslDistro: null },
-    codexTarget: { runtime: 'host', wslDistro: null },
-    inactiveClaudeAccounts: [],
-    inactiveCodexAccounts: [],
-    ...overrides
-  }
+  return createEmptyRateLimitState(overrides)
 }
 
 type AccountsStateFixture = {

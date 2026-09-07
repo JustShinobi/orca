@@ -1,5 +1,6 @@
 import type { StateCreator } from 'zustand'
 import type { RateLimitRuntimeTarget, RateLimitState } from '../../../../shared/rate-limit-types'
+import { createEmptyRateLimitState } from '../../../../shared/rate-limit-state-factory'
 import type { AppState } from '../types'
 import { callRuntimeRpc } from '../../runtime/runtime-rpc-client'
 
@@ -42,22 +43,7 @@ export function selectAccountOwnerRateLimits(s: AppState): RateLimitState {
 }
 
 export const createRateLimitSlice: StateCreator<AppState, [], [], RateLimitSlice> = (set, get) => ({
-  rateLimits: {
-    claude: null,
-    codex: null,
-    gemini: null,
-    opencodeGo: null,
-    kimi: null,
-    antigravity: null,
-    minimax: null,
-    grok: null,
-    minimaxCookieConfigured: false,
-    grokAuthConfigured: false,
-    claudeTarget: { runtime: 'host', wslDistro: null },
-    codexTarget: { runtime: 'host', wslDistro: null },
-    inactiveClaudeAccounts: [],
-    inactiveCodexAccounts: []
-  },
+  rateLimits: createEmptyRateLimitState(),
   remoteRateLimits: null,
 
   fetchRateLimits: async () => {

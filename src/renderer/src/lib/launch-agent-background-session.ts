@@ -25,8 +25,10 @@ import { getSettingsForWorktreeRuntimeOwner } from '@/lib/worktree-runtime-owner
 import { retireProvider } from '@/lib/retire-unowned-background-terminal'
 import { createRuntimeAgentBackgroundTerminal } from '@/lib/runtime-agent-background-create'
 import { toRemoteRuntimePtyId } from '@/runtime/runtime-terminal-stream'
-import { createSshBackgroundStartupDelivery } from '@/lib/ssh-background-startup-delivery'
-import { shouldUseShellReadyStartupDelivery } from '../../../shared/codex-startup-delivery'
+import {
+  createSshBackgroundStartupDelivery,
+  sshBackgroundLaunchWaitsForShellReady
+} from '@/lib/ssh-background-startup-delivery'
 import { isMainTerminalSideEffectAuthorityForPty } from '@/components/terminal-pane/terminal-side-effect-facts-handler'
 import { resolveLocalWindowsAgentStartupShell } from '../../../shared/windows-terminal-shell'
 import { runBestEffortAgentBackgroundCleanups } from '@/lib/agent-background-session-cleanup'
@@ -113,11 +115,7 @@ export async function launchAgentBackgroundSession(
   const sshStartupDelivery = createSshBackgroundStartupDelivery({
     command: sshConnectionId ? startupPlan.launchCommand : null,
     waitForShellReady:
-      Boolean(sshConnectionId) &&
-      shouldUseShellReadyStartupDelivery({
-        command: startupPlan.launchCommand,
-        startupCommandDelivery: startupPlan.startupCommandDelivery
-      }),
+      Boolean(sshConnectionId) && sshBackgroundLaunchWaitsForShellReady(startupPlan),
     write: (ptyId, data) => window.api.pty.write(ptyId, data)
   })
   // Route by the worktree's owner host, not the focused runtime.
@@ -219,6 +217,7 @@ export async function launchAgentBackgroundSession(
       })
       ptyId = result.id
       spawned = result
+      sshStartupDelivery.applyHostShellReadyArmed(result.shellReadyArmed)
     }
     const adopted = await adoptAgentBackgroundSessionTab({
       store,

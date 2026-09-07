@@ -65,6 +65,7 @@ import {
 } from '../../shared/windows-batch-spawn'
 import { ACCOUNT_IMPORT_RUNTIME_CAPABILITY } from '../../shared/protocol-version'
 import type { RateLimitState } from '../../shared/rate-limit-types'
+import { createEmptyRateLimitState } from '../../shared/rate-limit-state-factory'
 
 function successfulChild(): EventEmitter {
   const child = new EventEmitter()
@@ -98,23 +99,7 @@ function accountState(email: string) {
 // unconditionally, so every `accounts.list` fixture needs a full
 // RateLimitState, not just the {claude, codex} pair the old handler used.
 function rateLimitState(overrides: Partial<RateLimitState> = {}): RateLimitState {
-  return {
-    claude: null,
-    codex: null,
-    gemini: null,
-    opencodeGo: null,
-    kimi: null,
-    antigravity: null,
-    minimax: null,
-    grok: null,
-    minimaxCookieConfigured: false,
-    grokAuthConfigured: false,
-    claudeTarget: { runtime: 'host', wslDistro: null },
-    codexTarget: { runtime: 'host', wslDistro: null },
-    inactiveClaudeAccounts: [],
-    inactiveCodexAccounts: [],
-    ...overrides
-  }
+  return createEmptyRateLimitState(overrides)
 }
 
 // Why: the handler only reads id/email/active-slot fields, so fixtures state

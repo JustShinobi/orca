@@ -43,6 +43,32 @@ export async function cancelClaudeTurn(
   }
 }
 
+export async function stopClaudeBackgroundTasks(
+  session: ClaudeSession,
+  timeoutMs: number | undefined,
+  isCurrent: ClaudeTurnCancellationGuard = () => true,
+  taskId?: string
+): Promise<{ cancelled: boolean }> {
+  const stoppableTaskIds = session.backgroundTasks.stoppableTaskIds
+  const taskIds =
+    taskId === undefined ? stoppableTaskIds : stoppableTaskIds.includes(taskId) ? [taskId] : []
+  let cancelled = false
+  for (const taskId of taskIds) {
+    if (!isCurrent()) {
+      break
+    }
+    try {
+      await session.connection.stopTask(taskId, { timeoutMs })
+      cancelled = true
+    } catch (error) {
+      if (!(error instanceof ClaudeControlRequestError)) {
+        throw error
+      }
+    }
+  }
+  return { cancelled }
+}
+
 export async function answerClaudePrompt(
   session: ClaudeSession,
   input: { itemId: string; kind: 'approval' | 'question'; optionId: string }

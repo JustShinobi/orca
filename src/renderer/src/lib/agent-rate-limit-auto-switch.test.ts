@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProviderRateLimits, RateLimitState } from '../../../shared/rate-limit-types'
+import { createEmptyRateLimitState } from '../../../shared/rate-limit-state-factory'
 import type {
   ClaudeRateLimitAccountsState,
   CodexRateLimitAccountsState
@@ -45,24 +46,8 @@ const emptyCodex: CodexRateLimitAccountsState = {
   activeAccountIdsByRuntime: { host: null, wsl: {} }
 }
 
-function rateLimitState(overrides: Partial<RateLimitState>): RateLimitState {
-  return {
-    claude: null,
-    codex: null,
-    gemini: null,
-    opencodeGo: null,
-    kimi: null,
-    antigravity: null,
-    minimax: null,
-    grok: null,
-    minimaxCookieConfigured: false,
-    grokAuthConfigured: false,
-    claudeTarget: { runtime: 'host', wslDistro: null },
-    codexTarget: { runtime: 'host', wslDistro: null },
-    inactiveClaudeAccounts: [],
-    inactiveCodexAccounts: [],
-    ...overrides
-  }
+function rateLimitState(overrides: Partial<RateLimitState> = {}): RateLimitState {
+  return createEmptyRateLimitState(overrides)
 }
 
 describe('selectAutoSwitchAccount', () => {

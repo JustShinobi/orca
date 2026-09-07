@@ -17,7 +17,9 @@ import type {
   AgentSessionProcessIdentity
 } from '../../../shared/agent-session-record'
 import type {
+  AgentSessionBackgroundTaskState,
   AgentSessionOptionsResult,
+  AgentSessionSlashCommand,
   AgentSessionWireRefusalCode
 } from '../../../shared/agent-session-wire'
 import type { StructuredAgentSessionEventSink } from './structured-agent-session-event-sink'
@@ -129,6 +131,12 @@ export type StructuredAgentSessionAdapter = {
     body: AgentJournalMessageItem
     fence: number
   }): Promise<AgentSessionDispatchOutcome>
+  compact?(input: {
+    turnId: string
+    sessionId: string
+    fence: number
+    onLateResult?: (result: { error?: string }) => Promise<void>
+  }): Promise<{ error?: string }>
   /** Cancels one turn, not the session: a session-wide interrupt would also kill
    *  a turn the client never asked to stop. */
   cancelTurn(input: {
@@ -136,6 +144,15 @@ export type StructuredAgentSessionAdapter = {
     turnId: string
     fence: number
   }): Promise<{ cancelled: boolean }>
+  stopBackgroundTasks?(input: {
+    sessionId: string
+    fence: number
+    taskId?: string
+  }): Promise<{ cancelled: boolean }>
+  backgroundTaskState?(sessionId: string): AgentSessionBackgroundTaskState | null | undefined
+  /** The `/` surface the running provider reports for itself. Undefined when the
+   *  provider never reports one, which is what keeps the client on its catalog. */
+  readCommands?(sessionId: string): AgentSessionSlashCommand[] | undefined
   /** Fires the provider callback for an approval or a question. The wire calls
    *  this only after the durable compare-and-set won, so it runs exactly once. */
   answerPrompt(input: {
