@@ -11,6 +11,10 @@ import { isPairedWebClientWindow } from '@/lib/desktop-window-chrome'
 import { getWorkspacePortsByWorktreeId } from '@/lib/workspace-port-groups'
 import { getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { hydrateRuntimeEnvironmentSshState } from '@/runtime/runtime-environment-ssh-state'
+import {
+  isDisconnectedRuntimeHostState,
+  runtimeHostConnectionStateForEntry
+} from '@/runtime/runtime-host-connection-state'
 import { useAppStore } from '@/store'
 import {
   selectRuntimeAwareSshStatus,
@@ -180,12 +184,17 @@ export function useWorktreeCardFoundation({
   const runtimeHostLabel = runtimeHostId
     ? (getHostDisplayLabelOverrides(settings).get(runtimeHostId) ?? runtimeEnvironmentName)
     : null
-  // Why: runtime ("Orca server") hosts get the same disconnected dimming as SSH when their environment has no live status.
+  // Why the shared derivation, not raw truthiness: an absent entry means "not probed yet",
+  // which is not the same verdict as a probe that came back unreachable.
   const isRuntimeDisconnected = useAppStore((s) => {
     if (!runtimeOwnerEnvironmentId) {
       return false
     }
-    return !s.runtimeStatusByEnvironmentId.get(runtimeOwnerEnvironmentId)?.status
+    return isDisconnectedRuntimeHostState(
+      runtimeHostConnectionStateForEntry(
+        s.runtimeStatusByEnvironmentId.get(runtimeOwnerEnvironmentId)
+      )
+    )
   })
   const [titleRenaming, setTitleRenaming] = useState(false)
   const [showRenameErrorDialog, setShowRenameErrorDialog] = useState(false)

@@ -7,7 +7,7 @@ import type { ClaudeUsageStore } from '../claude-usage/store'
 import type { CodexUsageStore } from '../codex-usage/store'
 import type { Store } from '../persistence'
 import { clearAutomationDispatchTokens } from './dispatch-tokens'
-import { collectAutomationRunUsage } from './run-usage-collection'
+import { writeAutomationRunUsage } from './run-usage-collection'
 import type { AutomationRunWriter } from './automation-run-writer'
 
 type AutomationRunCompletionCallbacks = {
@@ -57,22 +57,11 @@ export async function persistAutomationDispatchResult(params: {
   if (run.usage) {
     return run
   }
-  const usage = await collectAutomationRunUsage({
-    automation: params.store.listAutomations().find((entry) => entry.id === run.automationId),
+  return await writeAutomationRunUsage({
+    store: params.store,
+    runs: params.runs,
     run,
     claudeUsage: params.claudeUsage,
     codexUsage: params.codexUsage
-  })
-  // Why: create-time retention may evict a final run during the usage await.
-  if (!params.store.listAutomationRuns(run.automationId).some((entry) => entry.id === run.id)) {
-    return run
-  }
-  return params.runs.updateRun({
-    runId: run.id,
-    status: run.status,
-    workspaceId: run.workspaceId,
-    terminalSessionId: run.terminalSessionId,
-    usage,
-    error: run.error
   })
 }

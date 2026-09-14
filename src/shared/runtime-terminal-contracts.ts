@@ -12,6 +12,7 @@ import type { RuntimeMobileSessionTabsResult } from './runtime-session-contracts
 import type { TabGroupLayoutNode } from './tab-types'
 import type { TerminalExitCause } from './terminal-exit-cause'
 import type { TerminalPaneLayoutNode } from './terminal-tab-types'
+import type { RuntimeTerminalWaitBlockedReason } from './terminal-wait-blocked-reason-legacy-alias'
 import type { TuiAgent } from './tui-agent'
 
 export type RuntimeTerminalSummary = {
@@ -332,14 +333,7 @@ export type RuntimeTerminalClose = {
 
 export type RuntimeTerminalWaitCondition = 'exit' | 'tui-idle'
 
-export type RuntimeTerminalWaitBlockedReason =
-  | 'codex-update-prompt'
-  | 'codex-trust-workspace'
-  | 'codex-cwd-prompt'
-  | 'codex-model-migration-prompt'
-  | 'codex-hooks-review-prompt'
-  | 'codex-interactive-prompt'
-  | 'agent-approval-prompt'
+export type { RuntimeTerminalWaitBlockedReason } from './terminal-wait-blocked-reason-legacy-alias'
 
 export type RuntimeTerminalWait = {
   handle: string

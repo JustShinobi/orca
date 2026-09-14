@@ -1,4 +1,8 @@
 import type { WebContents } from 'electron'
+
+/** All the service asks of the renderer: is it still there, and take this message. Narrower
+ *  than WebContents so a test can supply the real shape instead of casting one. */
+export type AutomationRendererChannel = Pick<WebContents, 'isDestroyed' | 'send'>
 import type { Store } from '../persistence'
 import type {
   Automation,
@@ -9,7 +13,7 @@ import type {
 } from '../../shared/automations-types'
 import type { ClaudeUsageStore } from '../claude-usage/store'
 import type { CodexUsageStore } from '../codex-usage/store'
-import { runAutomationPrecheck } from './precheck-runner'
+import { evaluateAutomationRunPrecheck } from './automation-run-precheck'
 import { resolveAutomationRunTarget, type AutomationRunTargetResult } from './run-target-resolution'
 import type { HeadlessAutomationDispatcher } from './headless-dispatch'
 import { DEFAULT_CODEX_HEADLESS_LAUNCH_TIMEOUT_MS } from './headless-dispatch'
@@ -28,6 +32,8 @@ import { createAutomationRunWriter, type AutomationRunWriter } from './automatio
 import {
   describeScheduledRefusal,
   recordRefusedAutomationRun,
+  recordUnevaluableAutomation,
+  sendRendererDispatch,
   NO_DISPATCH_HOST
 } from './dispatch-refusal'
 import type { PublishAutomationsChanged } from '../../shared/runtime-client-events'
@@ -38,7 +44,7 @@ export class AutomationService {
   private readonly store: Store
   private readonly tickMs: number
   private timer: ReturnType<typeof setInterval> | null = null
-  private webContents: WebContents | null = null
+  private webContents: AutomationRendererChannel | null = null
   private rendererReady = false
   private evaluating = false
   private readonly claudeUsage: ClaudeUsageStore | null
@@ -94,7 +100,7 @@ export class AutomationService {
     this.publish?.(payload)
   }
 
-  setWebContents(webContents: WebContents | null): void {
+  setWebContents(webContents: AutomationRendererChannel | null): void {
     this.webContents = webContents
     this.rendererReady = false
   }
@@ -157,39 +163,11 @@ export class AutomationService {
   }
 
   async runPrecheck(automationId: string, runId: string): Promise<AutomationPrecheckResult | null> {
-    const automation = this.store.listAutomations().find((entry) => entry.id === automationId)
-    if (!automation) {
-      throw new Error('Automation not found.')
-    }
-    const run = this.store.listAutomationRuns(automationId).find((entry) => entry.id === runId)
-    if (!run) {
-      throw new Error('Automation run not found.')
-    }
-    if (run.trigger !== 'scheduled' || !automation.precheck) {
-      return null
-    }
-    const target = this.resolveTarget(automation)
-    if (!target.ok) {
-      return {
-        command: automation.precheck.command,
-        exitCode: null,
-        timedOut: false,
-        durationMs: 0,
-        stdout: '',
-        stderr: '',
-        stdoutTruncated: false,
-        stderrTruncated: false,
-        error: target.error,
-        startedAt: Date.now(),
-        completedAt: Date.now()
-      }
-    }
-    return await runAutomationPrecheck({
-      precheck: automation.precheck,
-      target:
-        automation.executionTargetType === 'ssh'
-          ? { type: 'ssh', cwd: target.cwd, connectionId: automation.executionTargetId }
-          : { type: 'local', cwd: target.cwd }
+    return await evaluateAutomationRunPrecheck({
+      store: this.store,
+      automationId,
+      runId,
+      allowRemoteHostScheduling: this.allowRemoteHostScheduling
     })
   }
 
@@ -223,7 +201,13 @@ export class AutomationService {
         if (!automation.enabled || automation.nextRunAt > now) {
           continue
         }
-        await this.evaluateAutomation(automation, now)
+        // Isolated per record (#16303): an unreadable schedule throws out of the
+        // occurrence math, and an uncaught throw here skipped every later due row.
+        try {
+          await this.evaluateAutomation(automation, now)
+        } catch (error) {
+          recordUnevaluableAutomation({ runs: this.runs, automation, error })
+        }
       }
     } finally {
       this.evaluating = false
@@ -328,7 +312,6 @@ export class AutomationService {
       run: updated,
       dispatchToken: createAutomationDispatchToken(automation.id, updated.id)
     }
-    this.webContents?.send('automations:dispatchRequested', payload)
-    return updated
+    return sendRendererDispatch(this.webContents, payload, this.runs, updated)
   }
 }
