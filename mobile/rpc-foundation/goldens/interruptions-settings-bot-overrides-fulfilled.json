@@ -3,198 +3,157 @@
   "family": "settings.bot-overrides",
   "namedDeltas": [],
   "runnerVersion": 1,
-  "baseline": "aba77d5babfeb3988a8ad39a16a1bc5af86ebf80",
+  "baseline": "9add08bb5943144f5fb0178ab628cdfebe99c22a",
   "lockfileSha256": "788c1234b38a61fc882fca292341fce6690deee9cc6695673b0575cf2c4cf571",
-  "recorderSha256": "9b12a8ad059efe07654846d6d917cbc1c628ac2dfc8101d76f2c73184deb8aec",
+  "recorderSha256": "d4fa125899cd863c03dbf96657d46b8c7d6c0ccf522b342bc4f164ed1e3becfe",
+  "adapterSha256": "fc73116d95985606fe32f22d3f14f434a6d5cd49219416c9fa0f47f971fa6ff0",
+  "scenarioSha256": "2d5c6dea28aa1a7bb9e4aa14a4c8441527d9ad401ad30161f05ea1f8da836bb2",
   "platform": "darwin",
   "scenarioVersion": 1,
   "projectionVersion": 2,
-  "goldenFormatVersion": 2,
+  "goldenFormatVersion": 5,
   "values": {
-    "0131611322e3": {
-      "mount": {
-        "status": "fulfilled",
+    "1a10a74b4157": {
+      "name": "settings.get#1",
+      "ordinal": 1,
+      "args": [
+        {
+          "name": "method",
+          "value": "settings.get"
+        },
+        {
+          "name": "params",
+          "value": {
+            "$rpc": "absent"
+          }
+        },
+        {
+          "name": "options",
+          "value": {
+            "$rpc": "absent"
+          }
+        }
+      ],
+      "settlement": {
+        "status": "rejected",
         "startedAt": 0,
-        "settledAt": 0,
-        "value": {
-          "$rpc": "undefined"
+        "settledAt": 30000,
+        "error": {
+          "category": "Error",
+          "message": "Request timed out: settings.get",
+          "isRpcDeliveryUnknown": true
         }
       }
     },
-    "1f2f2a0a5737": [
-      {
-        "name": "settings.get#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "settings.get"
-          },
-          {
-            "name": "params",
-            "value": {
-              "$rpc": "absent"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "$rpc": "absent"
-            }
+    "1e38f5df2fc6": {
+      "name": "settings.get#1",
+      "ordinal": 1,
+      "args": [
+        {
+          "name": "method",
+          "value": "settings.get"
+        },
+        {
+          "name": "params",
+          "value": {
+            "$rpc": "absent"
           }
-        ],
-        "settlement": {
-          "status": "pending",
-          "startedAt": 0
+        },
+        {
+          "name": "options",
+          "value": {
+            "$rpc": "absent"
+          }
+        }
+      ],
+      "settlement": {
+        "status": "rejected",
+        "startedAt": 0,
+        "settledAt": 0,
+        "error": {
+          "category": "LogicalClientCutoverError",
+          "message": "RPC interrupted by connection migration",
+          "isRpcDeliveryUnknown": true,
+          "cause": {
+            "category": "Error",
+            "message": "Connection closed",
+            "isRpcDeliveryUnknown": true
+          }
         }
       }
-    ],
+    },
     "4f53cda18c2b": [],
-    "582aad0720e3": [
-      {
-        "name": "settings.get#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "settings.get"
-          },
-          {
-            "name": "params",
-            "value": {
-              "$rpc": "absent"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "$rpc": "absent"
-            }
+    "b6a74921f3bd": {
+      "name": "settings.get#1",
+      "ordinal": 1,
+      "args": [
+        {
+          "name": "method",
+          "value": "settings.get"
+        },
+        {
+          "name": "params",
+          "value": {
+            "$rpc": "absent"
           }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 0,
-          "error": {
-            "category": "LogicalClientCutoverError",
-            "message": "RPC interrupted by connection migration",
-            "isRpcDeliveryUnknown": true,
-            "cause": {
-              "category": "Error",
-              "message": "Connection closed",
-              "isRpcDeliveryUnknown": true
-            }
+        },
+        {
+          "name": "options",
+          "value": {
+            "$rpc": "absent"
           }
         }
-      }
-    ],
-    "77571e1166d2": {
-      "mount": {
-        "status": "fulfilled",
+      ],
+      "settlement": {
+        "status": "rejected",
         "startedAt": 0,
         "settledAt": 0,
-        "value": {
-          "$rpc": "undefined"
-        }
-      },
-      "disconnect": {
-        "status": "fulfilled",
-        "startedAt": 0,
-        "settledAt": 0,
-        "value": {
-          "$rpc": "undefined"
+        "error": {
+          "category": "Error",
+          "message": "Connection lost",
+          "isRpcDeliveryUnknown": true
         }
       }
     },
-    "79828a30028a": [
-      {
-        "name": "settings.get#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "settings.get"
-          },
-          {
-            "name": "params",
-            "value": {
-              "$rpc": "absent"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "$rpc": "absent"
-            }
+    "c8c77ac17e0a": {
+      "name": "settings.get#1",
+      "ordinal": 2,
+      "json": "{\"id\":\"frame-1\",\"deviceToken\":\"recording-device\",\"method\":\"settings.get\"}"
+    },
+    "e3973bb12da1": {
+      "name": "settings.get#1",
+      "ordinal": 1,
+      "args": [
+        {
+          "name": "method",
+          "value": "settings.get"
+        },
+        {
+          "name": "params",
+          "value": {
+            "$rpc": "absent"
           }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 30000,
-          "error": {
-            "category": "Error",
-            "message": "Request timed out: settings.get",
-            "isRpcDeliveryUnknown": true
+        },
+        {
+          "name": "options",
+          "value": {
+            "$rpc": "absent"
           }
         }
-      }
-    ],
-    "7a5a1b086254": [
-      {
-        "name": "settings.get#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "settings.get"
-          },
-          {
-            "name": "params",
-            "value": {
-              "$rpc": "absent"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "$rpc": "absent"
-            }
-          }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 0,
-          "error": {
-            "category": "Error",
-            "message": "Connection lost",
-            "isRpcDeliveryUnknown": true
-          }
-        }
-      }
-    ],
-    "8df6a469391c": {
-      "mount": {
-        "status": "fulfilled",
-        "startedAt": 0,
-        "settledAt": 0,
-        "value": {
-          "$rpc": "undefined"
-        }
-      },
-      "cutover": {
-        "status": "fulfilled",
-        "startedAt": 0,
-        "settledAt": 0,
-        "value": {
-          "$rpc": "undefined"
-        }
+      ],
+      "settlement": {
+        "status": "pending",
+        "startedAt": 0
       }
     },
-    "9e493785145e": [
-      {
-        "name": "settings.get#1",
-        "json": "{\"id\":\"frame-1\",\"deviceToken\":\"recording-device\",\"method\":\"settings.get\"}"
+    "eb79a9b3682a": {
+      "status": "fulfilled",
+      "startedAt": 0,
+      "settledAt": 0,
+      "value": {
+        "$rpc": "undefined"
       }
-    ]
+    }
   },
   "recording": {
     "scenario": "interruptions-settings-bot-overrides-fulfilled",
@@ -202,71 +161,89 @@
       {
         "id": "settings-bot-overrides-fulfilled.prelude:settings-pending",
         "observation": {
-          "sender": "1f2f2a0a5737",
-          "payloads": "9e493785145e",
-          "settlements": "0131611322e3",
+          "sender": ["e3973bb12da1"],
+          "payloads": ["c8c77ac17e0a"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "4f53cda18c2b",
-          "effects": "4f53cda18c2b"
+          "effects": []
         }
       },
       {
         "id": "settings-bot-overrides-fulfilled.timeout:interrupted",
         "observation": {
-          "sender": "79828a30028a",
-          "payloads": "9e493785145e",
-          "settlements": "0131611322e3",
+          "sender": ["1a10a74b4157"],
+          "payloads": ["c8c77ac17e0a"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "4f53cda18c2b",
-          "effects": "4f53cda18c2b"
+          "effects": []
         }
       },
       {
         "id": "settings-bot-overrides-fulfilled.timeout:settled",
         "observation": {
-          "sender": "79828a30028a",
-          "payloads": "9e493785145e",
-          "settlements": "0131611322e3",
+          "sender": ["1a10a74b4157"],
+          "payloads": ["c8c77ac17e0a"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "4f53cda18c2b",
-          "effects": "4f53cda18c2b"
+          "effects": []
         }
       },
       {
         "id": "settings-bot-overrides-fulfilled.disconnect:interrupted",
         "observation": {
-          "sender": "7a5a1b086254",
-          "payloads": "9e493785145e",
-          "settlements": "77571e1166d2",
+          "sender": ["b6a74921f3bd"],
+          "payloads": ["c8c77ac17e0a"],
+          "settlements": {
+            "mount": "eb79a9b3682a",
+            "disconnect": "eb79a9b3682a"
+          },
           "state": "4f53cda18c2b",
-          "effects": "4f53cda18c2b"
+          "effects": []
         }
       },
       {
         "id": "settings-bot-overrides-fulfilled.disconnect:settled",
         "observation": {
-          "sender": "7a5a1b086254",
-          "payloads": "9e493785145e",
-          "settlements": "77571e1166d2",
+          "sender": ["b6a74921f3bd"],
+          "payloads": ["c8c77ac17e0a"],
+          "settlements": {
+            "mount": "eb79a9b3682a",
+            "disconnect": "eb79a9b3682a"
+          },
           "state": "4f53cda18c2b",
-          "effects": "4f53cda18c2b"
+          "effects": []
         }
       },
       {
         "id": "settings-bot-overrides-fulfilled.cutover:interrupted",
         "observation": {
-          "sender": "582aad0720e3",
-          "payloads": "9e493785145e",
-          "settlements": "8df6a469391c",
+          "sender": ["1e38f5df2fc6"],
+          "payloads": ["c8c77ac17e0a"],
+          "settlements": {
+            "mount": "eb79a9b3682a",
+            "cutover": "eb79a9b3682a"
+          },
           "state": "4f53cda18c2b",
-          "effects": "4f53cda18c2b"
+          "effects": []
         }
       },
       {
         "id": "settings-bot-overrides-fulfilled.cutover:settled",
         "observation": {
-          "sender": "582aad0720e3",
-          "payloads": "9e493785145e",
-          "settlements": "8df6a469391c",
+          "sender": ["1e38f5df2fc6"],
+          "payloads": ["c8c77ac17e0a"],
+          "settlements": {
+            "mount": "eb79a9b3682a",
+            "cutover": "eb79a9b3682a"
+          },
           "state": "4f53cda18c2b",
-          "effects": "4f53cda18c2b"
+          "effects": []
         }
       }
     ]

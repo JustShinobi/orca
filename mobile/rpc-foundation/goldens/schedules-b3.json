@@ -3,34 +3,114 @@
   "family": "linear-detail-barrier",
   "namedDeltas": [],
   "runnerVersion": 1,
-  "baseline": "aba77d5babfeb3988a8ad39a16a1bc5af86ebf80",
+  "baseline": "9add08bb5943144f5fb0178ab628cdfebe99c22a",
   "lockfileSha256": "788c1234b38a61fc882fca292341fce6690deee9cc6695673b0575cf2c4cf571",
-  "recorderSha256": "9b12a8ad059efe07654846d6d917cbc1c628ac2dfc8101d76f2c73184deb8aec",
+  "recorderSha256": "d4fa125899cd863c03dbf96657d46b8c7d6c0ccf522b342bc4f164ed1e3becfe",
+  "adapterSha256": "d3b7f33d810e1fa420ac41a628cde9fe4a9e65fd57f89fbca0a40fc7d74951ab",
+  "scenarioSha256": "b59fb599dd3a5fbc79bb8602dcec4b1c51a392c662efab7efc8324fc718ce8de",
   "platform": "darwin",
   "scenarioVersion": 1,
   "projectionVersion": 2,
-  "goldenFormatVersion": 2,
+  "goldenFormatVersion": 5,
   "values": {
-    "0131611322e3": {
-      "mount": {
-        "status": "fulfilled",
+    "0056f47b204a": {
+      "name": "linear.getIssue#1",
+      "ordinal": 4,
+      "args": [
+        {
+          "name": "method",
+          "value": "linear.getIssue"
+        },
+        {
+          "name": "params",
+          "value": {
+            "id": "issue-1",
+            "workspaceId": "linear-workspace"
+          }
+        },
+        {
+          "name": "options",
+          "value": {
+            "timeoutMs": 30000
+          }
+        }
+      ],
+      "settlement": {
+        "status": "pending",
+        "startedAt": 0
+      }
+    },
+    "1127f274b58c": {
+      "name": "linear.getIssue#1",
+      "ordinal": 4,
+      "args": [
+        {
+          "name": "method",
+          "value": "linear.getIssue"
+        },
+        {
+          "name": "params",
+          "value": {
+            "id": "issue-1",
+            "workspaceId": "linear-workspace"
+          }
+        },
+        {
+          "name": "options",
+          "value": {
+            "timeoutMs": 30000
+          }
+        }
+      ],
+      "settlement": {
+        "status": "rejected",
         "startedAt": 0,
-        "settledAt": 0,
-        "value": {
-          "$rpc": "undefined"
+        "settledAt": 30000,
+        "error": {
+          "category": "Error",
+          "message": "Request timed out: linear.getIssue",
+          "isRpcDeliveryUnknown": true
         }
       }
     },
-    "0b631657711f": [
-      {
-        "name": "linear.getIssue#1",
-        "json": "{\"id\":\"frame-1\",\"deviceToken\":\"recording-device\",\"method\":\"linear.getIssue\",\"params\":{\"id\":\"issue-1\",\"workspaceId\":\"linear-workspace\"}}"
-      },
-      {
-        "name": "linear.issueComments#1",
-        "json": "{\"id\":\"frame-2\",\"deviceToken\":\"recording-device\",\"method\":\"linear.issueComments\",\"params\":{\"issueId\":\"issue-1\",\"workspaceId\":\"linear-workspace\"}}"
+    "1d3774209877": {
+      "name": "linear.issueComments#1",
+      "ordinal": 5,
+      "args": [
+        {
+          "name": "method",
+          "value": "linear.issueComments"
+        },
+        {
+          "name": "params",
+          "value": {
+            "issueId": "issue-1",
+            "workspaceId": "linear-workspace"
+          }
+        },
+        {
+          "name": "options",
+          "value": {
+            "timeoutMs": 30000
+          }
+        }
+      ],
+      "settlement": {
+        "status": "rejected",
+        "startedAt": 0,
+        "settledAt": 0,
+        "error": {
+          "category": "Error",
+          "message": "comments transport error",
+          "isRpcDeliveryUnknown": true
+        }
       }
-    ],
+    },
+    "1eaad537f925": {
+      "name": "linear.getIssue#1",
+      "ordinal": 6,
+      "json": "{\"id\":\"frame-1\",\"deviceToken\":\"recording-device\",\"method\":\"linear.getIssue\",\"params\":{\"id\":\"issue-1\",\"workspaceId\":\"linear-workspace\"}}"
+    },
     "24f3de063dfd": {
       "error": "linear.issueComments#1 rejected",
       "loading": false,
@@ -38,172 +118,51 @@
         "$rpc": "null"
       }
     },
-    "26c78123b573": [
-      {
-        "name": "detailPayload",
-        "value": {
-          "$rpc": "null"
-        }
-      },
-      {
-        "name": "detailError",
-        "value": ""
-      },
-      {
-        "name": "detailLoading",
-        "value": true
-      }
-    ],
-    "2852f47712e0": [
-      {
-        "name": "detailPayload",
-        "value": {
-          "$rpc": "null"
-        }
-      },
-      {
-        "name": "detailError",
-        "value": ""
-      },
-      {
-        "name": "detailLoading",
-        "value": true
-      },
-      {
-        "name": "detailError",
-        "value": "Request timed out: linear.getIssue"
-      },
-      {
-        "name": "detailLoading",
-        "value": false
-      }
-    ],
-    "3ab28be1560f": [
-      {
-        "name": "linear.getIssue#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.getIssue"
-          },
-          {
-            "name": "params",
-            "value": {
-              "id": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
+    "264010756b38": {
+      "name": "detailLoading",
+      "ordinal": 3,
+      "value": true
+    },
+    "325dc4e1af5c": {
+      "name": "linear.issueComments#1",
+      "ordinal": 5,
+      "args": [
+        {
+          "name": "method",
+          "value": "linear.issueComments"
+        },
+        {
+          "name": "params",
+          "value": {
+            "issueId": "issue-1",
+            "workspaceId": "linear-workspace"
           }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 0,
-          "error": {
-            "category": "Error",
-            "message": "linear.getIssue#1 rejected",
-            "isRpcDeliveryUnknown": true
+        },
+        {
+          "name": "options",
+          "value": {
+            "timeoutMs": 30000
           }
         }
-      },
-      {
-        "name": "linear.issueComments#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.issueComments"
-          },
-          {
-            "name": "params",
-            "value": {
-              "issueId": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
-          }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 0,
-          "error": {
-            "category": "Error",
-            "message": "linear.issueComments#1 rejected",
-            "isRpcDeliveryUnknown": true
-          }
+      ],
+      "settlement": {
+        "status": "rejected",
+        "startedAt": 0,
+        "settledAt": 0,
+        "error": {
+          "category": "Error",
+          "message": "Connection lost",
+          "isRpcDeliveryUnknown": true
         }
       }
-    ],
-    "3edc657e906b": [
-      {
-        "name": "linear.getIssue#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.getIssue"
-          },
-          {
-            "name": "params",
-            "value": {
-              "id": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
-          }
-        ],
-        "settlement": {
-          "status": "pending",
-          "startedAt": 0
-        }
-      },
-      {
-        "name": "linear.issueComments#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.issueComments"
-          },
-          {
-            "name": "params",
-            "value": {
-              "issueId": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
-          }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 0,
-          "error": {
-            "category": "Error",
-            "message": "linear.issueComments#1 rejected",
-            "isRpcDeliveryUnknown": true
-          }
-        }
+    },
+    "33614c90b6eb": {
+      "name": "detailPayload",
+      "ordinal": 1,
+      "value": {
+        "$rpc": "null"
       }
-    ],
+    },
     "42903545f0f8": {
       "error": "comments transport error",
       "loading": false,
@@ -211,276 +170,81 @@
         "$rpc": "null"
       }
     },
-    "4be41ba84e00": [
-      {
-        "name": "linear.getIssue#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.getIssue"
-          },
-          {
-            "name": "params",
-            "value": {
-              "id": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
-          }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 0,
-          "error": {
-            "category": "LogicalClientCutoverError",
-            "message": "RPC interrupted by connection migration",
-            "isRpcDeliveryUnknown": true,
-            "cause": {
-              "category": "Error",
-              "message": "Connection closed",
-              "isRpcDeliveryUnknown": true
-            }
-          }
-        }
-      },
-      {
-        "name": "linear.issueComments#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.issueComments"
-          },
-          {
-            "name": "params",
-            "value": {
-              "issueId": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
-          }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 0,
-          "error": {
-            "category": "LogicalClientCutoverError",
-            "message": "RPC interrupted by connection migration",
-            "isRpcDeliveryUnknown": true,
-            "cause": {
-              "category": "Error",
-              "message": "Connection closed",
-              "isRpcDeliveryUnknown": true
-            }
-          }
-        }
-      }
-    ],
-    "606c2767b466": [
-      {
-        "name": "linear.getIssue#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.getIssue"
-          },
-          {
-            "name": "params",
-            "value": {
-              "id": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
-          }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 0,
-          "error": {
-            "category": "Error",
-            "message": "Connection lost",
-            "isRpcDeliveryUnknown": true
-          }
-        }
-      },
-      {
-        "name": "linear.issueComments#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.issueComments"
-          },
-          {
-            "name": "params",
-            "value": {
-              "issueId": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
-          }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 0,
-          "error": {
-            "category": "Error",
-            "message": "Connection lost",
-            "isRpcDeliveryUnknown": true
-          }
-        }
-      }
-    ],
-    "68d958edb978": [
-      {
-        "name": "linear.getIssue#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.getIssue"
-          },
-          {
-            "name": "params",
-            "value": {
-              "id": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
-          }
-        ],
-        "settlement": {
-          "status": "fulfilled",
-          "startedAt": 0,
-          "settledAt": 0,
+    "44556e4bd91e": {
+      "name": "linear.issueComments#1",
+      "ordinal": 5,
+      "args": [
+        {
+          "name": "method",
+          "value": "linear.issueComments"
+        },
+        {
+          "name": "params",
           "value": {
-            "error": {
-              "code": "refused",
-              "message": "issue refused"
-            },
-            "id": "frame-1",
-            "ok": false
+            "issueId": "issue-1",
+            "workspaceId": "linear-workspace"
+          }
+        },
+        {
+          "name": "options",
+          "value": {
+            "timeoutMs": 30000
           }
         }
-      },
-      {
-        "name": "linear.issueComments#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.issueComments"
-          },
-          {
-            "name": "params",
-            "value": {
-              "issueId": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
+      ],
+      "settlement": {
+        "status": "rejected",
+        "startedAt": 0,
+        "settledAt": 0,
+        "error": {
+          "category": "Error",
+          "message": "linear.issueComments#1 rejected",
+          "isRpcDeliveryUnknown": true
+        }
+      }
+    },
+    "485053bffe22": {
+      "name": "linear.getIssue#1",
+      "ordinal": 4,
+      "args": [
+        {
+          "name": "method",
+          "value": "linear.getIssue"
+        },
+        {
+          "name": "params",
+          "value": {
+            "id": "issue-1",
+            "workspaceId": "linear-workspace"
           }
-        ],
-        "settlement": {
-          "status": "pending",
-          "startedAt": 0
+        },
+        {
+          "name": "options",
+          "value": {
+            "timeoutMs": 30000
+          }
         }
-      }
-    ],
-    "6c671f71ee89": [
-      {
-        "name": "detailPayload",
-        "value": {
-          "$rpc": "null"
-        }
-      },
-      {
-        "name": "detailError",
-        "value": ""
-      },
-      {
-        "name": "detailLoading",
-        "value": true
-      },
-      {
-        "name": "detailError",
-        "value": "Connection lost"
-      },
-      {
-        "name": "detailLoading",
-        "value": false
-      }
-    ],
-    "6d65777cf6fe": [
-      {
-        "name": "detailPayload",
-        "value": {
-          "$rpc": "null"
-        }
-      },
-      {
-        "name": "detailError",
-        "value": ""
-      },
-      {
-        "name": "detailLoading",
-        "value": true
-      },
-      {
-        "name": "detailError",
-        "value": "comments transport error"
-      },
-      {
-        "name": "detailLoading",
-        "value": false
-      }
-    ],
-    "77571e1166d2": {
-      "mount": {
-        "status": "fulfilled",
+      ],
+      "settlement": {
+        "status": "rejected",
         "startedAt": 0,
         "settledAt": 0,
-        "value": {
-          "$rpc": "undefined"
-        }
-      },
-      "disconnect": {
-        "status": "fulfilled",
-        "startedAt": 0,
-        "settledAt": 0,
-        "value": {
-          "$rpc": "undefined"
+        "error": {
+          "category": "Error",
+          "message": "Connection lost",
+          "isRpcDeliveryUnknown": true
         }
       }
+    },
+    "51ea77da7dbd": {
+      "name": "detailError",
+      "ordinal": 8,
+      "value": "comments transport error"
+    },
+    "5f9cfa2482e9": {
+      "name": "detailError",
+      "ordinal": 8,
+      "value": "linear.issueComments#1 rejected"
     },
     "780aaf1d97be": {
       "error": "",
@@ -489,6 +253,16 @@
         "$rpc": "null"
       }
     },
+    "7d8d46d494ff": {
+      "name": "linear.issueComments#1",
+      "ordinal": 7,
+      "json": "{\"id\":\"frame-2\",\"deviceToken\":\"recording-device\",\"method\":\"linear.issueComments\",\"params\":{\"issueId\":\"issue-1\",\"workspaceId\":\"linear-workspace\"}}"
+    },
+    "881cdeb6ce57": {
+      "name": "detailError",
+      "ordinal": 8,
+      "value": "RPC interrupted by connection migration"
+    },
     "88573133f7d5": {
       "error": "RPC interrupted by connection migration",
       "loading": false,
@@ -496,89 +270,20 @@
         "$rpc": "null"
       }
     },
-    "8ba072374c63": [
-      {
-        "name": "linear.getIssue#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.getIssue"
-          },
-          {
-            "name": "params",
-            "value": {
-              "id": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
-          }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 30000,
-          "error": {
-            "category": "Error",
-            "message": "Request timed out: linear.getIssue",
-            "isRpcDeliveryUnknown": true
-          }
-        }
-      },
-      {
-        "name": "linear.issueComments#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.issueComments"
-          },
-          {
-            "name": "params",
-            "value": {
-              "issueId": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
-          }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 30000,
-          "error": {
-            "category": "Error",
-            "message": "Request timed out: linear.issueComments",
-            "isRpcDeliveryUnknown": true
-          }
-        }
-      }
-    ],
-    "8df6a469391c": {
-      "mount": {
-        "status": "fulfilled",
-        "startedAt": 0,
-        "settledAt": 0,
-        "value": {
-          "$rpc": "undefined"
-        }
-      },
-      "cutover": {
-        "status": "fulfilled",
-        "startedAt": 0,
-        "settledAt": 0,
-        "value": {
-          "$rpc": "undefined"
-        }
-      }
+    "8aacae6d3ab3": {
+      "name": "detailError",
+      "ordinal": 8,
+      "value": "Request timed out: linear.getIssue"
+    },
+    "8ccd4fa759a5": {
+      "name": "detailLoading",
+      "ordinal": 9,
+      "value": false
+    },
+    "a4f1a8696a24": {
+      "name": "detailError",
+      "ordinal": 2,
+      "value": ""
     },
     "a778223fed77": {
       "error": "linear.getIssue#1 rejected",
@@ -587,198 +292,118 @@
         "$rpc": "null"
       }
     },
-    "b4cf0b80bf2a": [
-      {
-        "name": "detailPayload",
-        "value": {
-          "$rpc": "null"
-        }
-      },
-      {
-        "name": "detailError",
-        "value": ""
-      },
-      {
-        "name": "detailLoading",
-        "value": true
-      },
-      {
-        "name": "detailError",
-        "value": "linear.issueComments#1 rejected"
-      },
-      {
-        "name": "detailLoading",
-        "value": false
-      }
-    ],
-    "b9b67d6bf2bb": [
-      {
-        "name": "linear.getIssue#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.getIssue"
-          },
-          {
-            "name": "params",
-            "value": {
-              "id": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
+    "b1228a23df33": {
+      "name": "linear.getIssue#1",
+      "ordinal": 4,
+      "args": [
+        {
+          "name": "method",
+          "value": "linear.getIssue"
+        },
+        {
+          "name": "params",
+          "value": {
+            "id": "issue-1",
+            "workspaceId": "linear-workspace"
           }
-        ],
-        "settlement": {
-          "status": "pending",
-          "startedAt": 0
-        }
-      },
-      {
-        "name": "linear.issueComments#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.issueComments"
-          },
-          {
-            "name": "params",
-            "value": {
-              "issueId": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
+        },
+        {
+          "name": "options",
+          "value": {
+            "timeoutMs": 30000
           }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 0,
-          "error": {
+        }
+      ],
+      "settlement": {
+        "status": "rejected",
+        "startedAt": 0,
+        "settledAt": 0,
+        "error": {
+          "category": "LogicalClientCutoverError",
+          "message": "RPC interrupted by connection migration",
+          "isRpcDeliveryUnknown": true,
+          "cause": {
             "category": "Error",
-            "message": "comments transport error",
+            "message": "Connection closed",
             "isRpcDeliveryUnknown": true
           }
         }
       }
-    ],
-    "cbf28b66143a": [
-      {
-        "name": "detailPayload",
-        "value": {
-          "$rpc": "null"
-        }
-      },
-      {
-        "name": "detailError",
-        "value": ""
-      },
-      {
-        "name": "detailLoading",
-        "value": true
-      },
-      {
-        "name": "detailError",
-        "value": "RPC interrupted by connection migration"
-      },
-      {
-        "name": "detailLoading",
-        "value": false
-      }
-    ],
-    "ce1aa70ed814": [
-      {
-        "name": "linear.getIssue#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.getIssue"
-          },
-          {
-            "name": "params",
-            "value": {
-              "id": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
+    },
+    "b6399147a999": {
+      "name": "linear.getIssue#1",
+      "ordinal": 4,
+      "args": [
+        {
+          "name": "method",
+          "value": "linear.getIssue"
+        },
+        {
+          "name": "params",
+          "value": {
+            "id": "issue-1",
+            "workspaceId": "linear-workspace"
           }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 0,
+        },
+        {
+          "name": "options",
+          "value": {
+            "timeoutMs": 30000
+          }
+        }
+      ],
+      "settlement": {
+        "status": "rejected",
+        "startedAt": 0,
+        "settledAt": 0,
+        "error": {
+          "category": "Error",
+          "message": "linear.getIssue#1 rejected",
+          "isRpcDeliveryUnknown": true
+        }
+      }
+    },
+    "c834373cd824": {
+      "name": "detailError",
+      "ordinal": 8,
+      "value": "Connection lost"
+    },
+    "d3dc79e5717b": {
+      "name": "linear.getIssue#1",
+      "ordinal": 4,
+      "args": [
+        {
+          "name": "method",
+          "value": "linear.getIssue"
+        },
+        {
+          "name": "params",
+          "value": {
+            "id": "issue-1",
+            "workspaceId": "linear-workspace"
+          }
+        },
+        {
+          "name": "options",
+          "value": {
+            "timeoutMs": 30000
+          }
+        }
+      ],
+      "settlement": {
+        "status": "fulfilled",
+        "startedAt": 0,
+        "settledAt": 0,
+        "value": {
           "error": {
-            "category": "Error",
-            "message": "linear.getIssue#1 rejected",
-            "isRpcDeliveryUnknown": true
-          }
-        }
-      },
-      {
-        "name": "linear.issueComments#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.issueComments"
+            "code": "refused",
+            "message": "issue refused"
           },
-          {
-            "name": "params",
-            "value": {
-              "issueId": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
-          }
-        ],
-        "settlement": {
-          "status": "pending",
-          "startedAt": 0
+          "id": "frame-1",
+          "ok": false
         }
       }
-    ],
-    "d004d139c7df": [
-      {
-        "name": "detailPayload",
-        "value": {
-          "$rpc": "null"
-        }
-      },
-      {
-        "name": "detailError",
-        "value": ""
-      },
-      {
-        "name": "detailLoading",
-        "value": true
-      },
-      {
-        "name": "detailError",
-        "value": "linear.getIssue#1 rejected"
-      },
-      {
-        "name": "detailLoading",
-        "value": false
-      }
-    ],
+    },
     "d40dd5c93d21": {
       "error": "Connection lost",
       "loading": false,
@@ -786,75 +411,117 @@
         "$rpc": "null"
       }
     },
-    "db6e863f7087": [
-      {
-        "name": "linear.getIssue#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.getIssue"
-          },
-          {
-            "name": "params",
-            "value": {
-              "id": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
-          }
-        ],
-        "settlement": {
-          "status": "fulfilled",
-          "startedAt": 0,
-          "settledAt": 0,
+    "de8da0e14206": {
+      "name": "linear.issueComments#1",
+      "ordinal": 5,
+      "args": [
+        {
+          "name": "method",
+          "value": "linear.issueComments"
+        },
+        {
+          "name": "params",
           "value": {
-            "error": {
-              "code": "refused",
-              "message": "issue refused"
-            },
-            "id": "frame-1",
-            "ok": false
+            "issueId": "issue-1",
+            "workspaceId": "linear-workspace"
+          }
+        },
+        {
+          "name": "options",
+          "value": {
+            "timeoutMs": 30000
           }
         }
-      },
-      {
-        "name": "linear.issueComments#1",
-        "args": [
-          {
-            "name": "method",
-            "value": "linear.issueComments"
-          },
-          {
-            "name": "params",
-            "value": {
-              "issueId": "issue-1",
-              "workspaceId": "linear-workspace"
-            }
-          },
-          {
-            "name": "options",
-            "value": {
-              "timeoutMs": 30000
-            }
-          }
-        ],
-        "settlement": {
-          "status": "rejected",
-          "startedAt": 0,
-          "settledAt": 0,
-          "error": {
+      ],
+      "settlement": {
+        "status": "rejected",
+        "startedAt": 0,
+        "settledAt": 0,
+        "error": {
+          "category": "LogicalClientCutoverError",
+          "message": "RPC interrupted by connection migration",
+          "isRpcDeliveryUnknown": true,
+          "cause": {
             "category": "Error",
-            "message": "comments transport error",
+            "message": "Connection closed",
             "isRpcDeliveryUnknown": true
           }
         }
       }
-    ],
+    },
+    "dfab6810321b": {
+      "name": "linear.issueComments#1",
+      "ordinal": 5,
+      "args": [
+        {
+          "name": "method",
+          "value": "linear.issueComments"
+        },
+        {
+          "name": "params",
+          "value": {
+            "issueId": "issue-1",
+            "workspaceId": "linear-workspace"
+          }
+        },
+        {
+          "name": "options",
+          "value": {
+            "timeoutMs": 30000
+          }
+        }
+      ],
+      "settlement": {
+        "status": "rejected",
+        "startedAt": 0,
+        "settledAt": 30000,
+        "error": {
+          "category": "Error",
+          "message": "Request timed out: linear.issueComments",
+          "isRpcDeliveryUnknown": true
+        }
+      }
+    },
+    "ea4a4f6523e7": {
+      "name": "linear.issueComments#1",
+      "ordinal": 5,
+      "args": [
+        {
+          "name": "method",
+          "value": "linear.issueComments"
+        },
+        {
+          "name": "params",
+          "value": {
+            "issueId": "issue-1",
+            "workspaceId": "linear-workspace"
+          }
+        },
+        {
+          "name": "options",
+          "value": {
+            "timeoutMs": 30000
+          }
+        }
+      ],
+      "settlement": {
+        "status": "pending",
+        "startedAt": 0
+      }
+    },
+    "eb79a9b3682a": {
+      "status": "fulfilled",
+      "startedAt": 0,
+      "settledAt": 0,
+      "value": {
+        "$rpc": "undefined"
+      }
+    },
+    "f2c4f4180915": {
+      "name": "detailError",
+      "ordinal": 8,
+      "value": "linear.getIssue#1 rejected"
+    },
     "fc6d55bc97ed": {
       "error": "Request timed out: linear.getIssue",
       "loading": false,
@@ -869,131 +536,231 @@
       {
         "id": "b3.forward:sibling-pending",
         "observation": {
-          "sender": "68d958edb978",
-          "payloads": "0b631657711f",
-          "settlements": "0131611322e3",
+          "sender": ["d3dc79e5717b", "ea4a4f6523e7"],
+          "payloads": ["1eaad537f925", "7d8d46d494ff"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "780aaf1d97be",
-          "effects": "26c78123b573"
+          "effects": ["33614c90b6eb", "a4f1a8696a24", "264010756b38"]
         }
       },
       {
         "id": "b3.forward:settled",
         "observation": {
-          "sender": "db6e863f7087",
-          "payloads": "0b631657711f",
-          "settlements": "0131611322e3",
+          "sender": ["d3dc79e5717b", "1d3774209877"],
+          "payloads": ["1eaad537f925", "7d8d46d494ff"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "42903545f0f8",
-          "effects": "6d65777cf6fe"
+          "effects": [
+            "33614c90b6eb",
+            "a4f1a8696a24",
+            "264010756b38",
+            "51ea77da7dbd",
+            "8ccd4fa759a5"
+          ]
         }
       },
       {
         "id": "b3.reverse:sibling-pending",
         "observation": {
-          "sender": "b9b67d6bf2bb",
-          "payloads": "0b631657711f",
-          "settlements": "0131611322e3",
+          "sender": ["0056f47b204a", "1d3774209877"],
+          "payloads": ["1eaad537f925", "7d8d46d494ff"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "42903545f0f8",
-          "effects": "6d65777cf6fe"
+          "effects": [
+            "33614c90b6eb",
+            "a4f1a8696a24",
+            "264010756b38",
+            "51ea77da7dbd",
+            "8ccd4fa759a5"
+          ]
         }
       },
       {
         "id": "b3.reverse:settled",
         "observation": {
-          "sender": "db6e863f7087",
-          "payloads": "0b631657711f",
-          "settlements": "0131611322e3",
+          "sender": ["d3dc79e5717b", "1d3774209877"],
+          "payloads": ["1eaad537f925", "7d8d46d494ff"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "42903545f0f8",
-          "effects": "6d65777cf6fe"
+          "effects": [
+            "33614c90b6eb",
+            "a4f1a8696a24",
+            "264010756b38",
+            "51ea77da7dbd",
+            "8ccd4fa759a5"
+          ]
         }
       },
       {
         "id": "b3.both-reject-forward:sibling-pending",
         "observation": {
-          "sender": "ce1aa70ed814",
-          "payloads": "0b631657711f",
-          "settlements": "0131611322e3",
+          "sender": ["b6399147a999", "ea4a4f6523e7"],
+          "payloads": ["1eaad537f925", "7d8d46d494ff"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "a778223fed77",
-          "effects": "d004d139c7df"
+          "effects": [
+            "33614c90b6eb",
+            "a4f1a8696a24",
+            "264010756b38",
+            "f2c4f4180915",
+            "8ccd4fa759a5"
+          ]
         }
       },
       {
         "id": "b3.both-reject-forward:settled",
         "observation": {
-          "sender": "3ab28be1560f",
-          "payloads": "0b631657711f",
-          "settlements": "0131611322e3",
+          "sender": ["b6399147a999", "44556e4bd91e"],
+          "payloads": ["1eaad537f925", "7d8d46d494ff"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "a778223fed77",
-          "effects": "d004d139c7df"
+          "effects": [
+            "33614c90b6eb",
+            "a4f1a8696a24",
+            "264010756b38",
+            "f2c4f4180915",
+            "8ccd4fa759a5"
+          ]
         }
       },
       {
         "id": "b3.both-reject-reverse:sibling-pending",
         "observation": {
-          "sender": "3edc657e906b",
-          "payloads": "0b631657711f",
-          "settlements": "0131611322e3",
+          "sender": ["0056f47b204a", "44556e4bd91e"],
+          "payloads": ["1eaad537f925", "7d8d46d494ff"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "24f3de063dfd",
-          "effects": "b4cf0b80bf2a"
+          "effects": [
+            "33614c90b6eb",
+            "a4f1a8696a24",
+            "264010756b38",
+            "5f9cfa2482e9",
+            "8ccd4fa759a5"
+          ]
         }
       },
       {
         "id": "b3.both-reject-reverse:settled",
         "observation": {
-          "sender": "3ab28be1560f",
-          "payloads": "0b631657711f",
-          "settlements": "0131611322e3",
+          "sender": ["b6399147a999", "44556e4bd91e"],
+          "payloads": ["1eaad537f925", "7d8d46d494ff"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "24f3de063dfd",
-          "effects": "b4cf0b80bf2a"
+          "effects": [
+            "33614c90b6eb",
+            "a4f1a8696a24",
+            "264010756b38",
+            "5f9cfa2482e9",
+            "8ccd4fa759a5"
+          ]
         }
       },
       {
         "id": "b3.reject-peer-pending:sibling-pending",
         "observation": {
-          "sender": "ce1aa70ed814",
-          "payloads": "0b631657711f",
-          "settlements": "0131611322e3",
+          "sender": ["b6399147a999", "ea4a4f6523e7"],
+          "payloads": ["1eaad537f925", "7d8d46d494ff"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "a778223fed77",
-          "effects": "d004d139c7df"
+          "effects": [
+            "33614c90b6eb",
+            "a4f1a8696a24",
+            "264010756b38",
+            "f2c4f4180915",
+            "8ccd4fa759a5"
+          ]
         }
       },
       {
         "id": "b3.reject-peer-pending:settled",
         "observation": {
-          "sender": "ce1aa70ed814",
-          "payloads": "0b631657711f",
-          "settlements": "0131611322e3",
+          "sender": ["b6399147a999", "ea4a4f6523e7"],
+          "payloads": ["1eaad537f925", "7d8d46d494ff"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "a778223fed77",
-          "effects": "d004d139c7df"
+          "effects": [
+            "33614c90b6eb",
+            "a4f1a8696a24",
+            "264010756b38",
+            "f2c4f4180915",
+            "8ccd4fa759a5"
+          ]
         }
       },
       {
         "id": "b3.timeout:settled",
         "observation": {
-          "sender": "8ba072374c63",
-          "payloads": "0b631657711f",
-          "settlements": "0131611322e3",
+          "sender": ["1127f274b58c", "dfab6810321b"],
+          "payloads": ["1eaad537f925", "7d8d46d494ff"],
+          "settlements": {
+            "mount": "eb79a9b3682a"
+          },
           "state": "fc6d55bc97ed",
-          "effects": "2852f47712e0"
+          "effects": [
+            "33614c90b6eb",
+            "a4f1a8696a24",
+            "264010756b38",
+            "8aacae6d3ab3",
+            "8ccd4fa759a5"
+          ]
         }
       },
       {
         "id": "b3.disconnect:settled",
         "observation": {
-          "sender": "606c2767b466",
-          "payloads": "0b631657711f",
-          "settlements": "77571e1166d2",
+          "sender": ["485053bffe22", "325dc4e1af5c"],
+          "payloads": ["1eaad537f925", "7d8d46d494ff"],
+          "settlements": {
+            "mount": "eb79a9b3682a",
+            "disconnect": "eb79a9b3682a"
+          },
           "state": "d40dd5c93d21",
-          "effects": "6c671f71ee89"
+          "effects": [
+            "33614c90b6eb",
+            "a4f1a8696a24",
+            "264010756b38",
+            "c834373cd824",
+            "8ccd4fa759a5"
+          ]
         }
       },
       {
         "id": "b3.client-cutover:settled",
         "observation": {
-          "sender": "4be41ba84e00",
-          "payloads": "0b631657711f",
-          "settlements": "8df6a469391c",
+          "sender": ["b1228a23df33", "de8da0e14206"],
+          "payloads": ["1eaad537f925", "7d8d46d494ff"],
+          "settlements": {
+            "mount": "eb79a9b3682a",
+            "cutover": "eb79a9b3682a"
+          },
           "state": "88573133f7d5",
-          "effects": "cbf28b66143a"
+          "effects": [
+            "33614c90b6eb",
+            "a4f1a8696a24",
+            "264010756b38",
+            "881cdeb6ce57",
+            "8ccd4fa759a5"
+          ]
         }
       }
     ]

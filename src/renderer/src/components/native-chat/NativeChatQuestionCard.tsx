@@ -192,6 +192,11 @@ export function NativeChatQuestionCard({
                   <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
                     <Pencil className="size-3.5" />
                   </span>
+                  {/* No `/` or `@` picker here — that autocomplete belongs to the composer,
+                      which this card replaces. What you type is delivered verbatim as the
+                      AskUserQuestion tool result: it reaches the model but never the command
+                      parser, so `/compact` and friends are inert, while a skill name can
+                      still be acted on. */}
                   <input
                     ref={answerInputRef}
                     disabled={isSubmitting}

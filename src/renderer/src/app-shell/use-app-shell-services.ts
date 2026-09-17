@@ -18,6 +18,7 @@ import { useWebSessionTabsSync } from '../runtime/web-session-tabs-sync'
 import { useLocalStructuredSessionTabsSync } from '../runtime/local-structured-session-tabs-sync'
 import { useRemoteRuntimeRecoveryTriggers } from '../runtime/use-remote-runtime-recovery-triggers'
 import { useRemoteAccountUsageSync } from '../hooks/remote-account-usage-sync'
+import { useBrowserIdentityMigrationNotice } from '../components/browser-pane/browser-user-agent-migration-notice'
 
 /**
  * App-level subscriptions that must outlive any individual surface. Each one is here because
@@ -50,4 +51,5 @@ export function useAppShellServices(options: { floatingPanelVisible: boolean }):
   useLargeTextControlPaste()
   usePrimarySelectionPaste(primarySelectionMiddleClickPaste)
   useOsc52ClipboardDefaultOnNotice(persistedUIReady)
+  useBrowserIdentityMigrationNotice()
 }

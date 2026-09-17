@@ -1,0 +1,136 @@
+{
+  "operation": "tasks.task-list-gitlab-todos",
+  "family": "tasks.task-list-gitlab-todos",
+  "namedDeltas": [],
+  "runnerVersion": 1,
+  "baseline": "9add08bb5943144f5fb0178ab628cdfebe99c22a",
+  "lockfileSha256": "788c1234b38a61fc882fca292341fce6690deee9cc6695673b0575cf2c4cf571",
+  "recorderSha256": "d4fa125899cd863c03dbf96657d46b8c7d6c0ccf522b342bc4f164ed1e3becfe",
+  "adapterSha256": "07a15e900363faa25bc364f5bc1c330f96798abfeaed35210428c2ac558586b8",
+  "scenarioSha256": "a9e791f56e991e822b2a9f55db22eabbc39ad36ed669c87b6866ba7fe8eea24a",
+  "platform": "darwin",
+  "scenarioVersion": 1,
+  "projectionVersion": 2,
+  "goldenFormatVersion": 5,
+  "values": {
+    "038bb64a38ce": {
+      "name": "gitlab.todos#1",
+      "ordinal": 4,
+      "json": "{\"id\":\"frame-1\",\"deviceToken\":\"recording-device\",\"method\":\"gitlab.todos\",\"params\":{\"repo\":\"id:repo-1\"}}"
+    },
+    "1f4eeb3dcff1": {
+      "name": "items",
+      "ordinal": 5,
+      "value": []
+    },
+    "39f99cf479f0": {
+      "name": "error",
+      "ordinal": 1,
+      "value": ""
+    },
+    "411aee2eccd9": {
+      "name": "refreshing",
+      "ordinal": 8,
+      "value": false
+    },
+    "5ac1816a09df": {
+      "name": "loading",
+      "ordinal": 7,
+      "value": false
+    },
+    "609f32a21704": {
+      "name": "loading",
+      "ordinal": 2,
+      "value": true
+    },
+    "65696d9af446": {
+      "name": "gitlab.todos#1",
+      "ordinal": 3,
+      "args": [
+        {
+          "name": "method",
+          "value": "gitlab.todos"
+        },
+        {
+          "name": "params",
+          "value": {
+            "repo": "id:repo-1"
+          }
+        },
+        {
+          "name": "options",
+          "value": {
+            "$rpc": "absent"
+          }
+        }
+      ],
+      "settlement": {
+        "status": "fulfilled",
+        "startedAt": 0,
+        "settledAt": 0,
+        "value": {
+          "id": "frame-1",
+          "ok": true,
+          "result": [
+            {
+              "id": 1,
+              "target": {
+                "id": "gid://1",
+                "iid": 4,
+                "state": "opened",
+                "title": "A GitLab todo",
+                "updatedAt": "2020-01-01T00:00:00.000Z",
+                "webUrl": ""
+              },
+              "targetType": "Issue"
+            }
+          ]
+        }
+      }
+    },
+    "77882f3fe361": {
+      "name": "error",
+      "ordinal": 6,
+      "value": "Cannot read properties of undefined (reading 'replace')"
+    },
+    "eb79a9b3682a": {
+      "status": "fulfilled",
+      "startedAt": 0,
+      "settledAt": 0,
+      "value": {
+        "$rpc": "undefined"
+      }
+    },
+    "f7da7040be7b": {
+      "error": "Cannot read properties of undefined (reading 'replace')",
+      "items": [],
+      "loading": false,
+      "refreshing": false
+    }
+  },
+  "recording": {
+    "scenario": "tk-list-gitlab-todos",
+    "checkpoints": [
+      {
+        "id": "load-settled",
+        "observation": {
+          "sender": ["65696d9af446"],
+          "payloads": ["038bb64a38ce"],
+          "settlements": {
+            "mount": "eb79a9b3682a",
+            "load-0": "eb79a9b3682a"
+          },
+          "state": "f7da7040be7b",
+          "effects": [
+            "39f99cf479f0",
+            "609f32a21704",
+            "1f4eeb3dcff1",
+            "77882f3fe361",
+            "5ac1816a09df",
+            "411aee2eccd9"
+          ]
+        }
+      }
+    ]
+  }
+}
