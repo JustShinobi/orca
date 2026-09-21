@@ -4,7 +4,6 @@ import { isRuntimeSubscriptionReplayResponse } from '../../../../shared/runtime-
 import { useAppStore } from '../../store'
 import { recoverWebSessionTerminalOrphansBeforeApply } from '../web-session-terminal-orphan-recovery'
 import {
-  beginWebSessionTabsSnapshotRecovery,
   recordReceivedWebSessionTabsSnapshot,
   shouldApplyRecoveredWebSessionTabsSnapshot
 } from './tracking'
@@ -103,11 +102,6 @@ export function handleGlobalSessionEvent(args: GlobalSessionEventArgs): void {
     runtimeId
   )
   coordinator.recordSnapshotReceipt(environmentId, event, receivedFrame, runtimeId)
-  const finishRecovery = beginWebSessionTabsSnapshotRecovery(
-    environmentId,
-    event.worktree,
-    receivedFrame
-  )
   let settleHydration: HostSessionMirrorSettle | null = null
   void recoverWebSessionTerminalOrphansBeforeApply(useAppStore.getState(), event, environmentId, {
     expectedEnvironmentPairingRevision,
@@ -170,7 +164,6 @@ export function handleGlobalSessionEvent(args: GlobalSessionEventArgs): void {
       }
     })
     .finally(() => {
-      finishRecovery()
       if (isCurrent()) {
         settleHydration?.()
       }

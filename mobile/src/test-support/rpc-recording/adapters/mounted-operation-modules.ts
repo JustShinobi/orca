@@ -27,6 +27,7 @@ import { homeAccountsMountAdapters } from './home-accounts-mount-adapters'
 import { hostScreenMountAdapters } from './host-screen-mount-adapters'
 import { hostWorktreeActionMountAdapters } from './host-worktree-action-mount-adapters'
 import { hostedReviewMountAdapters } from './hosted-review-mount-adapters'
+import { mobileWebBundleMountAdapters } from './mobile-web-bundle-mount-adapters'
 import { nativeChatPagingMountAdapters } from './native-chat-paging-mount-adapters'
 import { nativeChatWriteMountAdapters } from './native-chat-write-mount-adapters'
 import { newTabAgentMountAdapters } from './new-tab-agent-mount-adapters'
@@ -37,6 +38,7 @@ import {
 import { newWorkspaceMountAdapters } from './new-workspace-mount-adapters'
 import { newWorkspaceRepositoryMountAdapters } from './new-workspace-repository-mount-adapters'
 import { pairingJournalMountAdapters } from './pairing-journal-mount-adapters'
+import { prSidebarMountAdapters } from './pr-sidebar-mount-adapters'
 import { pushDismissalMountAdapters } from './push-dismissal-mount-adapters'
 import {
   pushRegistrationMountAdapters,
@@ -128,6 +130,7 @@ export const MOUNTED_OPERATION_MODULES: readonly MountedOperationModule[] = [
     mounts: hostWorktreeActionMountAdapters
   },
   { source: 'hosted-review-mount-adapters.ts', mounts: hostedReviewMountAdapters },
+  { source: 'mobile-web-bundle-mount-adapters.ts', mounts: mobileWebBundleMountAdapters },
   { source: 'native-chat-paging-mount-adapters.ts', mounts: nativeChatPagingMountAdapters },
   { source: 'native-chat-write-mount-adapters.ts', mounts: nativeChatWriteMountAdapters },
   { source: 'new-tab-agent-mount-adapters.ts', mounts: newTabAgentMountAdapters },
@@ -142,6 +145,7 @@ export const MOUNTED_OPERATION_MODULES: readonly MountedOperationModule[] = [
     exposes: notificationTestScreenMountExposures
   },
   { source: 'pairing-journal-mount-adapters.ts', mounts: pairingJournalMountAdapters },
+  { source: 'pr-sidebar-mount-adapters.ts', mounts: prSidebarMountAdapters },
   { source: 'push-dismissal-mount-adapters.ts', mounts: pushDismissalMountAdapters },
   {
     source: 'push-registration-mount-adapters.ts',

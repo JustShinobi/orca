@@ -1,4 +1,5 @@
 import { useAppStore } from '../store'
+import { useClosedEditorTabCleanup } from '../components/editor/useClosedEditorTabCleanup'
 import { useIpcEvents } from '../hooks/useIpcEvents'
 import { useAutomationDispatchEvents } from '../hooks/useAutomationDispatchEvents'
 import { useAutoAckViewedAgent } from '../hooks/useAutoAckViewedAgent'
@@ -32,6 +33,7 @@ export function useAppShellServices(options: { floatingPanelVisible: boolean }):
     resolvePrimarySelectionMiddleClickPaste(s.settings?.primarySelectionMiddleClickPaste)
   )
 
+  useClosedEditorTabCleanup()
   useRadixBodyPointerEventsRecovery()
   useWebSessionTabsSync()
   useRemoteAccountUsageSync()
