@@ -70,6 +70,9 @@ jobs:
       - name: Project web client from renderer build
         run: pnpm run build:web-from-renderer
 
+      - name: Build mobile web bundle
+        run: pnpm run build:mobile-web
+
       - name: Build native components
         run: pnpm run build:native
 
