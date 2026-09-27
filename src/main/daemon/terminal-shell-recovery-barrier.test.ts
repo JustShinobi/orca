@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { POST_REPLAY_DEAD_TUI_RESET } from '../../shared/terminal-mode-reset-profiles'
+import { PROCESS_BOUNDARY_GROUND } from '../../shared/terminal-mode-reset-profiles'
 import { TerminalShellRecoveryBarrier } from './terminal-shell-recovery-barrier'
 import type { PtyIngressEmission } from '../../shared/pty-startup-ingress'
 
@@ -53,7 +53,7 @@ describe('TerminalShellRecoveryBarrier', () => {
     resolveConfirm?.(true)
     await vi.waitFor(() => expect(released).toHaveLength(3))
     expect(released[1]).toEqual({
-      data: POST_REPLAY_DEAD_TUI_RESET,
+      data: PROCESS_BOUNDARY_GROUND,
       rawStartSeq: 100 + TRIGGER.length,
       rawEndSeq: 100 + TRIGGER.length,
       transformed: true
@@ -82,7 +82,7 @@ describe('TerminalShellRecoveryBarrier', () => {
     await vi.waitFor(() => expect(released).toHaveLength(4))
     expect(released.map((emission) => emission.data)).toEqual([
       TRIGGER,
-      POST_REPLAY_DEAD_TUI_RESET,
+      PROCESS_BOUNDARY_GROUND,
       'late-1',
       'late-2'
     ])
@@ -166,10 +166,10 @@ describe('TerminalShellRecoveryBarrier', () => {
     await vi.waitFor(() =>
       expect(released.map((emission) => emission.data)).toEqual([
         TRIGGER,
-        POST_REPLAY_DEAD_TUI_RESET,
+        PROCESS_BOUNDARY_GROUND,
         'first-prompt',
         '\x1b[?1049hAGAIN\x1b]133;D;9\x07',
-        POST_REPLAY_DEAD_TUI_RESET,
+        PROCESS_BOUNDARY_GROUND,
         'second-prompt'
       ])
     )
@@ -275,7 +275,7 @@ describe('TerminalShellRecoveryBarrier', () => {
       expect(released.map((emission) => emission.data)).toEqual([
         head,
         '37\x07',
-        POST_REPLAY_DEAD_TUI_RESET,
+        PROCESS_BOUNDARY_GROUND,
         'PROMPT'
       ])
     )
@@ -310,32 +310,76 @@ describe('TerminalShellRecoveryBarrier', () => {
     await vi.waitFor(() =>
       expect(released.map((emission) => emission.data)).toEqual([
         TRIGGER,
-        POST_REPLAY_DEAD_TUI_RESET,
+        PROCESS_BOUNDARY_GROUND,
         'after-poison'
       ])
     )
     await expect(barrier.idle()).resolves.toBeUndefined()
   })
 
-  it('opens at most one episode per alternate-screen occupancy after a refuted proof', async () => {
+  it('asks at every D of a live TUI and releases every byte, in order, unmodified', async () => {
     const { barrier, released, confirm } = createBarrier({ confirm: async () => false })
-
-    barrier.accept(passthrough(`${TRIGGER}prompt`))
-    await vi.waitFor(() => expect(released).toHaveLength(2))
-    expect(confirm).toHaveBeenCalledTimes(1)
-
-    // Why: the refuted path never scans a reset, so alt stays active — later
-    // ordinary prompts must not each re-open a pause-and-inspect episode.
+    const leak = '\x1b]133;C\x07nested\x1b]133;D;0\x07'
+    const sent = [`\x1b[?1049h\x1b[?1003hTUI${leak}frame`]
     for (let index = 0; index < 5; index += 1) {
-      const prompt = passthrough(`\x1b]133;C\x07ls\r\n\x1b]133;D;0\x07`)
-      barrier.accept(prompt)
-      expect(released.at(-1)).toBe(prompt)
+      sent.push(`${leak}frame${index}`)
     }
-    expect(confirm).toHaveBeenCalledTimes(1)
 
-    // A fresh alternate-screen entry re-arms recovery.
-    barrier.accept(passthrough(`\x1b]133;C\x07\x1b[?1049hAGAIN\x1b]133;D;9\x07`))
-    expect(confirm).toHaveBeenCalledTimes(2)
+    let seq = 0
+    for (const data of sent) {
+      barrier.accept(passthrough(data, seq))
+      seq += data.length
+    }
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalledTimes(6))
+    await barrier.idle()
+
+    expect(released.map((emission) => emission.data).join('')).toBe(sent.join(''))
+    expect(released.every((emission) => !emission.transformed)).toBe(true)
+    expect(barrier.getOwner()).toBeUndefined()
+  })
+
+  it("grounds a TUI that dies after many nested shells' Ds were refuted", async () => {
+    let dead = false
+    const { barrier, released, confirm } = createBarrier({ confirm: async () => dead })
+    const leak = '\x1b]133;C\x07nested\x1b]133;D;0\x07'
+
+    barrier.accept(passthrough(`\x1b[?1049hTUI${leak.repeat(5)}`))
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalledTimes(5))
+    await barrier.idle()
+    dead = true
+    barrier.accept(passthrough('\x1b]133;D;137\x07prompt'))
+
+    await vi.waitFor(() => expect(barrier.getOwner()).toBe('shell'))
+    expect(released.slice(-3).map((emission) => emission.data)).toEqual([
+      '\x1b]133;D;137\x07',
+      PROCESS_BOUNDARY_GROUND,
+      'prompt'
+    ])
+    // Grounded once: the next prompt opens no episode.
+    barrier.accept(passthrough('\x1b]133;C\x07ls\x1b]133;D;0\x07'))
+    expect(confirm).toHaveBeenCalledTimes(6)
+  })
+
+  it('grounds a real death D that arrives while a stray D is still being proven', async () => {
+    const proofs: ((confirmed: boolean) => void)[] = []
+    const { barrier, released, confirm } = createBarrier({
+      confirm: () => new Promise((resolve) => void proofs.push(resolve))
+    })
+    const leak = '\x1b[?1049h\x1b[?1003hTUI\x1b]133;C\x07nested\x1b]133;D;0\x07'
+
+    barrier.accept(passthrough(leak, 0))
+    barrier.accept(passthrough('frame\x1b]133;D;137\x07prompt', leak.length))
+    proofs[0]?.(false)
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalledTimes(2))
+    proofs[1]?.(true)
+
+    await vi.waitFor(() => expect(barrier.getOwner()).toBe('shell'))
+    expect(released.map((emission) => emission.data)).toEqual([
+      leak,
+      'frame\x1b]133;D;137\x07',
+      PROCESS_BOUNDARY_GROUND,
+      'prompt'
+    ])
   })
 
   it('bounds awaitProofSettled by its own deadline when a clean-exit proof hangs', async () => {
@@ -374,7 +418,7 @@ describe('TerminalShellRecoveryBarrier', () => {
 
     await vi.waitFor(() =>
       expect(released.map((emission) => emission.data)).toEqual([
-        POST_REPLAY_DEAD_TUI_RESET,
+        PROCESS_BOUNDARY_GROUND,
         'SHELL-PROMPT'
       ])
     )

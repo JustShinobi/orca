@@ -2,9 +2,11 @@ import type {
   RuntimeTerminalWait as RuntimeTerminalWaitResult,
   RuntimeTerminalWaitCondition
 } from '../../shared/runtime-types'
+import { hasAntigravityTerminalHeader } from './antigravity-terminal-readiness'
 import {
   detectTerminalWaitBlockedReason,
-  isKnownReadyPromptPreview
+  isKnownReadyPromptBody,
+  isMuseReadyPromptPreview
 } from './terminal-wait-detection'
 import {
   buildPtyTerminalWaitBlockedResult,
@@ -31,7 +33,12 @@ type RuntimeTerminalWaitDependencies = {
   quiescenceMs: number
   getPaneAgent(ptyId: string | null | undefined): TuiAgent | null
   getFirstPartyAgentStatus(ptyId: string | null | undefined): FirstPartyAgentStatus
-  startVisibleReadProbe(waiter: TerminalWaiter, waiterTimeoutMs: number): void
+  readScreenLines(ptyId: string | null | undefined): readonly string[] | null
+  startVisibleReadProbe(
+    waiter: TerminalWaiter,
+    waiterTimeoutMs: number,
+    agent: TuiAgent | null
+  ): void
 }
 
 export class RuntimeTerminalWait {
@@ -44,22 +51,28 @@ export class RuntimeTerminalWait {
   /** Why one helper per record kind: every satisfaction site must rank the same way,
    *  or the immediate check and the poll disagree about the same pane. */
   private ptySatisfied(pty: RuntimePtyWorktreeRecord, waitText: string): boolean {
+    const agent = this.deps.getPaneAgent(pty.ptyId)
     return isTuiIdleSatisfied({
       record: pty,
       readPositiveBodyEvidence: () =>
-        this.deps.getAdoptedPtyIdleStatus(pty) === 'idle' || isKnownReadyPromptPreview(waitText),
-      agent: this.deps.getPaneAgent(pty.ptyId),
+        this.deps.getAdoptedPtyIdleStatus(pty) === 'idle' ||
+        isKnownReadyPromptBody(waitText, agent, () => this.deps.readScreenLines(pty.ptyId)),
+      readMuseReadyBodyEvidence: () => isMuseReadyPromptPreview(waitText),
+      agent,
       firstPartyStatus: this.deps.getFirstPartyAgentStatus(pty.ptyId),
       quiescenceMs: this.deps.quiescenceMs
     })
   }
 
   private leafSatisfied(leaf: RuntimeLeafRecord, waitText: string): boolean {
+    const agent = this.deps.getPaneAgent(leaf.ptyId)
     return isTuiIdleSatisfied({
       record: leaf,
       rendererTitle: leaf.paneTitle ?? this.deps.getTabTitle(leaf.tabId),
-      readPositiveBodyEvidence: () => isKnownReadyPromptPreview(waitText),
-      agent: this.deps.getPaneAgent(leaf.ptyId),
+      readPositiveBodyEvidence: () =>
+        isKnownReadyPromptBody(waitText, agent, () => this.deps.readScreenLines(leaf.ptyId)),
+      readMuseReadyBodyEvidence: () => isMuseReadyPromptPreview(waitText),
+      agent,
       firstPartyStatus: this.deps.getFirstPartyAgentStatus(leaf.ptyId),
       quiescenceMs: this.deps.quiescenceMs
     })
@@ -140,8 +153,20 @@ export class RuntimeTerminalWait {
             this.waiters.resolve(waiter, buildPtyTerminalWaitResult(handle, condition, live.pty))
           } else {
             this.polls.startPty(waiter, live.pty)
-            if (live.pty.lastAgentStatus === null && livePtyWaitText.length === 0) {
-              this.deps.startVisibleReadProbe(waiter, effectiveTimeoutMs)
+            const paneAgent = this.deps.getPaneAgent(live.pty.ptyId)
+            if (
+              // AGY can retain a stale working/blocked status after a trust dialog was
+              // dismissed. Its visible composer is authoritative, so probe whenever the
+              // pane is identified as AGY (or its banner is present), regardless of that
+              // stale status.
+              (paneAgent === 'antigravity' ||
+                hasAntigravityTerminalHeader(livePtyWaitText) ||
+                live.pty.lastAgentStatus === null) &&
+              (livePtyWaitText.length === 0 ||
+                paneAgent === 'antigravity' ||
+                hasAntigravityTerminalHeader(livePtyWaitText))
+            ) {
+              this.deps.startVisibleReadProbe(waiter, effectiveTimeoutMs, paneAgent)
             }
           }
         }
@@ -232,8 +257,16 @@ export class RuntimeTerminalWait {
             // while the last OSC title is still "working"; keep polling the
             // preview/title until the waiter resolves or hits its timeout.
             this.polls.startLeaf(waiter, live.leaf)
-            if (live.leaf.lastAgentStatus === null && liveLeafWaitText.length === 0) {
-              this.deps.startVisibleReadProbe(waiter, effectiveTimeoutMs)
+            const paneAgent = this.deps.getPaneAgent(live.leaf.ptyId)
+            if (
+              (paneAgent === 'antigravity' ||
+                hasAntigravityTerminalHeader(liveLeafWaitText) ||
+                live.leaf.lastAgentStatus === null) &&
+              (liveLeafWaitText.length === 0 ||
+                paneAgent === 'antigravity' ||
+                hasAntigravityTerminalHeader(liveLeafWaitText))
+            ) {
+              this.deps.startVisibleReadProbe(waiter, effectiveTimeoutMs, paneAgent)
             }
           }
         }

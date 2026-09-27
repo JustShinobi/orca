@@ -25,9 +25,9 @@ import {
   resizePtyFromRuntimeController,
   serializeProviderBufferFromRuntimeController,
   waitForRendererSerializerFromRuntimeController,
-  writePtyAgentSessionProofFromRuntimeController,
   writePtyFromRuntimeController
 } from './operations'
+import { recordUnconfirmedExplicitSshStop } from './undelivered-ssh-kill'
 import { supportsForegroundProcessEvidenceFromRuntimeController } from './foreground-process-evidence-capability'
 import {
   listProcessesFromRuntimeController,
@@ -45,11 +45,9 @@ export function installPtyRuntimeController(deps: PtyRuntimeControllerDeps): voi
     },
     adoptStablePane,
     spawn: async (args) => spawnPtyFromRuntimeController(deps, args),
-    write: (ptyId, data) => writePtyFromRuntimeController(deps, ptyId, data),
+    write: (ptyId, data) => writePtyFromRuntimeController(ptyId, data),
     writeWithSettlement: (ptyId, data) =>
-      writePtyFromRuntimeController(deps, ptyId, data, { waitForSettlement: true }),
-    writeAgentSessionProof: (ptyId, data, authority) =>
-      writePtyAgentSessionProofFromRuntimeController(ptyId, data, authority),
+      writePtyFromRuntimeController(ptyId, data, { waitForSettlement: true }),
     probePtyLiveness: (ptyId) => probePtyLivenessFromRuntimeController(deps, ptyId),
     // Why: subscriber-driven ingestion for daemon sessions no renderer pane
     // ever attached. Local daemon sessions only — SSH panes have their own
@@ -61,6 +59,12 @@ export function installPtyRuntimeController(deps: PtyRuntimeControllerDeps): voi
       retireRejectedPtyFromRuntimeController(deps, ptyId, stopConfirmed),
     markReversibleStops: (ptyIds) => markReversibleStopsFromRuntimeController(deps, ptyIds),
     stopAndWait: (ptyId, opts) => stopAndWaitPtyFromRuntimeController(deps, ptyId, opts),
+    recordUnconfirmedStop: (ptyId) =>
+      recordUnconfirmedExplicitSshStop({
+        store: deps.store,
+        ptyId,
+        reversible: deps.reversibleStopOwnersByPtyId.has(ptyId)
+      }),
     getForegroundProcess: (ptyId) => getForegroundProcessFromRuntimeController(ptyId),
     inspectProcess: (ptyId, options) => inspectProcessFromRuntimeController(ptyId, options),
     confirmForegroundProcess: (ptyId) => confirmForegroundProcessFromRuntimeController(ptyId),

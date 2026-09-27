@@ -24,7 +24,12 @@ import {
   stripElectronRunAsNode
 } from './app-executable-resolution'
 
-export { stripElectronRunAsNode } from './app-executable-resolution'
+export {
+  getExecutableAppArgs,
+  resolveAppRoot,
+  resolveForegroundOrcaExecutable,
+  stripElectronRunAsNode
+} from './app-executable-resolution'
 
 const IGNORED_NON_RECIPE_STDOUT = '[serve] ignored non-recipe stdout'
 

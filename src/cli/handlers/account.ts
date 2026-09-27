@@ -33,6 +33,7 @@ import {
   type InteractiveLoginSession,
   withInteractiveLoginCleanup
 } from './interactive-login-interruption'
+import { getWslAccountTarget } from './account-wsl-location'
 
 async function cleanupClaudeLoginArtifacts(
   configDir: string,
@@ -67,7 +68,7 @@ async function cleanupClaudeLoginArtifacts(
 }
 
 /** Logs into a Claude account in a temp config dir, then registers it with the local runtime. */
-async function addClaudeAccount({ client, json }: HandlerContext): Promise<void> {
+async function addClaudeAccount({ client, cwd, json }: HandlerContext): Promise<void> {
   const configDir = mkdtempSync(join(tmpdir(), 'orca-account-add-claude-'))
   const session: InteractiveLoginSession = {
     child: null,
@@ -98,6 +99,7 @@ async function addClaudeAccount({ client, json }: HandlerContext): Promise<void>
       session.registering = true
       return client.call<ClaudeRateLimitAccountsState>('accounts.addClaudeFromConfigDir', {
         configDir,
+        ...getWslAccountTarget(cwd),
         ...(process.platform === 'darwin'
           ? {
               previousLegacyCredentialsSha256: legacyCredentials
@@ -112,7 +114,7 @@ async function addClaudeAccount({ client, json }: HandlerContext): Promise<void>
 }
 
 /** Logs into a Codex account in a temp CODEX_HOME, then registers it with the local runtime. */
-async function addCodexAccount({ client, json }: HandlerContext): Promise<void> {
+async function addCodexAccount({ client, cwd, json }: HandlerContext): Promise<void> {
   const codexHome = mkdtempSync(join(tmpdir(), 'orca-account-add-codex-'))
   const session: InteractiveLoginSession = {
     child: null,
@@ -136,7 +138,8 @@ async function addCodexAccount({ client, json }: HandlerContext): Promise<void> 
       )
       session.registering = true
       return client.call<CodexRateLimitAccountsState>('accounts.addCodexFromHome', {
-        sourceHome: codexHome
+        sourceHome: codexHome,
+        ...getWslAccountTarget(cwd)
       })
     }
   )

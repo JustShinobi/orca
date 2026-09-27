@@ -1,3 +1,4 @@
+import { closeTestStores, createSqliteTestStore } from '../persistence-test-harness'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
@@ -5,6 +6,7 @@ import { tmpdir } from 'node:os'
 import type { Repo } from '../../shared/repo-types'
 import { AutomationService } from './service'
 import { reconcileStaleCodexHeadlessDispatches } from './headless-dispatch-lifecycle'
+import { installFakeAppEnvironment } from '../../../config/scripts/vitest-host-ports-setup'
 
 const testState = { dir: '' }
 
@@ -19,9 +21,11 @@ vi.mock('electron', () => ({
 
 async function createStore() {
   vi.resetModules()
+  // Why: userData resolves through AppEnvironment; point it at this file's temp dir.
+  installFakeAppEnvironment({ getPath: () => testState.dir })
   const { Store, initDataPath } = await import('../persistence')
   initDataPath()
-  return new Store()
+  return createSqliteTestStore(Store, { dataFile: join(testState.dir, 'orca-data.json') })
 }
 
 function makeRepo(): Repo {
@@ -62,7 +66,8 @@ describe('headless automation dispatch lifecycle', () => {
     nextScheduledFor = 0
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    await closeTestStores()
     vi.useRealTimers()
     rmSync(testState.dir, { recursive: true, force: true })
   })
@@ -301,8 +306,10 @@ describe('headless automation dispatch lifecycle', () => {
       })
     })
     const original = store.updateAutomationRun.bind(store)
-    vi.spyOn(store, 'updateAutomationRun').mockImplementationOnce((result) => {
-      if (result.status === 'dispatched') {
+    let dispatchedPersistThrew = false
+    vi.spyOn(store, 'updateAutomationRun').mockImplementation((result) => {
+      if (result.status === 'dispatched' && !dispatchedPersistThrew) {
+        dispatchedPersistThrew = true
         throw new Error('Automation run not found.')
       }
       return original(result)

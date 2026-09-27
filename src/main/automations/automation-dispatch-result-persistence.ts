@@ -41,7 +41,7 @@ export async function persistAutomationDispatchResult(params: {
     clearAutomationDispatchTokens(current.automationId, current.id)
     return current
   }
-  const run = params.runs.updateRun(params.result)
+  const run = await params.runs.updateRun(params.result)
   clearAutomationDispatchTokens(run.automationId, run.id)
   if (isFinalAutomationRunStatus(run.status) && run.status !== 'dispatch_failed') {
     params.clearHeadlessLaunchCleanup(run.id)

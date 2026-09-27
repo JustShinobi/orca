@@ -61,6 +61,8 @@ export type RuntimePtyController = {
     /** Windows shell to spawn AS this PTY, instead of the host default. */
     shellOverride?: string
     isNewSession?: boolean
+    /** No renderer view exists at spawn; main owns delivery and query replies until one mounts. */
+    initiallyHidden?: boolean
     persistHostSessionBinding?: boolean
     expectedSourceBinding?: PtyBindingSourceExpectation
     terminalKittyKeyboardProtocol?: boolean
@@ -92,11 +94,6 @@ export type RuntimePtyController = {
     agentSessionEnsure?: AgentSessionClaimedSpawnResult
   }>
   write(ptyId: string, data: string): boolean
-  writeAgentSessionProof?(
-    ptyId: string,
-    data: string,
-    authority: { sessionId: string; spawnToken: string }
-  ): boolean
   /** Three-valued settlement; local providers settle synchronously. */
   writeWithSettlement?(ptyId: string, data: string): WriteSettlement | Promise<WriteSettlement>
   /** Attach-only adoption of a live local daemon session so its output streams
@@ -110,6 +107,9 @@ export type RuntimePtyController = {
     opts?: { keepHistory?: boolean; deadlineMs?: number }
   ): Promise<boolean>
   markReversibleStops?(ptyIds: readonly string[]): () => void
+  /** Durably records a kill order for an explicit close's unconfirmed stop, replayed when its SSH
+   *  host reconnects. True only when an order was written; local PTYs have no later host to ask. */
+  recordUnconfirmedStop?(ptyId: string): boolean
   getCwd?(ptyId: string): Promise<string | null>
   getForegroundProcess(ptyId: string): Promise<string | null>
   inspectProcess?(
