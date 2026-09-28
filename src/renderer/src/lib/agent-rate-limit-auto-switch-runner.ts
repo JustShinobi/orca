@@ -246,9 +246,10 @@ export async function runAgentRateLimitAutoSwitch(args: {
   }
 
   const launched = await sendRuntimePtyInputVerified(
-    useAppStore.getState().settings,
+    settings,
     args.ptyId,
-    `${resumePlan.launchCommand}\r`
+    `${resumePlan.launchCommand}\r`,
+    'launch'
   )
   if (!launched) {
     return {
@@ -262,7 +263,7 @@ export async function runAgentRateLimitAutoSwitch(args: {
   }
 
   const resumed = await waitForResumedAgent({
-    settings: useAppStore.getState().settings,
+    settings,
     ptyId: args.ptyId,
     agent: args.agent,
     expectedProcess: resumePlan.expectedProcess
@@ -279,11 +280,7 @@ export async function runAgentRateLimitAutoSwitch(args: {
   }
 
   await waitForAgentReadyInput()
-  const continued = await sendRuntimePtyInputVerified(
-    useAppStore.getState().settings,
-    args.ptyId,
-    'continue\r'
-  )
+  const continued = await sendRuntimePtyInputVerified(settings, args.ptyId, 'continue\r', 'driving')
   if (!continued) {
     return {
       ok: false,

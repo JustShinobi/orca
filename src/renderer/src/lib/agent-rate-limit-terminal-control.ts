@@ -52,7 +52,7 @@ export async function stopForegroundAgent(args: {
   }
 
   for (let attempt = 0; attempt < AGENT_STOP_ATTEMPTS; attempt += 1) {
-    const sent = await sendRuntimePtyInputVerified(args.settings, args.ptyId, '\x03')
+    const sent = await sendRuntimePtyInputVerified(args.settings, args.ptyId, '\x03', 'driving')
     if (!sent) {
       return false
     }
