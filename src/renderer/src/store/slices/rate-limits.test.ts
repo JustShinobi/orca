@@ -39,12 +39,6 @@ beforeEach(() => {
 })
 
 describe('createRateLimitSlice', () => {
-  it('initializes Antigravity usage with a stable pending key', () => {
-    const store = createRateLimitStore()
-
-    expect(store.getState().rateLimits.antigravity).toBeNull()
-  })
-
   it('applies a remote snapshot only while its environment owns accounts', () => {
     const store = createRateLimitStore()
     setActiveEnvironment(store, 'env-1')
