@@ -27,6 +27,7 @@ import {
 } from './structured-agent-session-host-test-data'
 import { openTestJournalHostDatabase } from '../agent-session-journal/journal-host-database-test-support'
 import { createStructuredAgentSessionLogger } from './structured-agent-session-logger'
+import { codexProviderHandle } from '../../../shared/agent-session-provider-handle-encoding'
 
 export const QUEUED_RIG_CALLER = { callerKey: 'client-1' }
 
@@ -92,7 +93,7 @@ export async function createQueuedMessageTestRig(
             ...(options.starting ? { providerChildPhase: 'starting' as const } : {}),
             link: {
               linkId: `link-${fence}`,
-              handle: { provider: 'codex' as const, threadId: THREAD },
+              handle: codexProviderHandle(THREAD),
               origin: resumes ? ('resumed' as const) : ('created' as const),
               mintedAtFence: fence,
               observedAt: NOW
@@ -269,6 +270,14 @@ export async function createQueuedMessageTestRig(
     )
   }
 
+  /** The event sink the provider writes through. */
+  function providerEvents(): StructuredAgentSessionEventSink {
+    if (!events) {
+      throw new Error('no provider bound')
+    }
+    return events
+  }
+
   /** A host-process restart, as the queue sees it: the conversation closes, and
    *  opens afresh under a new instance id while its rows survive. The close is an eviction, whose
    *  Stop event ends a person's Stop pause if work runs; a quit writes none, so a test of that
@@ -316,6 +325,7 @@ export async function createQueuedMessageTestRig(
     awaitStarted,
     compact,
     finishCompact,
+    providerEvents,
     envelope,
     send,
     stop,
