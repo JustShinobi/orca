@@ -84,8 +84,7 @@ export function prepareComputerCliJsonResult<TResult>(
       }
     } as RuntimeRpcSuccess<TResult>
   } catch {
-    // Why: temp-file export is an ergonomics optimization; keep inline screenshot
-    // data when disk, permissions, or path validation would otherwise fail --json.
+    // Preserve inline screenshot data if the optional temp-file export fails.
     return response
   }
 }

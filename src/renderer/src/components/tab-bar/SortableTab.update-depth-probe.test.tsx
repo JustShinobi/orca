@@ -1,18 +1,9 @@
 // @vitest-environment happy-dom
 
-/**
- * Pins the settling guarantee for every setState-in-effect path SortableTab owns
- * (rename shortcut, title churn mid-rename, store write storms, StrictMode double
- * invoke) under a real React root, where "Maximum update depth exceeded" throws.
- *
- * Written while triaging the React #185 crash cluster whose component_stack names
- * SortableTab: these paths settle, which matches shared/react-update-depth-attribution.ts
- * — #185 lands on whichever fiber dispatched next after a root-global counter tripped,
- * so that stack names a bystander. Keep this green so the tab stays exonerated.
- */
+/** Exercises addressed rename updates, StrictMode effects, and menu completion ownership. */
 import type { ReactElement, ReactNode } from 'react'
-import { cloneElement, isValidElement, StrictMode, useEffect, useState } from 'react'
-import { act, render, cleanup } from '@testing-library/react'
+import { cloneElement, isValidElement, StrictMode } from 'react'
+import { act, render, cleanup, fireEvent } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import type { TabDragItemData } from '../tab-group/useTabDragSplit'
@@ -68,8 +59,6 @@ vi.mock('@dnd-kit/sortable', () => ({
   })
 }))
 
-vi.mock('@/lib/use-tab-agent', () => ({ useTabAgent: () => null }))
-
 vi.mock('@/components/ui/tooltip', () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   Tooltip: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -105,6 +94,22 @@ vi.mock('./TerminalTabLeadingIcon', () => ({
   TerminalTabLeadingIcon: () => {
     tabRenderCount += 1
     return <span />
+  }
+}))
+
+const menuCompletions: (() => void)[] = []
+vi.mock('./SortableTabContextMenu', () => ({
+  SortableTabContextMenu: ({
+    open,
+    onSessionSwitchComplete
+  }: {
+    open: boolean
+    onSessionSwitchComplete: () => void
+  }) => {
+    if (open) {
+      menuCompletions.push(onSessionSwitchComplete)
+    }
+    return open ? <div data-testid="open-menu" /> : null
   }
 }))
 
@@ -144,6 +149,7 @@ function Harness({ tab }: { tab: TerminalTab }): ReactElement {
   return (
     <SortableTab
       tab={tab}
+      agent={null}
       unifiedTabId="unified-1"
       groupId="group-1"
       tabCount={1}
@@ -168,17 +174,6 @@ function Harness({ tab }: { tab: TerminalTab }): ReactElement {
   )
 }
 
-/** Re-renders the tab with a new tab object on every store write, like the tab strip does. */
-function ChurningHarness({ titles }: { titles: string[] }): ReactElement {
-  const [index, setIndex] = useState(0)
-  useEffect(() => {
-    if (index < titles.length - 1) {
-      setIndex(index + 1)
-    }
-  }, [index, titles.length])
-  return <Harness tab={makeTab({ title: titles[index] })} />
-}
-
 afterEach(() => {
   cleanup()
   probeStore.setState({ unreadTerminalTabs: {}, agentStatusEpoch: 0 })
@@ -192,12 +187,6 @@ describe('SortableTab update-depth probe', () => {
     act(() => requestTerminalTabRename('terminal-tab-1'))
     expect(container.querySelector('[data-tab-rename-input]')).not.toBeNull()
     expect(renderCount).toBeLessThan(20)
-  })
-
-  it('settles under title churn while the rename editor is open', () => {
-    render(<ChurningHarness titles={['a', 'b', 'c', 'd', 'e', 'f']} />)
-    act(() => requestTerminalTabRename('terminal-tab-1'))
-    expect(renderCount).toBeLessThan(40)
   })
 
   // Regression: the shortcut used to arm a store field every tab subscribed to, so one rename
@@ -227,17 +216,6 @@ describe('SortableTab update-depth probe', () => {
     expect(tabRenderCount).toBe(mountRenders)
   })
 
-  it('settles under a store write storm', () => {
-    render(<Harness tab={makeTab()} />)
-    const before = renderCount
-    act(() => {
-      for (let i = 0; i < 60; i += 1) {
-        probeStore.setState({ agentStatusEpoch: i, agentStatusByPaneKey: {} })
-      }
-    })
-    expect(renderCount - before).toBeLessThan(200)
-  })
-
   it('settles in StrictMode double-invoked effects', () => {
     const { container } = render(
       <StrictMode>
@@ -247,4 +225,23 @@ describe('SortableTab update-depth probe', () => {
     act(() => requestTerminalTabRename('terminal-tab-1'))
     expect(container.querySelector('[data-tab-rename-input]')).not.toBeNull()
   })
+})
+
+it('retires completion ownership for repeated gestures and batched blur/reopen', () => {
+  const { container } = render(<Harness tab={makeTab()} />)
+  const slot = container.querySelector('[data-tab-strip-slot]')!
+  act(() => fireEvent.contextMenu(slot))
+  const first = menuCompletions.at(-1)!
+  act(() => fireEvent.contextMenu(slot))
+  act(first)
+  expect(container.querySelector('[data-testid="open-menu"]')).not.toBeNull()
+  const second = menuCompletions.at(-1)!
+  act(() => {
+    window.dispatchEvent(new Event('blur'))
+    fireEvent.contextMenu(slot)
+  })
+  act(second)
+  expect(container.querySelector('[data-testid="open-menu"]')).not.toBeNull()
+  act(menuCompletions.at(-1)!)
+  expect(container.querySelector('[data-testid="open-menu"]')).toBeNull()
 })

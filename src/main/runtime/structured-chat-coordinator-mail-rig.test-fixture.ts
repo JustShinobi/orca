@@ -260,7 +260,10 @@ beforeEach(async () => {
     resolveEnvironment: async () => ({ PATH: '/usr/bin' }),
     ...scriptedCodexTransport(codex.openConnection),
     // The same calls the runtime's own host install makes.
-    onSessionStatusChanged: (summary) => runtime.onStructuredSessionStatusForMail(summary),
+    onRequestFailure: (failure) => runtime.onStructuredRequestFailureForErrorMail(failure),
+    onSessionStatusChanged: (summary) => {
+      runtime.onStructuredSessionStatusForMail(summary)
+    },
     onSessionTabHidden: (sessionId) => runtime.onStructuredSessionTabHidden(sessionId)
   })
   dispatcher = new RpcDispatcher({ runtime, methods: ORCHESTRATION_METHODS })
@@ -294,7 +297,7 @@ afterEach(async () => {
 })
 
 // Pointers are sent on asynchronous edges; the default 1s wait is too tight under a loaded parallel run.
-export const WAIT = { timeout: 10_000 }
+export const WAIT = { timeout: 10_000, interval: 10 }
 
 export const POINTER =
   /You have 1 orchestration message\. Run `orca(-dev)? orchestration check --run run_\w+`\./

@@ -1,9 +1,11 @@
+import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import {
   agentSessionLeaseFixture,
   agentSessionRecordFixture
 } from '../../shared/agent-session-record.test-fixture'
 import type { AgentSessionProviderHandle } from '../../shared/agent-session-provider-handle'
 import type { AiVaultListResult, AiVaultSession } from '../../shared/ai-vault-types'
+import type { StructuredAgentSessionAdapter } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { StructuredProviderSessionOwnership } from '../native-chat/agent-session-wire/structured-provider-session-ownership'
 import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import {
@@ -13,8 +15,6 @@ import {
 
 export const PROVIDER_SESSION = '019fd532-7c11-7a90-b6de-4e1a2c3d5f60'
 
-/** Installs a host whose one record owns a conversation: by default a Codex chat on
- *  PROVIDER_SESSION, or the agent `handle` names. */
 export function installOwnership(
   overrides: Partial<StructuredProviderSessionOwnership> & {
     handle?: AgentSessionProviderHandle
@@ -55,6 +55,33 @@ export function installOwnership(
           }
         ]
       }
+    }
+  } as never)
+}
+
+export function installCopyingChat(
+  handle: AgentSessionProviderHandle,
+  copy: StructuredAgentSessionAdapter['copyConversation'],
+  otherRecords: AgentSessionRecord[] = []
+): void {
+  const lease = { ...agentSessionLeaseFixture(), sessionId: 'chat-1' }
+  const fixture = agentSessionRecordFixture(lease)
+  const record = {
+    ...fixture,
+    sessionId: 'chat-1',
+    provider: handle.agent,
+    location: { ...fixture.location, workspaceId: 'workspace-1' },
+    providerHandleChain: [{ ...fixture.providerHandleChain[0]!, handle }],
+    lease
+  }
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: a copy reads only `deps.store` and `deps.adapter.copyConversation`; the rest of the host is never reached.
+  setStructuredAgentSessionHost({
+    deps: {
+      store: {
+        listRecords: () => [record, ...otherRecords],
+        getRecord: (sessionId: string) => (sessionId === record.sessionId ? record : null)
+      },
+      adapter: { copyConversation: copy }
     }
   } as never)
 }

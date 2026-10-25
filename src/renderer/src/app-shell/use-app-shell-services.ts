@@ -2,7 +2,7 @@ import { useAppStore } from '../store'
 import { useClosedEditorTabCleanup } from '../components/editor/useClosedEditorTabCleanup'
 import { useIpcEvents } from '../hooks/useIpcEvents'
 import { useAutomationDispatchEvents } from '../hooks/useAutomationDispatchEvents'
-import { useAutoAckViewedAgent } from '../hooks/useAutoAckViewedAgent'
+import { useReadOnScreenAttention } from '../hooks/useReadOnScreenAttention'
 import { useEditorExternalWatch } from '../hooks/useEditorExternalWatch'
 import { useAppMenuPaste } from '../hooks/useAppMenuPaste'
 import { useAppMenuSelectionActions } from '../hooks/useAppMenuSelectionActions'
@@ -22,6 +22,7 @@ import { useRemoteRuntimeRecoveryTriggers } from '../runtime/use-remote-runtime-
 import { useRemoteAccountUsageSync } from '../hooks/remote-account-usage-sync'
 import { useTerminalViewerColorPublication } from './use-terminal-viewer-color-publication'
 import { useBrowserIdentityMigrationNotice } from '../components/browser-pane/browser-user-agent-migration-notice'
+import { useBrowserClientHostedDownloadNotices } from '../components/browser-pane/browser-client-hosted-download-notices'
 import { useCodexTerminalServerIsolationNotice } from '../components/terminal-pane/codex-terminal-server-isolation-notice'
 import { useCodexSharedSettingsNotice } from '../components/terminal-pane/codex-shared-settings-notice'
 import { useVisibleReviewRefreshReporting } from './use-visible-review-refresh-reporting'
@@ -59,13 +60,14 @@ export function useAppShellServices(): void {
   useGitStatusPolling({ enabled: workspaceSessionReady })
   // Why: wire file-change watching at App level so the editor keeps hearing FS changes when Explorer unmounts (right-sidebar switches to Source Control/Checks).
   useEditorExternalWatch()
-  useAutoAckViewedAgent()
+  useReadOnScreenAttention()
   useAppMenuPaste()
   useAppMenuSelectionActions()
   useLargeTextControlPaste()
   usePrimarySelectionPaste(primarySelectionMiddleClickPaste)
   useOsc52ClipboardDefaultOnNotice(persistedUIReady)
   useBrowserIdentityMigrationNotice()
+  useBrowserClientHostedDownloadNotices()
   useCodexTerminalServerIsolationNotice()
   useCodexSharedSettingsNotice()
 }

@@ -11,7 +11,7 @@ import { isNoiseMessage } from './native-chat-noise'
 import {
   CODEX_PLAN_UPDATED_FRAME_KIND,
   isWordlessProviderFrameMessage
-} from './native-chat-provider-frame-summary'
+} from './native-chat/native-chat-provider-frame-summary'
 import { FoldedToolResultSources } from './native-chat-folded-tool-results'
 
 export { pairToolBlocks, type NativeChatToolPair } from './native-chat-tool-pairs'
@@ -55,7 +55,7 @@ function isBackgroundTaskMessage(message: NativeChatMessage): boolean {
 
 /** A stored-only provider event draws nothing, so it must not split the run around it. A plan
  *  update still does: the desktop draws it in place as the task list. */
-function isUndrawnProviderFrameMessage(message: NativeChatMessage): boolean {
+export function isUndrawnProviderFrameMessage(message: NativeChatMessage): boolean {
   return (
     isWordlessProviderFrameMessage(message) &&
     !message.blocks.some(

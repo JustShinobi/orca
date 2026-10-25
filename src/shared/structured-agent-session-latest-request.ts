@@ -71,6 +71,13 @@ export function latestStructuredAgentSessionRequest(
     ) {
       continue
     }
+    if (
+      item.body.kind === 'message' &&
+      item.body.role === 'user' &&
+      item.turnScope?.kind === 'unknown'
+    ) {
+      return null
+    }
     const turn = readAgentJournalTurn(item.body)
     if (turn) {
       return {
@@ -82,7 +89,12 @@ export function latestStructuredAgentSessionRequest(
       }
     }
     const submission = rejected.get(item.itemId)
-    if (submission && classifyDispatchRejection(submission).verdict === 'failure') {
+    // Rejection relocates a refused steer to the thread, but its turn remains the request.
+    if (
+      submission &&
+      submission.answeredInTurn?.via !== 'steer' &&
+      classifyDispatchRejection(submission).verdict === 'failure'
+    ) {
       return {
         kind: 'refused-send',
         id: item.itemId,

@@ -189,7 +189,9 @@ export class PushDispatcher {
         agentState,
         title: clip(event.title, PUSH_TITLE_MAX_LENGTH),
         body: clip(event.body, PUSH_BODY_MAX_LENGTH),
-        ...(event.worktreeId ? { worktreeId: event.worktreeId } : {})
+        ...(event.worktreeId ? { worktreeId: event.worktreeId } : {}),
+        ...(event.paneKey ? { paneKey: event.paneKey } : {}),
+        ...(event.executionHost ? { executionHost: event.executionHost } : {})
       }
     }
   }

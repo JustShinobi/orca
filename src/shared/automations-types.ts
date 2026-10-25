@@ -7,8 +7,15 @@ export type AutomationExecutionTargetType = 'local' | 'ssh'
 export type AutomationSchedulerOwner = 'local_host_service' | 'ssh_bridge' | 'remote_host_service'
 export type AutomationMissedRunPolicy = 'run_once_within_grace'
 export type AutomationRunStatus =
-  | 'pending' | 'dispatching' | 'dispatched' | 'completed' | 'skipped_precheck'
-  | 'skipped_missed' | 'skipped_unavailable' | 'skipped_needs_interactive_auth' | 'dispatch_failed'
+  | 'pending'
+  | 'dispatching'
+  | 'dispatched'
+  | 'completed'
+  | 'skipped_precheck'
+  | 'skipped_missed'
+  | 'skipped_unavailable'
+  | 'skipped_needs_interactive_auth'
+  | 'dispatch_failed'
 export type AutomationRunTrigger = 'scheduled' | 'manual'
 
 /** Statuses a run can never leave; only these are safe to evict from history. */
@@ -28,8 +35,13 @@ export type AutomationRunUsageProvider = 'claude' | 'codex'
 export type AutomationRunUsageStatus = 'known' | 'unavailable'
 export type AutomationRunUsageAttribution = 'provider_session_time_window'
 export type AutomationRunUsageUnavailableReason =
-  | 'run_not_finished' | 'provider_unsupported' | 'remote_usage_unavailable'
-  | 'usage_not_enabled' | 'scan_failed' | 'no_matching_session' | 'ambiguous_session'
+  | 'run_not_finished'
+  | 'provider_unsupported'
+  | 'remote_usage_unavailable'
+  | 'usage_not_enabled'
+  | 'scan_failed'
+  | 'no_matching_session'
+  | 'ambiguous_session'
 
 export type AutomationRunUsage = {
   status: AutomationRunUsageStatus
@@ -239,9 +251,11 @@ export type AutomationDispatchResult = {
   launchDeadlineAt?: number | null
   launchEvidenceAt?: number | null
   error?: string | null
+  /** With `dispatched`: when the agent was handed the run, if not now. */
+  dispatchedAt?: number
 }
 
-export type ExternalAutomationProvider = 'hermes' | 'openclaw'
+export type ExternalAutomationProvider = 'openclaw'
 export type ExternalAutomationManagerStatus = 'available' | 'unavailable'
 export type ExternalAutomationAction = 'pause' | 'resume' | 'run' | 'delete'
 export type ExternalAutomationRunStatus = 'completed' | 'failed' | 'unknown'
@@ -287,41 +301,6 @@ export type ExternalAutomationRun = {
   outputContent: string | null
   error: string | null
   outputPath: string | null
-}
-
-export type ExternalAutomationRunsPage = {
-  managerId: string
-  provider: ExternalAutomationProvider
-  target: ExternalAutomationTarget
-  jobId: string
-  page: number
-  pageSize: number
-  total: number
-  totalSaturated?: true
-  runs: ExternalAutomationRun[]
-}
-
-export type ExternalAutomationRunsInput = {
-  managerId: string
-  provider: ExternalAutomationProvider
-  target: ExternalAutomationTarget
-  jobId: string
-  page: number
-  pageSize: number
-}
-
-export type ExternalAutomationCreateInput = {
-  managerId: string
-  provider: ExternalAutomationProvider
-  target: ExternalAutomationTarget
-  name: string
-  prompt: string
-  schedule: string
-  workdir: string | null
-}
-
-export type ExternalAutomationUpdateInput = ExternalAutomationCreateInput & {
-  jobId: string
 }
 
 export type ExternalAutomationManager = {

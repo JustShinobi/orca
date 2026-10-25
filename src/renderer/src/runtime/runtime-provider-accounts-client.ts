@@ -75,6 +75,8 @@ export function watchProviderAccounts(
     // the first snapshot surfaces through onError). Long-lived watchers use
     // this to resubscribe; the local one-shot path never fires it.
     onClosed?: () => void
+    /** Remote only: the stream ended after its first snapshot, so later usage is unverifiable. */
+    onClosedAfterSnapshot?: () => void
   }
 ): ProviderAccountsWatcher {
   if (target.kind === 'local') {
@@ -177,6 +179,7 @@ export function watchProviderAccounts(
             handlers.onError(new Error('Remote provider account subscription closed.'))
             return
           }
+          handlers.onClosedAfterSnapshot?.()
           handlers.onClosed?.()
         }
       }

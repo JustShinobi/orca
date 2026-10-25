@@ -46,7 +46,9 @@ import {
 
 vi.mock('../store', () => ({
   useAppStore: {
-    setState: vi.fn()
+    setState: vi.fn(),
+    // Snapshot receipt reads the held paired-tab closes; none here.
+    getState: () => ({})
   }
 }))
 

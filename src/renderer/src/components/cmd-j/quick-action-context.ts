@@ -2,7 +2,7 @@ import type { AppState } from '@/store/types'
 import { findWorktreeById } from '@/store/slices/worktree-helpers'
 import type { Worktree } from '../../../../shared/worktree/types'
 import type { SshConnectionStatus } from '../../../../shared/ssh-types'
-import { getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { runtimeEnvironmentIdUnlessTwin } from '@/lib/resolve-owner'
 import { selectRuntimeAwareSshStatus } from '@/store/slices/runtime-environment-ssh'
 import { isPairedWebClientWindow } from '@/lib/desktop-window-chrome'
 import { getClientCreationActionPolicy } from '@/lib/client-creation-action-policy'
@@ -12,6 +12,7 @@ import {
   runActiveNativeChatSplit
 } from '@/components/native-chat/native-chat-layout-actions'
 import type { NativeChatSplitDirection } from '@/components/native-chat/native-chat-split-shortcut'
+import { selectWorktreesByRepo } from '@/store/workspace-record-selectors'
 
 export type CmdJUnavailableReason =
   | 'loading'
@@ -40,6 +41,7 @@ export type CmdJQuickActionContext = {
   managedBrowserCreationEnabled?: boolean
   activeGroupId: string | null
   openNewBrowserTab: (groupId: string) => Promise<void>
+  openBrowserUrl: (groupId: string, url: string) => Promise<void>
   openNewMarkdownFile: (groupId: string) => Promise<void>
   openNewTerminalTab: (groupId: string) => Promise<void>
   openCreateWorkspace: () => void
@@ -103,7 +105,7 @@ export function getActiveWorktreeSshStatus(
   }
   const sshOwnerEnvironmentId = isPairedWebClientWindow()
     ? null
-    : getExplicitRuntimeEnvironmentIdForWorktree(state, activeWorktree.id)
+    : runtimeEnvironmentIdUnlessTwin(state, activeWorktree.id)
   return selectRuntimeAwareSshStatus(state, sshOwnerEnvironmentId, connectionId)
 }
 
@@ -156,6 +158,7 @@ export function buildCmdJQuickActionContext(args: {
   state: AppState
   activeGroupSnapshot: CmdJActiveGroupSnapshot | null
   openNewBrowserTab: (groupId: string) => Promise<void>
+  openBrowserUrl: (groupId: string, url: string) => Promise<void>
   openNewMarkdownFile: (groupId: string) => Promise<void>
   openNewTerminalTab: (groupId: string) => Promise<void>
   openCreateWorkspace: () => void
@@ -164,7 +167,7 @@ export function buildCmdJQuickActionContext(args: {
 }): CmdJQuickActionContext {
   const activeWorktreeId = args.state.activeWorktreeId
   const activeWorktree = activeWorktreeId
-    ? (findWorktreeById(args.state.worktreesByRepo, activeWorktreeId) ?? null)
+    ? (findWorktreeById(selectWorktreesByRepo(args.state), activeWorktreeId) ?? null)
     : null
   const activeGroupId = resolveCmdJActiveGroupId(
     args.state,
@@ -172,7 +175,7 @@ export function buildCmdJQuickActionContext(args: {
     args.activeGroupSnapshot
   )
   const isLoading =
-    args.state.repos.length > 0 && Object.keys(args.state.worktreesByRepo).length === 0
+    args.state.repos.length > 0 && Object.keys(selectWorktreesByRepo(args.state)).length === 0
   const runtimeMode =
     (globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ &&
     args.state.settings?.activeRuntimeEnvironmentId?.trim()
@@ -196,6 +199,7 @@ export function buildCmdJQuickActionContext(args: {
     managedBrowserCreationEnabled,
     activeGroupId,
     openNewBrowserTab: args.openNewBrowserTab,
+    openBrowserUrl: args.openBrowserUrl,
     openNewMarkdownFile: args.openNewMarkdownFile,
     openNewTerminalTab: args.openNewTerminalTab,
     openCreateWorkspace: args.openCreateWorkspace,

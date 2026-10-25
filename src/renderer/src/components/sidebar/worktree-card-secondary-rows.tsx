@@ -23,7 +23,6 @@ export function WorktreeCardSecondaryRows({
     settings,
     isActive,
     newCardStyle,
-    lineageChildren,
     lineageCollapsed,
     onLineageToggle,
     remoteBranchConflict,
@@ -105,9 +104,9 @@ export function WorktreeCardSecondaryRows({
             <TooltipTrigger asChild>
               <Button
                 type="button"
-                variant="ghost"
-                size="xs"
-                className="relative z-10 h-[18px] max-w-[8rem] gap-1 rounded-md border border-worktree-sidebar-border bg-worktree-sidebar px-1.5 text-[10px] font-medium leading-none text-muted-foreground shadow-none hover:bg-worktree-sidebar-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-worktree-sidebar-ring"
+                variant="outline"
+                size="chip"
+                className="relative z-10 max-w-32"
                 aria-label={lineageChildAriaLabel}
                 aria-expanded={!lineageCollapsed}
                 onClick={onLineageToggle}
@@ -131,12 +130,6 @@ export function WorktreeCardSecondaryRows({
                   )}
             </TooltipContent>
           </Tooltip>
-        </div>
-      )}
-
-      {!newCardStyle && lineageChildren && (
-        <div className="-ml-[1.125rem] mt-1.5 w-[calc(100%+1.125rem)] space-y-1">
-          {lineageChildren}
         </div>
       )}
     </>

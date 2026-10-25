@@ -24,33 +24,6 @@ type KnownOnMain = {
 const TRANSIENT = /\(transient\)$/
 
 export const LAYOUT_ORACLE_KNOWN_ON_MAIN: readonly KnownOnMain[] = [
-  // STA-9417: first activation of a host-created setup split mints a second tab for the setup
-  // terminal (one terminal in two panes) or leaves that terminal with no pane.
-  ...(['view', 'client'] as const).map((check) => ({
-    scenario: 'setup-split-first-activation',
-    check,
-    cause: 'STA-9417'
-  })),
-  ...(['rules', 'expected'] as const).map((check) => ({
-    scenario: 'setup-split-first-activation',
-    check,
-    platform: 'darwin' as const,
-    cause: 'STA-9417'
-  })),
-  // The in-app daemon restart drops the worktree's tabs from main while the window keeps them.
-  ...(['view', 'expected', 'restart', 'marker'] as const).map((check) => ({
-    scenario: 'live-daemon-restart',
-    check,
-    cause: 'daemon restart empties the runtime layout'
-  })),
-  // The relaunch after it has no tab bar for the worktree, so its group is minted again (Linux CI).
-  ...(['rules', 'client'] as const).map((check) => ({
-    scenario: 'live-daemon-restart',
-    check,
-    step: 'after relaunch',
-    platform: 'linux' as const,
-    cause: 'daemon restart empties the runtime layout'
-  })),
   // A headless host lists a worktree with no saved tab bar (and, after a restart, every worktree)
   // under a synthesized `headless-terminals:` group, while the layout stream names the same group
   // by its saved or minted id: same tabs and order, two group ids. One projection in PR 6.
@@ -59,21 +32,6 @@ export const LAYOUT_ORACLE_KNOWN_ON_MAIN: readonly KnownOnMain[] = [
     check: 'client',
     detail: /^group id differs: runtime \S+, client headless-terminals:\S+ \(tabs /,
     cause: 'two group ids'
-  },
-  // A renamed terminal's title lists as null in terminal.list after a serve restart (session tabs
-  // keep it): orcad everywhere, Electron serve on Linux.
-  {
-    scenario: 'headless-orcad-rename-terminal',
-    check: 'expected',
-    step: 'rename after restart',
-    cause: 'title after restart'
-  },
-  {
-    scenario: 'headless-electron-rename-terminal',
-    check: 'expected',
-    step: 'rename after restart',
-    platform: 'linux',
-    cause: 'title after restart'
   },
   // After a headless move into an existing group, paired clients still see that group's previous
   // tab selected, not the moved one. A split into a new group selects the moved tab.

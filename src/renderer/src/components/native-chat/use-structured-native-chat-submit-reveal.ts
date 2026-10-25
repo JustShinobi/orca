@@ -12,9 +12,11 @@ import type { StructuredAgentSessionQueuedMessagesController } from './use-struc
 type StructuredController = ReturnType<typeof useStructuredAgentSession>
 
 export function useStructuredNativeChatSubmitReveal(
-  controller: Pick<StructuredController, 'respond' | 'queuedMessages'>,
+  controller: Pick<StructuredController, 'respond' | 'queuedMessages' | 'capturePresentation'>,
   /** Relaunches a start that failed. */
-  retryLaunch: () => void
+  retryLaunch: () => void,
+  /** The host may take no turn: no card is sent now or resumed, and no failed start retried. */
+  startsHeld = false
 ): {
   messageListRef: React.RefObject<NativeChatMessageListHandle | null>
   /** For the composer, which reveals as it sends. */
@@ -24,11 +26,14 @@ export function useStructuredNativeChatSubmitReveal(
   queuedMessages: StructuredAgentSessionQueuedMessagesController
 } {
   const { messageListRef, revealLatest } = useNativeChatRevealLatest()
-  const { respond, queuedMessages } = controller
+  const { respond, queuedMessages, capturePresentation } = controller
   const revealingRetryLaunch = useCallback(() => {
+    if (startsHeld) {
+      return
+    }
     revealLatest()
     retryLaunch()
-  }, [retryLaunch, revealLatest])
+  }, [retryLaunch, revealLatest, startsHeld])
   const revealingRespond = useCallback<StructuredController['respond']>(
     (...args) => {
       revealLatest()
@@ -39,13 +44,21 @@ export function useStructuredNativeChatSubmitReveal(
   const revealingQueue = useMemo<StructuredAgentSessionQueuedMessagesController>(() => {
     // Resume can be refused or find nothing paused, so it reveals only once the host lifts it.
     const revealing = (lift: () => Promise<boolean>) => async (): Promise<boolean> => {
+      const isCurrent = capturePresentation()
       const resumed = await lift()
-      if (resumed) {
+      if (resumed && isCurrent()) {
         revealLatest()
       }
       return resumed
     }
-    const { queueResume } = queuedMessages
+    if (startsHeld) {
+      return {
+        ...queuedMessages,
+        steer: async () => undefined,
+        resume: async () => false,
+        steerNewest: () => false
+      }
+    }
     return {
       ...queuedMessages,
       steer: (messageId) => {
@@ -53,8 +66,6 @@ export function useStructuredNativeChatSubmitReveal(
         return queuedMessages.steer(messageId)
       },
       resume: revealing(queuedMessages.resume),
-      // The composer's Resume is the same press.
-      queueResume: queueResume && { ...queueResume, resume: revealing(queueResume.resume) },
       steerNewest: () => {
         const steered = queuedMessages.steerNewest()
         if (steered) {
@@ -63,7 +74,7 @@ export function useStructuredNativeChatSubmitReveal(
         return steered
       }
     }
-  }, [queuedMessages, revealLatest])
+  }, [capturePresentation, queuedMessages, revealLatest, startsHeld])
   return {
     messageListRef,
     revealLatest,

@@ -11,7 +11,20 @@
  * The fault is injected at the multiplex transport seam (onClose), never with
  * elapsed time; the oracle is the per-pane handle inventory.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// These transport fixtures never read abandoned-launch ownership from the app store.
+const appStore = vi.hoisted(() => ({
+  getState: vi.fn(() => {
+    throw new Error('These transport fixtures must not read app-store ownership')
+  })
+}))
+
+vi.mock('@/store', () => ({ useAppStore: { getState: appStore.getState } }))
+
+afterEach(() => {
+  expect(appStore.getState).not.toHaveBeenCalled()
+})
+
 import {
   TerminalStreamOpcode,
   decodeTerminalStreamFrame,
@@ -151,7 +164,9 @@ describe('paired client sleep/wake with several remote terminal tabs', () => {
       PANE_COUNT
     )
     for (const pane of panes) {
-      expect(pane.transport.getPtyId(), `pane ${pane.hostTabId} lost its handle`).not.toBeNull()
+      expect(pane.transport.getPtyId(), `pane ${pane.hostTabId} bound the wrong handle`).toBe(
+        `remote:env-1@@${hostHandleByTabId.get(pane.hostTabId)}`
+      )
       pane.transport.destroy?.()
     }
   })
@@ -174,7 +189,9 @@ describe('paired client sleep/wake with several remote terminal tabs', () => {
     const evidence = `resubscribes: ${JSON.stringify(afterReconnect)}`
     expect(afterReconnect, evidence).toContain(`${parked}-respawned`)
     for (const pane of panes) {
-      expect(pane.transport.getPtyId(), `pane ${pane.hostTabId} lost its handle`).not.toBeNull()
+      expect(pane.transport.getPtyId(), `pane ${pane.hostTabId} bound the wrong handle`).toBe(
+        `remote:env-1@@${hostHandleByTabId.get(pane.hostTabId)}`
+      )
       pane.transport.destroy?.()
     }
   })

@@ -57,7 +57,7 @@ describe('the permission mode picker', () => {
 
   it('shows nothing for a host that states no mode, or an agent with none', () => {
     expect(permission(live('codex', {}))).toBeUndefined()
-    expect(permission(live('grok', { permissionMode: 'ask' }))).toBeUndefined()
+    expect(permission(live('pi', { permissionMode: 'ask' }))).toBeUndefined()
   })
 
   it("offers Codex's three modes with its own descriptions", () => {
@@ -90,6 +90,14 @@ describe('the permission mode picker', () => {
       kind: { currentValue: 'auto' }
     })
     expect(offered(false, 'auto')).toEqual(['ask', 'accept-edits', 'auto', 'full-access'])
+    const changing = { ...live('claude', { permissionMode: 'ask' }, true), pendingId: 'model' }
+    expect(permission(changing)?.kind).toMatchObject({
+      choices: expect.not.arrayContaining([expect.objectContaining({ value: 'auto' })])
+    })
+    expect(permission({ ...changing, permissionMode: 'auto' })?.kind).toMatchObject({
+      currentValue: 'auto',
+      choices: expect.arrayContaining([expect.objectContaining({ value: 'auto' })])
+    })
   })
 
   // A new chat names no model: the host's catalog row for the CLI default decides, as the host's does.

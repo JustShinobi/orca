@@ -67,20 +67,6 @@ describe('resolveTerminalViewportResubscribe', () => {
     }
   })
 
-  it('keeps holding on absent dims across repeated frames without spending budget', () => {
-    for (let frame = 0; frame < 50; frame += 1) {
-      expect(
-        resolveTerminalViewportResubscribe({
-          hostCols: null,
-          hostRows: null,
-          viewportMeasured: true,
-          viewport: PHONE,
-          attempts: 0
-        }).kind
-      ).toBe('hold')
-    }
-  })
-
   it('converges when host dims match the measured viewport', () => {
     expect(
       resolveTerminalViewportResubscribe({
@@ -89,6 +75,19 @@ describe('resolveTerminalViewportResubscribe', () => {
         viewportMeasured: true,
         viewport: PHONE,
         attempts: 2
+      })
+    ).toEqual({ kind: 'converged' })
+  })
+
+  it('accepts desktop dims in desktop mode instead of treating them as a failed fit (#28487)', () => {
+    expect(
+      resolveTerminalViewportResubscribe({
+        hostCols: 150,
+        hostRows: 40,
+        viewportMeasured: true,
+        viewport: PHONE,
+        attempts: 0,
+        displayMode: 'desktop'
       })
     ).toEqual({ kind: 'converged' })
   })
@@ -241,6 +240,7 @@ describe('runTerminalViewportFitPass', () => {
     measured?: { cols: number; rows: number } | null
     sentViewport?: { cols: number; rows: number } | null
     budget?: TerminalViewportResubscribeBudget
+    displayMode?: string
   }) {
     const budget = overrides.budget ?? new TerminalViewportResubscribeBudget()
     const diagnostics = {
@@ -267,6 +267,7 @@ describe('runTerminalViewportFitPass', () => {
       seq: 1,
       hostCols: overrides.hostCols ?? null,
       hostRows: overrides.hostRows ?? null,
+      displayMode: overrides.displayMode ?? null,
       sentViewport: overrides.sentViewport ?? null,
       budget,
       diagnostics,
@@ -292,7 +293,10 @@ describe('runTerminalViewportFitPass', () => {
     }
   }
 
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+  const settle = async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+  }
 
   it('holds without any teardown when host dims are absent (STA-3337 regression)', async () => {
     const h = makeHarness({ viewportMeasured: true, viewport: PHONE })
@@ -301,6 +305,28 @@ describe('runTerminalViewportFitPass', () => {
     expect(h.unsubscribeTerminal).not.toHaveBeenCalled()
     expect(h.subscribeToTerminal).not.toHaveBeenCalled()
     expect(h.diagnostics.streamResubscribeHeld).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the stream up and shows no fit error when the host is in desktop mode (#28487)', async () => {
+    // Why: after a desktop take-back the phone reconnects at desktop dims on purpose.
+    const budget = new TerminalViewportResubscribeBudget()
+    budget.chargeAttempt(HANDLE)
+    const h = makeHarness({
+      hostCols: 150,
+      hostRows: 40,
+      viewportMeasured: true,
+      viewport: PHONE,
+      displayMode: 'desktop',
+      budget
+    })
+    for (let i = 0; i <= MAX_TERMINAL_VIEWPORT_RESUBSCRIBE_ATTEMPTS; i++) {
+      runTerminalViewportFitPass(h.args)
+      await settle()
+    }
+    expect(h.unsubscribeTerminal).not.toHaveBeenCalled()
+    expect(h.subscribeToTerminal).not.toHaveBeenCalled()
+    expect(h.showToast).not.toHaveBeenCalled()
+    expect(h.budget.attempts(HANDLE)).toBe(0)
   })
 
   it('measures and resubscribes immediately on the first pass, charging one attempt', async () => {

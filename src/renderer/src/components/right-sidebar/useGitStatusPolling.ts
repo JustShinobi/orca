@@ -3,21 +3,29 @@ import { useAppStore } from '@/store'
 import { useAllWorktrees, useRepoById, useRepoMap, useWorktreeById } from '@/store/selectors'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
 import { getConnectionId } from '@/lib/connection-context'
-import { getExecutionHostIdForWorktree, getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { refreshGitStatusForWorktree } from './git-status-refresh'
 import { isWindowVisible } from '@/lib/window-visibility-interval'
 import {
   hasInteractiveActiveGitStatusConsumer,
   shouldPollActiveGitStatus
 } from '@/lib/passive-macos-app-data-access'
-import { getWorktreeGitOwnerTarget } from './worktree-git-owner-target'
+import {
+  getWorktreeGitOwnerTarget,
+  useWorktreeGitSshConnectionReady
+} from './worktree-git-owner-target'
 import { useGitStatusFileWatchRefresh } from './git-status-file-watch-refresh'
 import { useGitStatusPushSignalRefresh } from './git-status-push-signal-refresh'
 import { useStaleConflictOperationPolling } from './stale-conflict-operation-poll'
 import { useGitStatusUpstreamRefWatch } from './use-git-status-upstream-ref-watch'
-import { createGitStatusRefreshPacing, createGitStatusRefreshScheduler, type GitStatusRefreshPacing, type GitStatusRefreshReason, type GitStatusRefreshScheduler } from './git-status-refresh-scheduler'
-import { selectRuntimeAwareSshStatus } from '@/store/slices/runtime-environment-ssh'
-import { isPairedWebClientWindow } from '@/lib/desktop-window-chrome'
+import {
+  createGitStatusRefreshPacing,
+  createGitStatusRefreshScheduler,
+  type GitStatusRefreshPacing,
+  type GitStatusRefreshReason,
+  type GitStatusRefreshScheduler
+} from './git-status-refresh-scheduler'
+import { selectWorktreesByRepo } from '@/store/workspace-record-selectors'
 
 const STATUS_SAFETY_INTERVAL_MS = 60_000
 const STATUS_ACTIVITY_DEBOUNCE_MS = 125
@@ -26,9 +34,15 @@ const STATUS_ACTIVITY_DEBOUNCE_MS = 125
 const STATUS_ACTIVITY_MIN_GAP_MS = 3000
 // Why: status scans and remote conflict probes can take longer than their
 // timers; duration-aware spacing prevents a slow task from running nonstop.
-export const SLOW_GIT_POLL_BACKOFF = { idleMultiplier: 1, changeSignalMultiplier: 1, maxIntervalMs: 5 * 60_000 }
+export const SLOW_GIT_POLL_BACKOFF = {
+  idleMultiplier: 1,
+  changeSignalMultiplier: 1,
+  maxIntervalMs: 5 * 60_000
+}
 
-export function admissionTierForGitStatusRefreshReason(reason: GitStatusRefreshReason): 'status' | 'background' {
+export function admissionTierForGitStatusRefreshReason(
+  reason: GitStatusRefreshReason
+): 'status' | 'background' {
   return reason === 'safety' ? 'background' : 'status'
 }
 
@@ -47,9 +61,6 @@ export function useGitStatusPolling(options: { enabled?: boolean } = {}): void {
   const setUpstreamStatus = useAppStore((s) => s.setUpstreamStatus)
   const setConflictOperation = useAppStore((s) => s.setConflictOperation)
   const conflictOperationByWorktree = useAppStore((s) => s.gitConflictOperationByWorktree)
-  const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
-  const sshStateByEnvironment = useAppStore((s) => s.sshStateByEnvironment)
-  const runtimeStatusByEnvironmentId = useAppStore((s) => s.runtimeStatusByEnvironmentId)
   const rightSidebarOpen = useAppStore((s) => s.rightSidebarOpen)
   const rightSidebarTab = useAppStore((s) => s.rightSidebarTab)
   const rightSidebarExplorerView = useAppStore((s) => s.rightSidebarExplorerView)
@@ -62,33 +73,14 @@ export function useGitStatusPolling(options: { enabled?: boolean } = {}): void {
   const activeRepo = useRepoById(activeRepoId)
   const activeRepoSupportsGit = activeRepo ? isGitRepoKind(activeRepo) : false
   const activeConnectionId = activeRepo?.connectionId ?? null
-  const isConnectionReady = useCallback(
-    (connectionId: string | null | undefined, worktreeId = activeWorktreeId): boolean => {
-      if (!connectionId) {
-        return true
-      }
-      const state = useAppStore.getState()
-      const sshOwnerEnvironmentId =
-        worktreeId && !isPairedWebClientWindow()
-          ? getExplicitRuntimeEnvironmentIdForWorktree(state, worktreeId)
-          : null
-      return (
-        selectRuntimeAwareSshStatus(
-          {
-            ...state,
-            runtimeStatusByEnvironmentId,
-            sshConnectionStates,
-            sshStateByEnvironment
-          },
-          sshOwnerEnvironmentId,
-          connectionId
-        ) === 'connected'
-      )
-    },
-    [activeWorktreeId, runtimeStatusByEnvironmentId, sshConnectionStates, sshStateByEnvironment]
-  )
+  const isConnectionReady = useWorktreeGitSshConnectionReady(activeWorktreeId)
   const activeGitStatusPollingArgs = {
-    activeWorktreeId, worktreePath, rightSidebarOpen, rightSidebarTab, rightSidebarExplorerView, openFiles
+    activeWorktreeId,
+    worktreePath,
+    rightSidebarOpen,
+    rightSidebarTab,
+    rightSidebarExplorerView,
+    openFiles
   }
   const isActiveConnectionReady = isConnectionReady(activeConnectionId)
   const canFetchActiveWorktreeGitStatus =
@@ -300,6 +292,14 @@ export function useGitStatusPolling(options: { enabled?: boolean } = {}): void {
     statusSchedulerRef.current?.signal()
   }, [])
 
+  const getRepoWorktreePathsForSignal = useCallback(
+    (repoId: string) =>
+      (selectWorktreesByRepo(useAppStore.getState())[repoId] ?? []).map(
+        (worktree) => worktree.path
+      ),
+    []
+  )
+
   useGitStatusFileWatchRefresh({
     activeConnectionId,
     activeRepoSupportsGit,
@@ -318,8 +318,10 @@ export function useGitStatusPolling(options: { enabled?: boolean } = {}): void {
   useGitStatusPushSignalRefresh({
     activeRepoId,
     activeWorktreeId,
+    activeWorktreePath: worktreePath,
     enabled: canFetchActiveWorktreeGitStatus,
-    fetchStatus: fetchStatusOnChangeSignal
+    fetchStatus: fetchStatusOnChangeSignal,
+    getRepoWorktreePaths: getRepoWorktreePathsForSignal
   })
 
   useStaleConflictOperationPolling({

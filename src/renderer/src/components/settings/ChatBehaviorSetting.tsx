@@ -1,13 +1,18 @@
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { translate } from '@/i18n/i18n'
 import type { RuntimeClientTarget } from '../../../../shared/runtime-client-target'
-import { useStructuredAgentSessionHostQueuesMessages } from '@/runtime/structured-agent-session-host-capability'
+import {
+  useChatSettingsTypedPermissions,
+  useStructuredAgentSessionHostQueuesMessages
+} from '@/runtime/structured-agent-session-host-capability'
 import { useAppStore } from '../../store'
 import { Card, CardContent } from '../ui/card'
+import { ChatPermissionSetting } from './ChatPermissionSetting'
 import { NativeChatShellEnvironmentSetting } from './NativeChatShellEnvironmentSetting'
 import { SearchableSetting } from './SearchableSetting'
 import { SettingsSubsectionHeader, SettingsSwitchRow } from './SettingsFormControls'
 import { getChatBehaviorEntriesByKey, getChatBehaviorTitle } from './chat-behavior-search'
+import { getChatPermissionSearchEntry } from './chat-permission-search'
 import { matchesSettingsSearch } from './settings-search'
 
 // This screen edits this machine's settings, so it asks this machine's runtime; a paired host that
@@ -25,11 +30,15 @@ export function ChatBehaviorSetting({
   updateSettings,
   forceVisible = false
 }: ChatBehaviorSettingProps): React.JSX.Element | null {
+  const typedPermissions = useChatSettingsTypedPermissions()
   const query = useAppStore((state) => state.settingsSearchQuery)
   // A host without the capability ignores the preference; the switch would do nothing.
   const hostQueuesMessages = useStructuredAgentSessionHostQueuesMessages(STRUCTURED_CHAT_HOST)
   const entries = getChatBehaviorEntriesByKey()
   const rows = [
+    ...(settings.nativeChatPermissionMode !== undefined
+      ? [getChatPermissionSearchEntry(typedPermissions)]
+      : []),
     entries.resumeOnRestart,
     ...(hostQueuesMessages ? [entries.queueFollowUps] : []),
     entries.shellEnvironment
@@ -45,6 +54,11 @@ export function ChatBehaviorSetting({
       <Card>
         <CardContent>
           <div className="divide-y divide-border/40">
+            <ChatPermissionSetting
+              settings={settings}
+              updateSettings={updateSettings}
+              forceVisible={forceVisible}
+            />
             <SearchableSetting
               {...entries.resumeOnRestart}
               id={entries.resumeOnRestart.targetSectionId}

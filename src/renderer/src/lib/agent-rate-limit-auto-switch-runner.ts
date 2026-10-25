@@ -5,7 +5,7 @@ import {
   resolveTuiAgentLaunchEnv
 } from '../../../shared/tui-agent-launch-defaults'
 import { useAppStore } from '@/store'
-import { sendRuntimePtyInputVerified } from '@/runtime/runtime-terminal-inspection'
+import { sendRuntimePtyInputVerified } from '@/runtime/runtime-terminal-verified-input'
 import { getRemoteRuntimePtyEnvironmentId } from '@/runtime/runtime-terminal-stream'
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
@@ -200,8 +200,8 @@ export async function runAgentRateLimitAutoSwitch(args: {
     agent: args.agent,
     providerSession: args.providerSession,
     cmdOverrides: localSettings?.agentCmdOverrides ?? {},
-    agentArgs: resolveTuiAgentLaunchArgs(args.agent, localSettings?.agentDefaultArgs),
-    agentEnv: resolveTuiAgentLaunchEnv(args.agent, localSettings?.agentDefaultEnv),
+    agentArgs: resolveTuiAgentLaunchArgs(args.agent, localSettings),
+    agentEnv: resolveTuiAgentLaunchEnv(args.agent, localSettings),
     platform
   })
   if (!resumePlan) {

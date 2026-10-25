@@ -8,7 +8,7 @@ import type {
   AgentSessionDeathEvidence,
   AgentSessionRecord
 } from '../../shared/agent-session-record'
-import { assertFence, withLease } from './agent-session-lease-transitions'
+import { assertFence, withLease } from './agent-session/ownership/agent-session-lease-transitions'
 import type { AgentSessionStoreState } from './agent-session-store-state'
 
 /**
@@ -81,8 +81,7 @@ export function settleFailedAgentSessionPostAcquisitionAttachment(
     record.lease.claimStatus !== 'live' ||
     record.lease.handoffStage !== null ||
     record.lease.ownerProcess?.spawnToken !== args.spawnToken ||
-    record.lease.reservedSpawnToken !== args.spawnToken ||
-    record.lease.provenHandleLinkId === null
+    record.lease.reservedSpawnToken !== args.spawnToken
   ) {
     throw new Error('agent_session_ownership_unknown')
   }

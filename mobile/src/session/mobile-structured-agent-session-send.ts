@@ -1,8 +1,14 @@
 import type { AgentSessionSendResult } from '../../../src/shared/agent-session-wire'
+import type { AgentJournalCursor } from '../../../src/shared/agent-session-journal-types'
 import {
   structuredAgentSessionSendBody,
   type StructuredAgentSessionAttachment
 } from '../../../src/shared/structured-agent-session-send-mutation'
+import { structuredAgentSessionBlocksTooLarge } from '../../../src/shared/rpc-contract/structured-agent-session-message-params'
+import {
+  AGENT_SESSION_MESSAGE_TOO_LARGE_PARTS,
+  agentSessionWriteNoticeEnglish
+} from '../../../src/shared/agent-session-refusal-notice'
 import type { RpcClient } from '../transport/rpc-client'
 import type { MobileNativeChatSendOutcome } from './mobile-native-chat-send'
 import {
@@ -20,14 +26,23 @@ export async function sendMobileStructuredAgentSessionMessage(input: {
   attachments: readonly StructuredAgentSessionAttachment[]
   /** Sent only when the host advertises `agent-session.queued-messages.v1`. */
   delivery?: 'queue-if-active'
+  /** Sent only when the host advertises `agent-session.send-options.v1`. */
+  options?: Readonly<Record<string, string>>
   deadline?: number
   /** The id the host records the message under. */
   clientMessageId: string
   onError: MobileNativeChatSendErrorReporter
+  onAccepted?: (cursor: AgentJournalCursor | undefined) => void
 }): Promise<MobileNativeChatSendOutcome> {
   const timeoutMs = timeoutForDeadline(input.deadline)
   if (timeoutMs === null) {
     input.onError('Message not sent')
+    return 'rejected'
+  }
+  const body = structuredAgentSessionSendBody(input.text, input.attachments)
+  // The host refuses it unexplained, so say why here and keep the draft.
+  if (structuredAgentSessionBlocksTooLarge(body.blocks)) {
+    input.onError(agentSessionWriteNoticeEnglish(AGENT_SESSION_MESSAGE_TOO_LARGE_PARTS))
     return 'rejected'
   }
   // Each Send is a new action, under one operation id.
@@ -38,8 +53,9 @@ export async function sendMobileStructuredAgentSessionMessage(input: {
     sessionId: input.sessionId,
     expectedRuntimeFence: input.expectedRuntimeFence,
     fields: {
-      body: structuredAgentSessionSendBody(input.text, input.attachments),
-      ...(input.delivery ? { delivery: input.delivery } : {})
+      body,
+      ...(input.delivery ? { delivery: input.delivery } : {}),
+      ...(input.options ? { options: input.options } : {})
     },
     clientOperationId: input.clientMessageId,
     timeoutMs
@@ -47,6 +63,9 @@ export async function sendMobileStructuredAgentSessionMessage(input: {
   const outcome = mobileStructuredSendDelivery(result)
   if (outcome.error !== null) {
     input.onError(outcome.error)
+  }
+  if (outcome.outcome === 'accepted' && result.status === 'accepted') {
+    input.onAccepted?.(result.cursor)
   }
   return outcome.outcome
 }

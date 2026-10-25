@@ -7,6 +7,7 @@ import type { SourceControlAiActionDefaults } from '../../shared/source-control-
 export type RuntimeClientSettings = Pick<
   GlobalSettings,
   | 'defaultTuiAgent'
+  | 'newWorkspaceSetupOnly'
   | 'disabledTuiAgents'
   | 'agentCmdOverrides'
   | 'agentDefaultArgs'
@@ -32,6 +33,7 @@ export type RuntimeClientSettings = Pick<
   | 'agentSkillSharingEnabled'
   | 'machineName'
   | 'nativeChatPermissionMode'
+  | 'agentNativeChatPermissionModes'
 > & {
   /** Older clients still read these; neither is persisted or accepted as an update. */
   openAgentTabsInChatByDefault?: boolean
@@ -51,6 +53,7 @@ export type RuntimeHostDisplayLabelOverrides = Partial<
 export type RuntimeClientSettingsUpdate = Pick<
   Partial<GlobalSettings>,
   | 'agentStatusHooksEnabled'
+  | 'experimentalConnectors'
   | 'defaultTuiAgent'
   | 'disabledTuiAgents'
   | 'agentDefaultArgs'

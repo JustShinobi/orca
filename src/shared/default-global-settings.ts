@@ -4,12 +4,10 @@ import type { VoiceSettings } from './speech-types'
 import { DEFAULT_TERMINAL_FONT_WEIGHT, DEFAULT_TERMINAL_FONT_WEIGHT_BOLD } from './terminal-fonts'
 import { getDefaultTerminalQuickCommands } from './terminal-quick-commands'
 import { TASK_PROVIDERS } from './task-providers'
-import { getDefaultSourceControlAiSettings } from './source-control-ai'
+import { getDefaultSourceControlAiSettings } from './source-control-ai-settings'
 import { DEFAULT_APP_ICON_ID } from './app-icon'
 import { DEFAULT_OPEN_IN_APPLICATIONS } from './open-in-applications'
 import { DEFAULT_DISABLED_TUI_AGENTS } from './tui-agent-selection'
-import { DEFAULT_TUI_AGENT_ARGS, DEFAULT_TUI_AGENT_ENV } from './tui-agent-launch-defaults'
-import { loadedChatPermissionSetting } from './agent-chat-permission-mode'
 import { UI_LANGUAGE_SYSTEM } from './ui-language'
 import {
   DEFAULT_LEFT_SIDEBAR_TINT_COLOR,
@@ -41,11 +39,13 @@ export function buildDefaultSettings(args: {
     autoRenameBranchFromWorkDefaultedOn: true,
     branchPrefix: 'git-username',
     branchPrefixCustom: '',
+    jiraIssueKeyCasing: 'lowercase',
     theme: 'system',
     leftSidebarAppearanceMode: 'default',
     leftSidebarTintColor: DEFAULT_LEFT_SIDEBAR_TINT_COLOR,
     leftSidebarTintOpacity: DEFAULT_LEFT_SIDEBAR_TINT_OPACITY,
     uiLanguage: UI_LANGUAGE_SYSTEM,
+    uiLanguagePortugueseMigrationApplied: true,
     appIcon: DEFAULT_APP_ICON_ID,
     appFontFamily: args.appFontFamily,
     editorAutoSave: false,
@@ -121,15 +121,16 @@ export function buildDefaultSettings(args: {
     terminalAllowOsc52Clipboard: true,
     terminalAllowOsc52ClipboardDefaultedOnForAllUsers: true,
     claudeAgentTeamsMode: 'off',
-    setupScriptLaunchMode: 'new-tab',
     terminalScrollbackRows: DESKTOP_TERMINAL_SCROLLBACK_ROWS_DEFAULT,
     httpProxyUrl: '',
     httpProxyBypassRules: '',
+    nodeDistMirrorUrl: '',
     electronHttp1CompatibilityMode: false,
     openLinksInApp: false,
     localhostWorktreeLabelsEnabled: false,
     openLinksInAppPreferencePrompted: false,
     openLinksInAppModifierInverts: false,
+    openLinksInAppInBackground: false,
     terminalLinkActionPopoverEnabled: true,
     terminalLinkClickBehavior: 'actions',
     terminalUrlMiddleClickBehavior: 'open',
@@ -140,10 +141,8 @@ export function buildDefaultSettings(args: {
     nativeChatInheritShellEnvironment: true,
     nativeChatShellEnvironmentVariables: [],
     nativeChatSessionOptions: {},
-    nativeChatPermissionMode: loadedChatPermissionSetting(undefined, {
-      agentDefaultArgs: DEFAULT_TUI_AGENT_ARGS,
-      agentDefaultEnv: DEFAULT_TUI_AGENT_ENV
-    }),
+    // New chats of agents on their own settings; others start in their agent permission.
+    nativeChatPermissionMode: 'full-access',
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
     rightSidebarOpenByDefault: true,
     showGitIgnoredFiles: true,
@@ -158,6 +157,7 @@ export function buildDefaultSettings(args: {
     artifactSharingEnabled: false,
     agentSkillSharingEnabled: false,
     nestedWorkerMaxDepth: 1,
+    orchestrationChatErrorEscalationEnabled: true,
     showArtifactsButton: false,
     showSkillsButton: false,
     showMobileButton: true,
@@ -204,8 +204,10 @@ export function buildDefaultSettings(args: {
     pluginConsents: {},
     devPluginPaths: [],
     claudeAgentTeamsDefaultDisabledMigrated: true,
+    sshRemoteCliControlExistingHostsMigrated: true,
     skipDeleteWorktreeConfirm: false,
     alwaysForceDeleteWorktrees: false,
+    alwaysForceDeletePreservedBranches: false,
     skipCloseTerminalWithRunningProcessConfirm: false,
     skipDeleteAutomationConfirm: false,
     skipDeleteArtifactConfirm: false,
@@ -224,9 +226,12 @@ export function buildDefaultSettings(args: {
     zcodePlanSite: 'zai',
     geminiCliOAuthEnabled: false,
     agentCmdOverrides: {},
-    agentDefaultArgs: { ...DEFAULT_TUI_AGENT_ARGS },
-    agentDefaultEnv: { ...DEFAULT_TUI_AGENT_ENV },
+    // Arguments hold only the user's own text; the permission flag comes from the choice below.
+    agentDefaultArgs: {},
+    agentDefaultEnv: {},
     agentYoloDefaultsMigrated: true,
+    agentPermissionDefault: 'full-access',
+    agentPermissionOverrides: {},
     agentStatusHooksEnabled: true,
     agentWorkspaceTrustEnabled: true,
     codexTerminalServerIsolation: true,
@@ -259,6 +264,8 @@ export function buildDefaultSettings(args: {
     agentHibernationIdleMs: 30 * 60 * 1000,
     experimentalNewWorktreeCardStyle: false,
     experimentalEphemeralVms: false,
+    experimentalConnectors: false,
+    experimentalWslHosts: false,
     compactWorktreeCards: false,
     // Why: local desktop stays the default until the user picks a saved runtime environment.
     activeRuntimeEnvironmentId: null,

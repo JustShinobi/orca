@@ -1,6 +1,6 @@
 import type { AppState } from '@/store/types'
 import type { Repo } from '../../../../shared/repo-types'
-import { getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { runtimeEnvironmentIdUnlessTwin } from '@/lib/resolve-owner'
 import {
   selectRuntimeAwareSshStatus,
   selectRuntimeAwareSshTargetRemoved
@@ -17,7 +17,7 @@ export function resolveRuntimeAwareSshWorkspaceForget(
   worktreeId: string
 ): SshWorkspaceForgetResolution {
   const sshOwnerEnvironmentId = repo?.connectionId
-    ? getExplicitRuntimeEnvironmentIdForWorktree(state, worktreeId)
+    ? runtimeEnvironmentIdUnlessTwin(state, worktreeId)
     : null
   const connectionStatus = repo?.connectionId
     ? selectRuntimeAwareSshStatus(state, sshOwnerEnvironmentId, repo.connectionId)

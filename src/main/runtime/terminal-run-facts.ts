@@ -2,7 +2,7 @@ import {
   spawnCommitBindingOrigin,
   type PtySpawnCommitOrigin
 } from '../persistence/loading-store/pty-binding-span'
-import { isTerminalQueryReply } from '../../shared/terminal-query-reply'
+import { isUntypedTerminalInput } from '../../shared/terminal-untyped-input'
 import type { TerminalInputKind } from '../../shared/terminal-input-kind'
 
 export type TerminalRunFacts = {
@@ -12,20 +12,12 @@ export type TerminalRunFacts = {
   firstUserInputAt: number | null
 }
 
-// Why: a paired client's xterm answers focus changes (CSI I / CSI O) through input that carries no
-// provenance; the desktop renderer already excludes them via xterm's user-input signal.
-// oxlint-disable-next-line no-control-regex -- focus reports are ESC-framed sequences by definition.
-const TERMINAL_FOCUS_REPORTS_ONLY_RE = new RegExp('^(?:\\u001b\\[[IO])+$')
-
-/** Input with no provenance that no person typed: a whole terminal reply or only focus reports. */
-export function isUntypedTerminalInput(payload: string): boolean {
-  return isTerminalQueryReply(payload) || TERMINAL_FOCUS_REPORTS_ONLY_RE.test(payload)
-}
-
 export type TerminalSpawnCommit = Parameters<typeof spawnCommitBindingOrigin>[0] & {
   id: string
   incarnationId?: string
   coldRestore?: object
+  /** Taken before the spawn, or a fast process's first report would read as older than it. */
+  spawnRequestedAt?: number
 }
 
 /** A cold restore starts a new process for a pane that had one, so it is never fresh. */
@@ -35,6 +27,14 @@ type TerminalRunRecord = {
   incarnationId: string | null
   spawnOrigin: TerminalRunSpawnOrigin
   firstUserInputAt: number | null
+  /** When main committed a process it started (spawn, split or cold restore); null for one it
+   *  attached to, whose start main never saw. */
+  processStartedAt: number | null
+}
+
+// Why not the binding origin: a split outranks a reattach there, but only an attach keeps a process.
+function startedNewProcess(commit: TerminalSpawnCommit): boolean {
+  return commit.isReattach !== true && commit.agentSessionEnsure?.disposition !== 'adopted'
 }
 
 /** Main's per-process facts about one PTY run, keyed by the incarnation they describe. */
@@ -46,6 +46,13 @@ export class TerminalRunFactsRegister {
     string,
     { incarnationId: string | null; firstInputAt: number | null }
   >()
+  private readonly inputListeners = new Set<(ptyId: string, now: number) => void>()
+
+  /** Called on driving input from any client (not launch writes or replies); keep it cheap. */
+  onInput(listener: (ptyId: string, now: number) => void): () => void {
+    this.inputListeners.add(listener)
+    return () => this.inputListeners.delete(listener)
+  }
 
   reserveSpawnCommit(commit: TerminalSpawnCommit): void {
     if (!commit.incarnationId) {
@@ -86,6 +93,11 @@ export class TerminalRunFactsRegister {
     this.runsByPtyId.set(commit.id, {
       incarnationId,
       spawnOrigin: origin === 'spawn' && commit.coldRestore !== undefined ? 'cold-restore' : origin,
+      processStartedAt: sameProcess
+        ? (previous?.processStartedAt ?? null)
+        : startedNewProcess(commit)
+          ? (commit.spawnRequestedAt ?? Date.now())
+          : null,
       firstUserInputAt: sameProcess
         ? (previous?.firstUserInputAt ?? null)
         : pending?.incarnationId === incarnationId
@@ -104,6 +116,9 @@ export class TerminalRunFactsRegister {
     this.lastInputAtByPtyId.set(ptyId, now)
     const run = this.runsByPtyId.get(ptyId)
     if (inputKind === 'driving') {
+      for (const listener of this.inputListeners) {
+        listener(ptyId, now)
+      }
       const pending = this.pendingByPtyId.get(ptyId)
       if (pending) {
         pending.firstInputAt ??= now
@@ -132,6 +147,17 @@ export class TerminalRunFactsRegister {
       freshSpawn: run.spawnOrigin === 'spawn' || run.spawnOrigin === 'split',
       firstUserInputAt: run.firstUserInputAt
     }
+  }
+
+  /** When the PTY's current process was started by main; null when main attached to it instead,
+   *  so evidence older than that may still describe it. A run older than the PTY's live process
+   *  only understates that start, so callers may omit the incarnation. */
+  readProcessStartedAt(ptyId: string, incarnationId?: string | null): number | null {
+    const run = this.runsByPtyId.get(ptyId)
+    if (!run || (run.incarnationId && incarnationId && run.incarnationId !== incarnationId)) {
+      return null
+    }
+    return run.processStartedAt
   }
 
   delete(ptyId: string): void {

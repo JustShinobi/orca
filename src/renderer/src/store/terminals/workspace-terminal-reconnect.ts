@@ -1,8 +1,9 @@
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import { buildByIdIndex, buildWorktreeByIdIndex } from '../slices/worktree-by-id-index'
 import { getRepoIdFromWorktreeId } from '../../../../shared/worktree/id'
-import { getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { runtimeEnvironmentIdUnlessTwin } from '@/lib/resolve-owner'
 import type { TerminalSlice, TerminalStoreGet, TerminalStoreSet } from './terminal-state'
+import { selectWorktreesByRepo } from '../workspace-record-selectors'
 
 export function createWorkspaceTerminalReconnectActions(
   set: TerminalStoreSet,
@@ -36,7 +37,7 @@ export function createWorkspaceTerminalReconnectActions(
       let reconnectedPtyIdsByTabId: Record<string, string[]> | null = null
       // Why indexed: the loop neither sets state nor awaits, so one index over the
       // whole store snapshot serves every iteration.
-      const worktreeById = buildWorktreeByIdIndex(get().worktreesByRepo)
+      const worktreeById = buildWorktreeByIdIndex(selectWorktreesByRepo(get()))
       const repoById = buildByIdIndex(get().repos)
       for (const worktreeId of ids) {
         const tabs = tabsByWorktree[worktreeId] ?? []
@@ -104,7 +105,7 @@ export function createWorkspaceTerminalReconnectActions(
         }
         // Why: runtime-owned SSH terminals restore through runtime handles, not
         // the local sshConnectionStates map, so they never reach 'connected' here.
-        if (getExplicitRuntimeEnvironmentIdForWorktree(get(), worktreeId)) {
+        if (runtimeEnvironmentIdUnlessTwin(get(), worktreeId)) {
           continue
         }
         const sshConnected = get().sshConnectionStates.get(connectionId)?.status === 'connected'
@@ -123,6 +124,7 @@ export function createWorkspaceTerminalReconnectActions(
         return
       }
       set({
+        // Only each row's ptyId changes, a field the frame merge leaves to the window.
         ...(reconnectedTabsByWorktree ? { tabsByWorktree: reconnectedTabsByWorktree } : {}),
         ...(reconnectedPtyIdsByTabId ? { ptyIdsByTabId: reconnectedPtyIdsByTabId } : {}),
         workspaceSessionReady: true,

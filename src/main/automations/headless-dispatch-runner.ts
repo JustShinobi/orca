@@ -30,6 +30,9 @@ export type HeadlessAutomationDispatchContext = {
   cleanupLaunch?: (runId: string) => Promise<void>
 }
 
+/** Record dispatch refusals as skips. */
+export class AutomationDispatchRefusedError extends Error {}
+
 function describeDispatchError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -50,6 +53,8 @@ export async function runHeadlessAutomationDispatch(
     })
   }
   let launch: HeadlessAutomationDispatchLaunch
+  // The agent can finish before launch returns.
+  const dispatchedAt = Date.now()
   try {
     launch = await ctx.dispatcher({ automation, run, target })
   } catch (error) {
@@ -59,7 +64,8 @@ export async function runHeadlessAutomationDispatch(
     ctx.clearLaunchCleanup?.(run.id)
     return runs.updateRun({
       runId: run.id,
-      status: 'dispatch_failed',
+      status:
+        error instanceof AutomationDispatchRefusedError ? 'skipped_unavailable' : 'dispatch_failed',
       workspaceId: automation.workspaceId,
       error: describeDispatchError(error)
     })
@@ -81,8 +87,9 @@ export async function runHeadlessAutomationDispatch(
   const updatePromise = runs.updateRun({
     runId: run.id,
     status: 'dispatched',
+    dispatchedAt,
     ...launchRunTarget,
-    // Kept here: a watched run's completion is written without it.
+    // Watched completions omit the precheck result.
     ...(precheckResult ? { precheckResult } : {}),
     launchDeadlineAt,
     launchEvidenceAt: null,
@@ -126,7 +133,7 @@ export async function runHeadlessAutomationDispatch(
           .markDispatchResult({
             runId: run.id,
             status: 'dispatch_failed',
-            ...launchRunTarget,
+            workspaceId: automation.workspaceId,
             error: describeDispatchError(error)
           })
           .catch(() => {})
@@ -136,9 +143,15 @@ export async function runHeadlessAutomationDispatch(
         ctx.clearLaunchCleanup?.(run.id)
       })
   }
-  // Observe the launched agent even while persistence is stalled or rejects its acknowledgement.
+  // Start observation without waiting for persistence acknowledgement.
   if (!launch.completion) {
-    ctx.watchRun({ ...run, ...launchRunTarget, status: 'dispatched', error: null })
+    ctx.watchRun({
+      ...run,
+      ...launchRunTarget,
+      status: 'dispatched',
+      dispatchedAt,
+      error: null
+    })
     return updated
   }
   void launch.completion

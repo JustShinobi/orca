@@ -2,8 +2,8 @@ import { translate } from '@/i18n/i18n'
 import { AppearanceChatSection } from './AppearanceChatSection'
 import { ChatBehaviorSetting } from './ChatBehaviorSetting'
 import { ChatNamingSetting } from './ChatNamingSetting'
-import { ChatPermissionSetting } from './ChatPermissionSetting'
 import { NativeChatInlineVisualsSetting } from './NativeChatInlineVisualsSetting'
+import { NativeChatProvidersSetting } from './NativeChatProvidersSetting'
 import { SettingsSection } from './SettingsSection'
 import { SettingsSubsectionHeader } from './SettingsFormControls'
 import { matchesSettingsSearch } from './settings-search'
@@ -27,7 +27,7 @@ export function ChatSettingsSection({
   isMounted
 }: {
   settings: GlobalSettings
-  updateSettings: (updates: Partial<GlobalSettings>) => void
+  updateSettings: (updates: Partial<GlobalSettings>) => void | Promise<void>
   writeSourceControlAiSettings: (patch: SourceControlAiSettingsPatch) => Promise<void>
   onChatPromptDirtyChange?: (dirty: boolean) => void
   chatPromptDiscardSignal?: number
@@ -57,11 +57,6 @@ export function ChatSettingsSection({
     >
       {isMounted ? (
         <div className="space-y-5">
-          <ChatPermissionSetting
-            settings={settings}
-            updateSettings={updateSettings}
-            forceVisible={matchesSettingsSearch(query, [{ title }])}
-          />
           {matchesSettingsSearch(query, [{ title }, ...getChatAppearanceSearchEntries()]) ? (
             <section id="chat-appearance" className="space-y-3">
               <SettingsSubsectionHeader title={appearanceTitle} />
@@ -78,6 +73,13 @@ export function ChatSettingsSection({
                 </CardContent>
               </Card>
             </section>
+          ) : null}
+          {showDesktopOnlySettings ? (
+            <NativeChatProvidersSetting
+              settings={settings}
+              updateSettings={updateSettings}
+              forceVisible={matchesSettingsSearch(query, [{ title }])}
+            />
           ) : null}
           {showDesktopOnlySettings ? (
             <NativeChatInlineVisualsSetting

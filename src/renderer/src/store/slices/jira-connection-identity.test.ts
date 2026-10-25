@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { AppState } from '../types'
-import type { JiraConnectionStatus } from '../../../../shared/jira-types'
+import type { JiraConnectionStatus } from '../../../../shared/jira/jira-types'
 import { createJiraSlice } from './jira'
 
 const jiraStatus = vi.hoisted(() => vi.fn())
@@ -32,7 +32,9 @@ function status(accountId: string): JiraConnectionStatus {
   }
 }
 
-beforeEach(() => jiraStatus.mockReset())
+beforeEach(() => {
+  jiraStatus.mockReset()
+})
 
 it('replaces status when the provider context changes even if its visible values are identical', async () => {
   const store = createTestStore()
@@ -79,3 +81,20 @@ it('preserves the status reference for an unchanged identity on the same host', 
   await store.getState().checkJiraConnection()
   expect(store.getState().jiraStatus).toBe(initial)
 })
+
+it.each([false, true])(
+  'clears the old disconnected host capability when the new status read fails (checked: %s)',
+  async (jiraStatusChecked) => {
+    const store = createTestStore()
+    store.setState({
+      jiraStatus: { connected: false, viewer: null, supportsScopedTokens: true },
+      jiraStatusChecked,
+      jiraStatusContextKey: 'runtime:old-host#0'
+    })
+    jiraStatus.mockRejectedValueOnce(new Error('Host unavailable'))
+    await store.getState().checkJiraConnection()
+    expect(store.getState().jiraStatus).toEqual({ connected: false, viewer: null })
+    expect(store.getState().jiraStatusChecked).toBe(true)
+    expect(store.getState().jiraStatusContextKey).toBe('local#0')
+  }
+)

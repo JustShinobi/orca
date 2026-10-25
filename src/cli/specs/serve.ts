@@ -6,7 +6,7 @@ export const SERVE_COMMAND_SPECS: CommandSpec[] = [
     path: ['serve'],
     summary: 'Start an Orca runtime server without opening a desktop window',
     usage:
-      'orca serve [--port <port>] [--pairing-address <host>] [--mobile-pairing] [--no-pairing] [--grant-desktop-control] [--project-root <path>] [--recipe-json] [--supervise] [--force] [--preview-port <port> --preview-domain <host>] [--preview-bind <host>] [--preview-auth open|token] [--preview-token <secret>] [--json]',
+      'orca serve [--port <port>] [--pairing-address <host>] [--mobile-pairing] [--no-pairing] [--grant-desktop-control] [--project-root <path>] [--recipe-json] [--supervise] [--force] [--reclaim-stale-lock [--data-root <dir>] [--yes]] [--preview-port <port> --preview-domain <host>] [--preview-bind <host>] [--preview-auth open|token] [--preview-token <secret>] [--json]',
     allowedFlags: [
       ...GLOBAL_FLAGS,
       'port',
@@ -18,6 +18,9 @@ export const SERVE_COMMAND_SPECS: CommandSpec[] = [
       'recipe-json',
       'supervise',
       'force',
+      'reclaim-stale-lock',
+      'data-root',
+      'yes',
       'preview-port',
       'preview-bind',
       'preview-domain',
@@ -26,6 +29,7 @@ export const SERVE_COMMAND_SPECS: CommandSpec[] = [
     ],
     notes: [
       'Runs in the foreground and prints the bound endpoint, advertised endpoint, and pairing status. Stop it with Ctrl+C.',
+      'With --port, serve exits with an error when that port is already in use. Without it, serve uses 6768 and moves to another port when 6768 is taken.',
       '--pairing-address changes only the client-advertised address; use a reachable LAN, Tailscale, SSH-forward, or reverse-proxy endpoint.',
       'Use --recipe-json with --project-root from VM recipes to print the recipe result JSON and leave the server running.',
       'Use --mobile-pairing to print a mobile-scoped pairing QR/link instead of the default runtime-environment pairing link.',
@@ -34,9 +38,11 @@ export const SERVE_COMMAND_SPECS: CommandSpec[] = [
       '--preview-port starts a single-port preview proxy that exposes workspace dev servers as <worktree>[--<port>].<preview-domain>, routed by Host header. Point a wildcard DNS record and reverse-proxy route for *.<preview-domain> at this one port.',
       '--preview-bind defaults to 127.0.0.1 (reverse proxy on the same machine). --preview-auth defaults to open on loopback binds and token otherwise; token mode generates a secret when --preview-token is not given and prints it in the ready block.',
       'Exits with code 3, without starting anything, when another Orca already serves this profile or cannot be shown to have stopped.',
+      "--reclaim-stale-lock starts nothing. When a start refuses because this profile's lock may belong to an Orca on another machine sharing this home (for example after a reboot, on a network home), it checks that the lock was written on a host with this name in an earlier boot, is at least 2 minutes old, and that nothing answers on this machine at its holder's endpoints. Those checks cannot rule out another machine with the same host name, so it then only prints what it found (exit 2); add --yes, once you are sure no other machine sharing this home runs Orca for this profile, to clear it (exit 0). It exits 1 when a check fails and 4 when there is no lock. --data-root names the data root the refusal printed. --json prints the status (none, eligible, refused or reclaimed). Linux only.",
       'On macOS, after Orca serve aborts at startup (it could not register with Launch Services), later runs from the same environment refuse for 30 minutes with exit code 78. Use --force to try anyway.',
       '--supervise is for service managers (launchd, systemd). Orca serve then restarts the server itself with growing delays instead of exiting when it stops, waits while an update replaces the app, and waits while another Orca serves this profile. After 6 failures in 15 minutes it gives up and exits with code 0 so the manager stops too, and later supervised runs refuse until a new build is installed or --force is passed. Not available on Windows yet.',
-      'Experimental and off by default: set ORCA_TERMINAL_PROCESS_CEILING=<n> (64 or more) before the terminal host starts to have the OS cap how many processes all terminals together may run (Linux, through a systemd user slice; needs a user manager that outlives logout) or each terminal may run (Windows). `orca serve` reports the ceiling as on or off, with the reason.'
+      'Experimental and off by default: set ORCA_TERMINAL_PROCESS_CEILING=<n> (64 or more) before the terminal host starts to have the OS cap how many processes each terminal may run (Linux, through a systemd user scope per terminal, which needs a user manager that outlives logout; Windows, through a job per terminal). `orca serve` reports the ceiling as on or off, with the reason.',
+      'Off by default: set ORCA_TERMINAL_MEMORY_MAX=<size> (256M or more) and ORCA_TERMINAL_MEMORY_SWAP_MAX=<size> (0 for no swap) before the terminal host starts to cap the memory and swap of each terminal on Linux, through the same per-terminal systemd user scope. A terminal over its limit has its largest process OOM-killed; the host and other terminals keep running. Sizes take K, M, G or T. A limit the host cannot enforce is skipped and logged in the terminal host log. No effect on macOS or Windows.'
     ],
     examples: [
       'orca serve',
@@ -45,7 +51,8 @@ export const SERVE_COMMAND_SPECS: CommandSpec[] = [
       'orca serve --port 6768 --pairing-address 100.64.1.20',
       'orca serve --pairing-address 100.64.1.20 --mobile-pairing',
       'orca serve --port 6768 --preview-port 6769 --preview-domain https://preview.example.com',
-      'orca serve --preview-port 6769 --preview-bind 0.0.0.0 --preview-domain preview.example.com --preview-auth token'
+      'orca serve --preview-port 6769 --preview-bind 0.0.0.0 --preview-domain preview.example.com --preview-auth token',
+      'orca serve --reclaim-stale-lock'
     ]
   },
   {

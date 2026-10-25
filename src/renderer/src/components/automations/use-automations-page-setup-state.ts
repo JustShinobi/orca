@@ -26,14 +26,15 @@ export function useAutomationsPageSetupState({
   local: AutomationsPageLocalState
   list: AutomationsPageListState
 }) {
-  const { repos, settings, projectHostSetups, worktreesByRepo } = store
+  const { repos, settings, projectHostSetups, worktreesByRepo, pendingAutomationRunNavigation } =
+    store
   const {
-    createTarget,
     automationYamlHooksByRepoKey,
     automationHookCheckPromisesRef,
     setAutomationYamlHooksByRepoKey,
     setupDecisionTouchedRef,
     selectedAutomationRuns,
+    runHistoryReloadToken,
     draft,
     automationHostTargetKey,
     selectedAutomationRunPageId
@@ -74,7 +75,6 @@ export function useAutomationsPageSetupState({
         : projectHostSetups
       const hookKey = `${setupHostId ?? getRuntimeEnvironmentIdForRepo({ repos, settings }, candidate.projectId) ?? 'local'}:${candidate.projectId}`
       return getVisibleAutomationSetupDecision({
-        createTarget,
         workspaceMode: candidate.workspaceMode,
         repoId: candidate.projectId,
         repos: setupRepos,
@@ -84,7 +84,6 @@ export function useAutomationsPageSetupState({
     },
     [
       automationYamlHooksByRepoKey,
-      createTarget,
       list.hostCatalog.entries,
       local.editingAutomationId,
       local.editingHostStableKey,
@@ -148,12 +147,11 @@ export function useAutomationsPageSetupState({
   const getDraftSetupDecisionDefaultSignature = useCallback(
     (candidate: Pick<AutomationDraft, 'projectId' | 'workspaceMode'>): string =>
       [
-        createTarget,
         candidate.workspaceMode,
         candidate.projectId,
         getDraftSetupDecisionDefault(candidate) ?? 'none'
       ].join(':'),
-    [createTarget, getDraftSetupDecisionDefault]
+    [getDraftSetupDecisionDefault]
   )
   const markSetupDecisionTouched = useCallback((): void => {
     setupDecisionTouchedRef.current = true
@@ -164,7 +162,12 @@ export function useAutomationsPageSetupState({
     selectedAutomationRuns.rowKey === selectedRow.key &&
     selectedAutomationRuns.ownerKey ===
       capturedAutomationOwnerKey(capturedAutomationOwner(capturedAutomationOwners, selectedRow.key))
-  const selectedRunsNotice = selectedRunsMatchSelection ? selectedAutomationRuns.notice : null
+  const selectedRunsReady =
+    selectedRunsMatchSelection &&
+    selectedAutomationRuns.reloadToken === runHistoryReloadToken &&
+    (!pendingAutomationRunNavigation ||
+      selectedAutomationRuns.navigation === pendingAutomationRunNavigation)
+  const selectedRunsNotice = selectedRunsReady ? selectedAutomationRuns.notice : null
   const selectedRuns = useMemo(
     () =>
       selected && selectedRunsMatchSelection
@@ -191,6 +194,7 @@ export function useAutomationsPageSetupState({
     getDraftSetupDecisionDefaultSignature,
     markSetupDecisionTouched,
     selectedRuns,
+    selectedRunsReady,
     selectedRunsNotice,
     selectedAutomationRunPage,
     worktrees,

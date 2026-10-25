@@ -1,7 +1,6 @@
 import { GLOBAL_FLAGS, type CommandSpec } from '../args'
 
-// Why: absorbs the deleted `orca accounts` group; adds select/rm and a remote
-// device-authorization login path alongside the original local-terminal flow.
+// Terminal login lets headless hosts manage accounts without the desktop login UI.
 export const ACCOUNT_COMMAND_SPECS: CommandSpec[] = [
   {
     path: ['account', 'add'],

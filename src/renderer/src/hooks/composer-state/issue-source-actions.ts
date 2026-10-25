@@ -33,7 +33,7 @@ type IssueSourceActionsInput = Pick<
 
 import { useCallback, useMemo } from 'react'
 import type { LinearIssue } from '../../../../shared/linear/issue-types'
-import type { JiraIssue } from '../../../../shared/jira-types'
+import type { JiraIssue } from '../../../../shared/jira/jira-types'
 import {
   toLinearLinkedWorkItem,
   getLinkedItemDisplayName,
@@ -44,6 +44,7 @@ import {
   getLinearLinkedWorkItemBranchName
 } from '@/lib/linear-linked-work-item'
 import { getLinearIssueWorkspaceName } from '../../../../shared/workspace-name'
+import { getJiraIssueKeyCasingSeedOptions } from '@/lib/jira-issue-key-casing'
 import {
   getLinkedWorkItemSuggestedName,
   getLinkedWorkItemWorkspaceName,
@@ -181,7 +182,7 @@ export function useIssueSourceActions(input: IssueSourceActionsInput) {
       setLinkedWorkItem(linkedItem)
       setLinkedTaskSourceContext(sourceContext)
       const suggestedName =
-        getLinkedWorkItemWorkspaceName(linkedItem)?.seedName ??
+        getLinkedWorkItemWorkspaceName(linkedItem, getJiraIssueKeyCasingSeedOptions())?.seedName ??
         getLinkedWorkItemSuggestedName(linkedItem)
       // Why: the Jira lookup is async, so a name the user typed while it resolved must survive.
       if (

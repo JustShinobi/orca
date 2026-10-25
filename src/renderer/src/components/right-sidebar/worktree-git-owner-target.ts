@@ -1,10 +1,12 @@
-import { useMemo } from 'react'
-import { runtimeTargetForWorkspaceOwner } from '@/lib/resolve-owner'
+import { useCallback, useMemo } from 'react'
+import { isPairedWebClientWindow } from '@/lib/desktop-window-chrome'
+import { runtimeEnvironmentIdUnlessTwin, runtimeTargetForWorkspaceOwner } from '@/lib/resolve-owner'
 import { runtimeTargetForOwnerEnvironment } from '@/runtime/runtime-client-target'
 import type { RuntimeClientTarget } from '../../../../shared/runtime-client-target'
 import { useAppStore } from '@/store'
 import type { AppState } from '@/store/types'
 import { UNRESOLVED_GIT_HOST_ERROR } from '@/store/slices/editor/actions/git-operation-target'
+import { selectRuntimeAwareSshStatus } from '@/store/slices/runtime-environment-ssh'
 
 function ownerTargetFor(
   state: AppState,
@@ -47,4 +49,37 @@ export function requireGitOwnerTarget(target: RuntimeClientTarget | null): Runti
     throw new Error(UNRESOLVED_GIT_HOST_ERROR)
   }
   return target
+}
+
+export function useWorktreeGitSshConnectionReady(
+  activeWorktreeId: string | null
+): (connectionId: string | null | undefined, worktreeId?: string | null) => boolean {
+  const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
+  const sshStateByEnvironment = useAppStore((s) => s.sshStateByEnvironment)
+  const runtimeStatusByEnvironmentId = useAppStore((s) => s.runtimeStatusByEnvironmentId)
+  return useCallback(
+    (connectionId: string | null | undefined, worktreeId = activeWorktreeId): boolean => {
+      if (!connectionId) {
+        return true
+      }
+      const state = useAppStore.getState()
+      const sshOwnerEnvironmentId =
+        worktreeId && !isPairedWebClientWindow()
+          ? runtimeEnvironmentIdUnlessTwin(state, worktreeId)
+          : null
+      return (
+        selectRuntimeAwareSshStatus(
+          {
+            ...state,
+            runtimeStatusByEnvironmentId,
+            sshConnectionStates,
+            sshStateByEnvironment
+          },
+          sshOwnerEnvironmentId,
+          connectionId
+        ) === 'connected'
+      )
+    },
+    [activeWorktreeId, runtimeStatusByEnvironmentId, sshConnectionStates, sshStateByEnvironment]
+  )
 }

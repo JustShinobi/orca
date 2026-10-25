@@ -9,7 +9,11 @@ const mocks = vi.hoisted(() => ({
   ipcHandle: vi.fn()
 }))
 
-vi.mock('electron', () => ({ app: { on: vi.fn() }, ipcMain: { handle: mocks.ipcHandle } }))
+vi.mock('electron', () => ({
+  app: { on: vi.fn() },
+  ipcMain: { handle: mocks.ipcHandle },
+  BrowserWindow: { getAllWindows: () => [] }
+}))
 vi.mock('../ai-vault/session-scanner-service-spawn', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   scanAiVaultSessionsInService: mocks.scanAiVaultSessionsInService,
@@ -96,7 +100,7 @@ describe('Agent Session History scan coalescing', () => {
     await expect(first).rejects.toMatchObject({ name: 'AbortError' })
     expect(scan).toHaveBeenCalledTimes(1)
     resolveScan?.(EMPTY_RESULT)
-    await expect(second).resolves.toEqual(EMPTY_RESULT)
+    await expect(second).resolves.toMatchObject(EMPTY_RESULT)
   })
 
   it('reports a failed local scan as a host issue rather than rejecting', async () => {
@@ -104,14 +108,14 @@ describe('Agent Session History scan coalescing', () => {
     registerAiVaultHandlers()
     const list = ipcHandler('aiVault:listSessions')
 
-    // The local leg degrades like the SSH legs above: a rejection reaches the
-    // renderer as a raw string painted over the list instead of an issue row.
+    // Like SSH failures, local failures must become issue rows instead of rejected IPC calls.
     const result = await list(
       { sender: Object.assign(new EventEmitter(), { id: 1 }) },
       { executionHostScope: 'local', requestToken: 'scan' }
     )
     expect(result).toMatchObject({
       sessions: [],
+      scanId: expect.any(String),
       issues: [expect.objectContaining({ message: 'transcript root is unreadable', kind: 'host' })]
     })
     expect(result).not.toHaveProperty('cancelled')

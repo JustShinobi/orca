@@ -11,11 +11,15 @@ vi.mock('react-native', () => ({
 }))
 
 vi.mock('./MobileNativeChatView', () => ({ MobileNativeChatView: 'ChatView' }))
+vi.mock('../platform/use-reduced-motion', () => ({ useReducedMotionEnabled: () => null }))
 vi.mock('./MobileNativeChatQueuedMessages', () => ({ MobileNativeChatQueuedMessages: 'Queued' }))
 vi.mock('./MobileNativeChatBackgroundTasks', () => ({
   MobileNativeChatBackgroundTasks: 'BackgroundTasks'
 }))
 vi.mock('./MobileNativeChatVisual', () => ({ useMobileNativeChatVisualRenderer: () => null }))
+vi.mock('./MobileNativeChatRowOverlaysHost', () => ({
+  MobileNativeChatRowOverlaysHost: 'View'
+}))
 
 function assistantTurn(id: string, text: string): NativeChatMessage {
   return { id, role: 'assistant', blocks: [{ type: 'text', text }], timestamp: 0, source: 'hook' }
@@ -32,6 +36,11 @@ type Tick = {
   /** The host says a person's Stop is ending the turn. */
   stopping?: boolean
   acceptsImages?: boolean
+  agent?: string
+  structured?: boolean
+  activeTabId?: string | null
+  setTabView?: (tabId: string, view: 'terminal') => void
+  attachImage?: (source: 'library' | 'camera') => Promise<void>
 }
 
 function overlayElement(tick: Tick): ReturnType<typeof createElement> {
@@ -39,7 +48,9 @@ function overlayElement(tick: Tick): ReturnType<typeof createElement> {
   const controller = {
     showNativeChat: tick.show ?? true,
     nativeChatSession: { messages: tick.messages ?? [], status: 'ready' },
-    nativeChatAgent: 'claude',
+    nativeChatAgent: tick.agent ?? 'claude',
+    nativeChatStructured: tick.structured ?? false,
+    setTabView: tick.setTabView ?? vi.fn(),
     nativeChatAcceptsImages: tick.acceptsImages ?? true,
     nativeChatAgentWorking: tick.streamLive ?? false,
     nativeChatTurnIndicator: {
@@ -66,7 +77,15 @@ function overlayElement(tick: Tick): ReturnType<typeof createElement> {
   } as unknown as MobileNativeChatController
   return createElement(MobileNativeChatOverlay, {
     controller,
-    images: {} as never,
+    activeSessionTabId: tick.activeTabId,
+    onOpenFile: vi.fn(),
+    images: {
+      attachments: [],
+      isAttaching: false,
+      attachImage: tick.attachImage ?? vi.fn(async () => {}),
+      removeAttachment: vi.fn(),
+      sendNativeChat: vi.fn(async () => true)
+    },
     onMicPress: vi.fn(),
     micActive: false,
     dictationMode: 'toggle',
@@ -76,6 +95,7 @@ function overlayElement(tick: Tick): ReturnType<typeof createElement> {
     sendErrorMessage: null,
     onClearSendError: vi.fn(),
     sendSurfaceId: tick.identity ?? 'tab-a',
+    sessionId: null,
     getSendCompletionGeneration: () => 0,
     keyboardInset: 0
   })
@@ -233,11 +253,49 @@ describe('MobileNativeChatOverlay attach button', () => {
     renderer = null
   })
 
-  it.each([true, false])('offers attach only when the agent takes images (%s)', async (accepts) => {
+  it('opens the exact active terminal tab for an OMP bridge question', async () => {
+    const setTabView = vi.fn()
     await act(async () => {
-      renderer = create(overlayElement({ acceptsImages: accepts }))
+      renderer = create(overlayElement({ agent: 'omp', activeTabId: 'tab-omp', setTabView }))
+    })
+    const view = renderer!.root.find((node) => node.type === 'ChatView')
+    expect(view.props.askRequiresTerminal).toBe(true)
+    act(() => view.props.onAnswerInTerminal())
+    expect(setTabView).toHaveBeenCalledExactlyOnceWith('tab-omp', 'terminal')
+  })
+
+  it.each(['structured', 'claude', 'missing tab'])(
+    'keeps the terminal-only gate scoped correctly: %s',
+    async (scenario) => {
+      await act(async () => {
+        renderer = create(
+          overlayElement({
+            agent: scenario === 'claude' ? 'claude' : 'omp',
+            structured: scenario === 'structured',
+            activeTabId: scenario === 'missing tab' ? null : 'tab-omp'
+          })
+        )
+      })
+      const view = renderer!.root.find((node) => node.type === 'ChatView')
+      expect(view.props.askRequiresTerminal).toBe(scenario === 'missing tab')
+      if (scenario === 'missing tab') {
+        expect(view.props.onAnswerInTerminal).toBeUndefined()
+      }
+    }
+  )
+
+  it.each([true, false])('offers attach only when the agent takes images (%s)', async (accepts) => {
+    const attachImage = vi.fn(async () => {})
+    await act(async () => {
+      renderer = create(overlayElement({ acceptsImages: accepts, attachImage }))
     })
     const view = renderer!.root.find((node) => node.type === 'ChatView')
     expect(typeof view.props.onAttachImage === 'function').toBe(accepts)
+    if (accepts) {
+      await act(async () => view.props.onAttachImage())
+      expect(attachImage).toHaveBeenCalledExactlyOnceWith('library')
+    } else {
+      expect(attachImage).not.toHaveBeenCalled()
+    }
   })
 })

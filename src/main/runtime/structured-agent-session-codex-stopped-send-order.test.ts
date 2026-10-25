@@ -9,11 +9,12 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   CodexAppServerConnection,
-  CodexAppServerConnectionHandlers,
-  openCodexAppServerConnection
-} from '../codex/codex-app-server-connection'
+  CodexAppServerConnectionHandlers
+} from '../codex/app-server/codex-app-server-connection-types'
+import type { openCodexAppServerConnection } from '../codex/codex-app-server-connection'
 import { codexTurnLifecycleFake } from '../codex/codex-turn-lifecycle-fake'
 import { settledWithin } from '../codex/codex-structured-dispatch-test-support'
+import type * as CodexTurnOpenWait from '../codex/codex-structured-turn-open-wait'
 import { CODEX_TURN_OPEN_WAIT_MS } from '../codex/codex-structured-turn-open-wait'
 import { agentJournalSubmissionKey } from '../../shared/agent-session-journal-item-key'
 import { computeAgentSessionPayloadFingerprint } from '../../shared/agent-session-mutation-envelope'
@@ -41,6 +42,37 @@ import {
   stopStructuredAgentSessionRuntime
 } from './structured-agent-session-runtime'
 import { scriptedCodexTransport } from './scripted-codex-transport.test-fixture'
+
+const openWaits = vi.hoisted(() => {
+  const state: {
+    turnIds: string[]
+    ended: string[]
+    began: (() => void) | null
+    releaseAll: (() => void) | null
+  } = { turnIds: [], ended: [], began: null, releaseAll: null }
+  return state
+})
+vi.mock('../codex/codex-structured-turn-open-wait', async (importOriginal) => {
+  const actual = await importOriginal<typeof CodexTurnOpenWait>()
+  return {
+    ...actual,
+    createCodexTurnOpenWaits: () => {
+      const waits = actual.createCodexTurnOpenWaits()
+      openWaits.releaseAll = waits.releaseAll
+      return {
+        ...waits,
+        wait: (turnId: string, withinMs: number) => {
+          openWaits.turnIds.push(turnId)
+          const pending = waits.wait(turnId, withinMs)
+          openWaits.began?.()
+          return pending.then(() => {
+            openWaits.ended.push(turnId)
+          })
+        }
+      }
+    }
+  }
+})
 
 const CALLER = { callerKey: 'codex-stopped-send-resume-test' }
 const MODEL = {
@@ -91,9 +123,14 @@ async function send(text: string): Promise<string> {
 }
 
 /** The chat's Stop; `turnId` names the turn it stops, as the phone does. */
-function stop(turnId?: string): Promise<unknown> {
+async function stop(turnId?: string): Promise<unknown> {
   const fields = turnId === undefined ? {} : { turnId }
-  return host.cancel(CALLER, { envelope: envelope('agentSession.cancel', fields), ...fields })
+  const result = await host.cancel(CALLER, {
+    envelope: envelope('agentSession.cancel', fields),
+    ...fields
+  })
+  await host.collaboratorsForTests().serialize(SESSION, async () => {})
+  return result
 }
 
 function verdictOf(submissions: readonly AgentJournalSubmission[], clientMessageId: string) {
@@ -199,6 +236,10 @@ async function attach(expected: number | null): Promise<void> {
 }
 
 beforeEach(async () => {
+  openWaits.turnIds = []
+  openWaits.ended = []
+  openWaits.began = null
+  openWaits.releaseAll = null
   root = await mkdtemp(join(tmpdir(), 'orca-codex-stopped-send-resume-'))
   answers = 0
   resumes = 0
@@ -213,6 +254,9 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.useRealTimers()
+  openWaits.began = null
+  openWaits.releaseAll?.()
   await stopStructuredAgentSessionRuntime()
   await rm(root, { recursive: true, force: true })
 })
@@ -275,7 +319,7 @@ describe('a send a Stop took back, then a send made while it read Stopping', () 
     turns.end('completed')
     await vi.waitFor(async () => expect(verdictOf(await submissions(), second)).toBe('accepted'))
     const live = await drawn()
-    expect(live).toEqual([
+    expect(live.filter((text) => text !== 'Cancellation requested.')).toEqual([
       'look around',
       NATIVE_CHAT_STOPPED_BEFORE_START_TEXT,
       'sent while stopping'
@@ -340,10 +384,35 @@ describe('a send a Stop took back before Codex echoed it', () => {
     const release = turns.holdNextAnswer()
     const sent = await send('look around')
     await vi.waitFor(() => expect(answers).toBe(2))
-    const stopping = stop()
-    release()
-    // The Stop waits out the turn-open wait for a turn that never opens, then ends there.
-    expect(await settledWithin(stopping, CODEX_TURN_OPEN_WAIT_MS + 2_000)).not.toBe('held')
+    await host.flushStreamedEvents(SESSION)
+    const began = Promise.withResolvers<void>()
+    const registeredBeforeStop = openWaits.turnIds.length
+    const endedBeforeStop = openWaits.ended.length
+    openWaits.began = began.resolve
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    let stopSettled = false
+    const stopping = stop().finally(() => {
+      stopSettled = true
+    })
+    try {
+      release()
+      await began.promise
+      expect(openWaits.turnIds.slice(registeredBeforeStop)).toEqual(['turn-2'])
+      await vi.advanceTimersByTimeAsync(CODEX_TURN_OPEN_WAIT_MS - 1)
+      expect(openWaits.ended.slice(endedBeforeStop)).toEqual([])
+      expect(stopSettled).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(openWaits.ended.slice(endedBeforeStop)).toEqual(['turn-2'])
+      vi.useRealTimers()
+      // The Stop waits out the turn-open wait for a turn that never opens, then ends there.
+      expect(await settledWithin(stopping, 2_000)).not.toBe('held')
+    } finally {
+      vi.useRealTimers()
+      openWaits.began = null
+      release()
+      openWaits.releaseAll?.()
+      await stopping
+    }
     expect(verdictOf(await submissions(), sent)).toBe('withdrawn')
 
     // Every client draws the send where it was sent, then the one row saying it never started.
@@ -354,6 +423,12 @@ describe('a send a Stop took back before Codex echoed it', () => {
       ['user', [{ type: 'text', text: 'look around' }]],
       ['system', [expect.objectContaining({ text: NATIVE_CHAT_STOPPED_BEFORE_START_TEXT })]]
     ])
-    expect(await drawn()).toEqual(['warm up', 'look around', NATIVE_CHAT_STOPPED_BEFORE_START_TEXT])
+    const rows = await drawn()
+    expect(rows.filter((text) => text === 'Cancellation requested.')).toHaveLength(1)
+    expect(rows.filter((text) => text !== 'Cancellation requested.')).toEqual([
+      'warm up',
+      'look around',
+      NATIVE_CHAT_STOPPED_BEFORE_START_TEXT
+    ])
   })
 })

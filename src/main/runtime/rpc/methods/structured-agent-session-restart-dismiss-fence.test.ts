@@ -1,3 +1,4 @@
+import '../unused-default-rpc-methods.test-fixture'
 // "Dismiss all" from the desktop prompt, through the context the desktop renderer really dispatches
 // with. On a host whose agents it all shows, the dismissal is the unscoped, fenced one; a desktop
 // from before registered agents, which cannot show some agent, leaves that agent's offers alone.
@@ -86,12 +87,7 @@ it('fences a dismissed offer against a late teardown write when the desktop sees
 })
 
 it('leaves offers it was not shown when the host runs an agent an older desktop cannot show', async () => {
-  const { host, root, marker } = await interruptedRestart(
-    undefined,
-    undefined,
-    undefined,
-    withPilot()
-  )
+  const { host, root, marker } = await interruptedRestart(undefined, undefined, withPilot())
   setStructuredAgentSessionHost(host)
   const capsule = new AgentSessionRecoveryCapsule(root)
   // An offer whose chat this launch cannot read names no agent the desktop was shown.

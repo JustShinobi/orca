@@ -6,6 +6,8 @@ import type {
   WorkspacePortAdvertisedUrlChangedEvent,
   WorkspacePortKillRequest,
   WorkspacePortKillResult,
+  WorkspacePortPageProbeRequest,
+  WorkspacePortPageProbeResult,
   WorkspacePortScanRequest,
   WorkspacePortScanResult
 } from '../../shared/workspace-ports'
@@ -14,6 +16,7 @@ import type { PreviewProxyStatus } from '../../shared/preview-proxy-types'
 export type WorkspacePortsApi = {
   scan: (args: WorkspacePortScanRequest) => Promise<WorkspacePortScanResult>
   kill: (args: WorkspacePortKillRequest) => Promise<WorkspacePortKillResult>
+  probePage: (args: WorkspacePortPageProbeRequest) => Promise<WorkspacePortPageProbeResult>
   onAdvertisedUrlChanged: (
     callback: (event: WorkspacePortAdvertisedUrlChangedEvent) => void
   ) => () => void

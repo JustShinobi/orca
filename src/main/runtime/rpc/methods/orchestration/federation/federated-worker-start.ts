@@ -29,6 +29,7 @@ import {
 } from './federated-attach-receipt'
 import { isWorkerStartTimeoutWithinTimerLimit } from '../../../../../../shared/orchestration-timing-budgets'
 import {
+  federatedFailedReceipt,
   federatedUnknownReceipt,
   isKnownRemoteStartFailure,
   recoveryFromError
@@ -38,6 +39,7 @@ import {
   WORKER_PROMPT_SUBMITTED_STAGE
 } from '../../../../orchestration/worker-dispatch-stages'
 import { parseTaskDeps } from '../worker/task-deps-argument'
+import { releaseRetriedWorkerTerminal } from '../worker/retried-worker-terminal-release'
 
 export async function startFederatedWorker(args: {
   params: WorkerStartInput
@@ -161,6 +163,8 @@ export async function startFederatedWorker(args: {
       protocolVersion: federationProtocolVersion
     }
   })
+  // A remote retry can replace a failed local attempt whose terminal is still live here.
+  releaseRetriedWorkerTerminal(runtime, db, { retryOf: params.retryOf })
   const createdTask = started.task
   const taskForRemote = task ?? createdTask
   db.recordWorkerStage({ dispatchId: started.dispatch.id, stage: 'remote_attach_requested' })
@@ -267,40 +271,33 @@ export async function startFederatedWorker(args: {
       remote.failedStage ?? 'remote_attach',
       remote.lastError ?? `The worker server returned ${remote.state}.`
     )
-    return {
+    return federatedFailedReceipt({
       runId,
       taskId: taskForRemote.id,
       dispatchId: started.dispatch.id,
-      state: worker.state,
-      stage: worker.stage,
-      server: { environmentId: server.environmentId, name: server.name },
-      failedStage: worker.stage,
-      lastError: worker.last_error,
-      setup: remote.setup,
+      worker,
+      server,
       launch,
-      effects: remote.effects ?? [],
-      residualResources: remote.residualResources ?? [],
-      ...(remote.recovery ? { recovery: remote.recovery } : {})
-    }
+      setup: remote.setup,
+      includeSetup: true,
+      effects: remote.effects,
+      residualResources: remote.residualResources,
+      recovery: remote.recovery
+    })
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     const recovery = recoveryFromError(error)
     if (error instanceof OrchestrationError && isKnownRemoteStartFailure(error.code)) {
       const worker = db.failWorkerStart(started.dispatch.id, 'remote_attach', reason)
-      return {
+      return federatedFailedReceipt({
         runId,
         taskId: taskForRemote.id,
         dispatchId: started.dispatch.id,
-        state: worker.state,
-        stage: worker.stage,
-        server: { environmentId: server.environmentId, name: server.name },
-        failedStage: worker.stage,
-        lastError: worker.last_error,
+        worker,
+        server,
         launch: requestedLaunch,
-        effects: [],
-        residualResources: [],
-        ...(recovery ? { recovery } : {})
-      }
+        recovery
+      })
     }
     const worker = db.markWorkerStartUnknown(started.dispatch.id, 'remote_attach', reason)
     return federatedUnknownReceipt(worker, taskForRemote.id, server.name, requestedLaunch, recovery)

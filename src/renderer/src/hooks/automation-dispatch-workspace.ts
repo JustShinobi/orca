@@ -1,4 +1,3 @@
-import { launchWorktreeBackgroundTerminals } from '@/lib/launch-worktree-background-terminals'
 import { useAppStore } from '@/store'
 import { translate } from '@/i18n/i18n'
 import { createBrowserUuid } from '@/lib/browser-uuid'
@@ -152,7 +151,7 @@ export async function prepareAutomationDispatchWorkspace(args: {
       try {
         const connected = sshOwnerEnvironmentId
           ? await connectRuntimeEnvironmentSshTarget(sshOwnerEnvironmentId, sshTargetId)
-          : await window.api.ssh.connect({ targetId: sshTargetId })
+          : await window.api.ssh.connect({ targetId: sshTargetId, automatic: true })
         if (connected?.status !== 'connected') {
           throw new Error('SSH target is unavailable.')
         }
@@ -233,6 +232,8 @@ export async function prepareAutomationDispatchWorkspace(args: {
           undefined,
           undefined,
           {
+            // Why: only a captured host; with none, a project two hosts publish refuses, never guesses.
+            executionHostId: parseExecutionHostId(automation.runContext?.hostId)?.id,
             automationProvenanceRequest: {
               automationId: automation.id,
               automationRunId: run.id,
@@ -263,17 +264,6 @@ export async function prepareAutomationDispatchWorkspace(args: {
   }
   context.workspaceId = worktree.id
   context.workspaceDisplayName = worktree.displayName
-  if (createResult?.setup || createResult?.defaultTabs) {
-    void launchWorktreeBackgroundTerminals({
-      worktreeId: worktree.id,
-      setup: createResult.setup,
-      defaultTabs: createResult.defaultTabs
-    }).catch((error) => {
-      // Why: setup/defaultTabs match normal worktree creation: they are
-      // best-effort terminal work and must not block the automation agent.
-      console.warn('[automations] Failed to launch workspace setup/default tabs:', error)
-    })
-  }
   return worktree
 }
 

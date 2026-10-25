@@ -1,5 +1,5 @@
 import type * as React from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Terminal } from '@xterm/headless'
 import {
   TerminalStreamOpcode,
@@ -8,7 +8,12 @@ import {
   encodeTerminalStreamFrame
 } from '../../../../shared/terminal-stream-protocol'
 import { flushAsyncTicks, writeHeadlessTerminal } from './pty-connection-test-async'
-import { createMockTransport, createPane, createManager } from './pty-connection-test-pane-fixtures'
+import {
+  terminalWriteText,
+  createMockTransport,
+  createPane,
+  createManager
+} from './pty-connection-test-pane-fixtures'
 import type { ConnectCallbacks, MockTransport } from './pty-connection-test-pane-fixtures'
 import type { PtyReplayDataMeta } from './pty-transport-types'
 import { buildPaneConnectionDeps } from './pty-connection-test-deps'
@@ -159,24 +164,54 @@ async function render(events: PaneEvent[]): Promise<Terminal> {
   return term
 }
 
+type HostModules = {
+  OrcaRuntimeService: new (store: null) => HostRuntime
+  sendSnapshotFrames: (send: HostSendFrame, options: Record<string, unknown>) => unknown
+  serializeBudgetedRequestedSnapshot: (
+    runtime: HostRuntime,
+    ptyId: string,
+    scrollbackRows: number
+  ) => Promise<HostSnapshot | null>
+  installMultiplexFlowControl: (build: HostConnection) => void
+}
+
+let hostModules: HostModules | null = null
+
+// Why a hook: the first load of the main runtime graph takes ~19s cold, and charged to the first
+// test it crossed the 30s test limit whenever the directory ran in parallel.
+async function loadHostModules(): Promise<HostModules> {
+  const [runtime, publication, flowControl] = await Promise.all([
+    vi.importActual<Pick<HostModules, 'OrcaRuntimeService'>>(
+      '../../../../main/runtime/orca-runtime'
+    ),
+    vi.importActual<Pick<HostModules, 'sendSnapshotFrames' | 'serializeBudgetedRequestedSnapshot'>>(
+      '../../../../main/runtime/rpc/methods/terminal/terminal-snapshot-publication'
+    ),
+    vi.importActual<Pick<HostModules, 'installMultiplexFlowControl'>>(
+      '../../../../main/runtime/rpc/methods/terminal/terminal-multiplex-flow-control'
+    )
+  ])
+  return {
+    OrcaRuntimeService: runtime.OrcaRuntimeService,
+    sendSnapshotFrames: publication.sendSnapshotFrames,
+    serializeBudgetedRequestedSnapshot: publication.serializeBudgetedRequestedSnapshot,
+    installMultiplexFlowControl: flowControl.installMultiplexFlowControl
+  }
+}
+
 /** Real host + client chain: returns what the remote transport hands the pane for the push. */
 async function publishHostRecovery(
   missed: string
 ): Promise<{ data: string; meta: PtyReplayDataMeta; published: HostSnapshot }> {
-  const { OrcaRuntimeService } = await vi.importActual<{
-    OrcaRuntimeService: new (store: null) => HostRuntime
-  }>('../../../../main/runtime/orca-runtime')
-  const { sendSnapshotFrames, serializeBudgetedRequestedSnapshot } = await vi.importActual<{
-    sendSnapshotFrames: (send: HostSendFrame, options: Record<string, unknown>) => unknown
-    serializeBudgetedRequestedSnapshot: (
-      runtime: HostRuntime,
-      ptyId: string,
-      scrollbackRows: number
-    ) => Promise<HostSnapshot | null>
-  }>('../../../../main/runtime/rpc/methods/terminal/terminal-snapshot-publication')
-  const { installMultiplexFlowControl } = await vi.importActual<{
-    installMultiplexFlowControl: (build: HostConnection) => void
-  }>('../../../../main/runtime/rpc/methods/terminal/terminal-multiplex-flow-control')
+  if (!hostModules) {
+    throw new Error('host modules are loaded in beforeAll')
+  }
+  const {
+    OrcaRuntimeService,
+    sendSnapshotFrames,
+    serializeBudgetedRequestedSnapshot,
+    installMultiplexFlowControl
+  } = hostModules
 
   const host = new OrcaRuntimeService(null)
   host.setPtyController({
@@ -301,13 +336,16 @@ async function publishHostRecovery(
 }
 
 describe('host-published recovery snapshot onto a live alt screen', () => {
-  beforeEach(() => {
-    vi.resetModules()
+  beforeAll(async () => {
+    hostModules = await loadHostModules()
+  })
+
+  beforeEach(async () => {
     vi.clearAllMocks()
     transportFactoryQueue = []
     storeSubscribers = []
     mockStoreState = createInitialStoreState(() => mockStoreState)
-    installTerminalTestGlobals()
+    await installTerminalTestGlobals()
   })
 
   afterEach(async () => {
@@ -330,7 +368,8 @@ describe('host-published recovery snapshot onto a live alt screen', () => {
     const pane = createPane(1)
     const events: PaneEvent[] = []
     const parseCallbacks: (() => void)[] = []
-    pane.terminal.write.mockImplementation((chunk: string, callback?: () => void) => {
+    pane.terminal.write.mockImplementation((chunk: string | Uint8Array, callback?: () => void) => {
+      chunk = terminalWriteText(chunk)
       if (chunk.length > 0) {
         events.push(chunk)
       }

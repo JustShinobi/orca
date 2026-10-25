@@ -16,7 +16,7 @@ vi.mock('@/store', () => ({ useAppStore: { getState: mocks.getState } }))
 vi.mock('@/lib/activate-tab-and-focus-pane', () => ({
   activateTabAndFocusPane: mocks.activateTabAndFocusPane
 }))
-vi.mock('@/lib/structured-agent-session-tab-activation', () => ({
+vi.mock('@/lib/agent-session/structured-agent-session-tab-activation', () => ({
   activateStructuredAgentSessionTab: mocks.activateStructuredAgentSessionTab
 }))
 vi.mock('@/lib/worktree-activation', () => ({
@@ -153,6 +153,19 @@ describe('activity thread host routing', () => {
     expect(mocks.dispatchEvent).not.toHaveBeenCalled()
     expect(mocks.activateTabAndFocusPane).toHaveBeenCalled()
     await vi.waitFor(() => expect(requestAnimationFrame).toHaveBeenCalledTimes(1))
+    expect(mocks.dispatchEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: TOGGLE_FLOATING_TERMINAL_EVENT })
+    )
+  })
+
+  it('opens the floating panel on a floating chat row once its tab is activated', () => {
+    state.settings = { floatingTerminalEnabled: true }
+    state.floatingWorkspacePanelOpen = false
+    mocks.activateStructuredAgentSessionTab.mockReturnValue(true)
+
+    makeActions().selectThread(makeFloatingThread())
+
+    expect(mocks.activateAndRevealWorkspace).not.toHaveBeenCalled()
     expect(mocks.dispatchEvent).toHaveBeenCalledWith(
       expect.objectContaining({ type: TOGGLE_FLOATING_TERMINAL_EVENT })
     )

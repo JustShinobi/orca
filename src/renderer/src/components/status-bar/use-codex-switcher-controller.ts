@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useMountedRef } from '@/hooks/useMountedRef'
 import type { CodexRateLimitAccountsState } from '../../../../shared/managed-account-types'
 import type { ProviderRateLimits } from '../../../../shared/rate-limit-types'
 import { useAppStore } from '../../store'
 import { selectAccountOwnerRateLimits } from '../../store/slices/rate-limits'
 import { defaultScopeHost } from '@/lib/default-creation-host'
-import { useActiveWorkspaceOwnerTarget } from '@/runtime/use-worktree-runtime-target'
+import { useActiveAccountOwner } from '@/runtime/use-worktree-runtime-target'
 import { runtimeTargetEnvironmentId } from '@/runtime/runtime-client-target'
 import {
   fetchProviderAccountsSnapshot,
@@ -41,11 +42,14 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
   const [accountsExpanded, setAccountsExpanded] = useState(false)
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
   const [skipFutureResetConfirm, setSkipFutureResetConfirm] = useState(false)
-  const [accounts, setAccounts] = useState<CodexRateLimitAccountsState>({ accounts: [], activeAccountId: null })
+  const [accounts, setAccounts] = useState<CodexRateLimitAccountsState>({
+    accounts: [],
+    activeAccountId: null
+  })
   const [isSwitching, setIsSwitching] = useState(false)
   const [isRedeemingReset, setIsRedeemingReset] = useState(false)
   const [reauthenticatingAccountId, setReauthenticatingAccountId] = useState<string | null>(null)
-  const mountedRef = useRef(true)
+  const mountedRef = useMountedRef()
   const accountsExpandedRef = useRef(accountsExpanded)
   // Why: Radix item-select is separate from the nested button click, so stopPropagation alone won't prevent the row switch.
   const suppressNextAccountSelectRef = useRef(false)
@@ -70,7 +74,7 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
   const settings = useAppStore((s) => s.settings)
   const runtimeEnvironments = useAppStore((s) => s.runtimeEnvironments)
   // Why: no host picker; the focused workspace's owner, else the default scope host.
-  const runtimeTarget = useActiveWorkspaceOwnerTarget(defaultScopeHost(settings))
+  const { target: runtimeTarget, wslHostDistro } = useActiveAccountOwner(defaultScopeHost(settings))
   const activeRuntimeEnvironmentId = runtimeTargetEnvironmentId(runtimeTarget)
   const hasActiveRuntimeEnvironment = activeRuntimeEnvironmentId !== null
   const providerAccountHostLabel = hasActiveRuntimeEnvironment
@@ -102,14 +106,7 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
     if (mountedRef.current) {
       setAccounts(snapshot.codex)
     }
-  }, [runtimeTarget])
-
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
+  }, [mountedRef, runtimeTarget])
 
   useEffect(() => {
     accountsExpandedRef.current = accountsExpanded
@@ -277,16 +274,18 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
   const selectedRuntimeKey = getCodexStatusRuntimeKey(
     normalizeCodexStatusRuntimeTarget(accountState, toCodexStatusRuntimeTarget(codexTarget))
   )
-  const fallbackWslDistro = getStatusBarPreferredWslDistro(
-    settings,
-    windowsTerminalCapabilities.wslDistros
-  )
+  // A focused WSL host's accounts are this desktop's for its distro, so that group always shows.
+  const fallbackWslDistro =
+    wslHostDistro ??
+    getStatusBarPreferredWslDistro(settings, windowsTerminalCapabilities.wslDistros)
   const switchGroups = buildCodexStatusSwitchGroups(
     accountState,
     toCodexStatusRuntimeTarget(codexTarget),
     {
       fallbackWslDistro,
-      includeFallbackWsl: !hasActiveRuntimeEnvironment && shouldIncludeSettingsWslRuntime(settings),
+      includeFallbackWsl:
+        wslHostDistro !== null ||
+        (!hasActiveRuntimeEnvironment && shouldIncludeSettingsWslRuntime(settings)),
       hostLabel: providerAccountHostLabel
     }
   )

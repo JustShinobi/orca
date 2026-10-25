@@ -10,11 +10,14 @@ import {
 } from './file-explorer-operation-owner'
 import {
   fileExplorerEntriesToTreeNodes,
+  keepOpenedDirectoryLinks,
+  clearFailedOpenedDirectoryLink,
   readFileExplorerDirectory
 } from './file-explorer-directory-listing'
 import { refreshFileExplorerExpandedDirs } from './file-explorer-expanded-dirs-refresh'
 import { collectStaleDirCachePaths } from './file-explorer-stale-dir-cache'
 import { fileExplorerRefreshConcurrency } from './file-explorer-refresh-concurrency'
+import { describeFileExplorerReadError } from './file-explorer-read-error'
 import {
   clearFileExplorerDirsLoading,
   EMPTY_FILE_EXPLORER_LOADING_DIRS,
@@ -134,7 +137,10 @@ export function useFileExplorerTree(
         )
         setDirCache((prev) => ({
           ...prev,
-          [dirPath]: { children, operationOwner: listing.operationOwner }
+          [dirPath]: {
+            children: keepOpenedDirectoryLinks(prev[dirPath]?.children, children, prev),
+            operationOwner: listing.operationOwner
+          }
         }))
         updateLoadingDirPaths((prev) => clearFileExplorerDirsLoading(prev, [dirPath]))
         return true
@@ -147,18 +153,23 @@ export function useFileExplorerTree(
           // empty tree, which made authorization/path bugs look like a real
           // empty worktree. Preserve the message so the UI can distinguish
           // "no files" from "could not read this worktree".
-          setRootError(error instanceof Error ? error.message : String(error))
+          setRootError(describeFileExplorerReadError(error))
           setSourceWorkspaceId(null)
           rootReadFailedRef.current = true
         }
-        setDirCache((prev) => ({
-          ...prev,
-          [dirPath]: {
-            ...prev[dirPath],
-            children: prev[dirPath]?.children ?? [],
-            error: error instanceof Error ? error.message : String(error)
-          }
-        }))
+        setDirCache((prev) =>
+          clearFailedOpenedDirectoryLink(
+            {
+              ...prev,
+              [dirPath]: {
+                ...prev[dirPath],
+                children: prev[dirPath]?.children ?? [],
+                error: describeFileExplorerReadError(error)
+              }
+            },
+            dirPath
+          )
+        )
         updateLoadingDirPaths((prev) => clearFileExplorerDirsLoading(prev, [dirPath]))
         return !options?.failOnError
       }
@@ -178,7 +189,11 @@ export function useFileExplorerTree(
           }
           changed = true
           cacheChanged = true
-          return { ...child, isDirectory: true }
+          return {
+            ...child,
+            isDirectory: true,
+            isDirectoryFromOpenedLink: child.isSymlink === true
+          }
         })
         next[dirPath] = cacheChanged ? { ...cache, children } : cache
       }

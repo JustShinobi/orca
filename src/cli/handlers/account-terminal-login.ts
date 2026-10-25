@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { delimiter } from 'node:path'
-import { stripElectronRunAsNode } from '../runtime/launch'
+import { stripElectronRunAsNode } from '../runtime/orca-app-executable'
 import {
   getVersionManagerBinPaths,
   resolveCliCommand,

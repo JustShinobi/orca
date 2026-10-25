@@ -12,6 +12,7 @@ import type {
 import type { LocalhostWorktreeLabelRoute } from '../../../shared/localhost-worktree-labels'
 import { runWorkspacePortScanForTarget } from './workspace-port-scan-client'
 import { browserUrlForPort, previewBrowserUrlForPort } from './workspace-port-urls'
+import { createBrowserUuid } from './browser-uuid'
 import { BROWSER_SCREENCAST_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import { RUNTIME_BROWSER_UNAVAILABLE_MESSAGE } from './client-creation-action-policy'
 
@@ -96,6 +97,23 @@ export function goToWorkspacePortOwner(port: WorkspacePort): boolean {
   return Boolean(worktreeId && activateAndRevealWorktree(worktreeId))
 }
 
+/** The URL a port opens at: its labelled localhost name when one is set up locally, else its raw URL. */
+export async function resolveWorkspacePortBrowserUrl(args: {
+  port: WorkspacePort
+  runtimeTarget: RuntimeClientTarget
+  localhostLabelRoute?: LocalhostWorktreeLabelRoute | null
+}): Promise<string> {
+  const rawUrl = browserUrlForPort(args.port)
+  if (args.runtimeTarget.kind !== 'local' || !args.localhostLabelRoute) {
+    return rawUrl
+  }
+  try {
+    return (await window.api.localhostWorktreeLabels.register(args.localhostLabelRoute)).url
+  } catch {
+    return rawUrl
+  }
+}
+
 export async function openWorkspacePortInBrowser(args: {
   port: WorkspacePort
   activeWorktreeId?: string | null
@@ -108,37 +126,28 @@ export async function openWorkspacePortInBrowser(args: {
   if (!args.runtimeTarget) {
     return { ok: false, reason: WORKSPACE_PORT_TARGET_UNAVAILABLE_REASON }
   }
-  const rawUrl = browserUrlForPort(args.port)
-  let url = rawUrl
-  if (args.runtimeTarget.kind === 'local' && args.localhostLabelRoute) {
-    try {
-      url = (await window.api.localhostWorktreeLabels.register(args.localhostLabelRoute)).url
-    } catch {
-      url = rawUrl
-    }
-  }
-  if (args.openInOrcaBrowser === false && args.runtimeTarget.kind === 'local') {
-    try {
-      await window.api.shell.openUrl(url)
-      return { ok: true }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      return { ok: false, reason: message || 'Failed to open system browser.' }
-    }
-  }
-
+  const url = await resolveWorkspacePortBrowserUrl({
+    port: args.port,
+    runtimeTarget: args.runtimeTarget,
+    localhostLabelRoute: args.localhostLabelRoute
+  })
   // Why: a remote port with a preview URL renders in the user's own browser
   // (web client: a plain new tab), skipping the screencast-backed remote
   // browser entirely. openInOrcaBrowser=true keeps the embedded flow.
-  if (args.openInOrcaBrowser === false && args.runtimeTarget.kind === 'environment') {
-    const previewUrl = previewBrowserUrlForPort(args.port)
-    if (previewUrl) {
+  if (args.openInOrcaBrowser === false) {
+    const externalUrl =
+      args.runtimeTarget.kind === 'local' ? url : previewBrowserUrlForPort(args.port)
+    if (externalUrl) {
       try {
-        await window.api.shell.openUrl(previewUrl)
+        await window.api.shell.openUrl(externalUrl)
         return { ok: true }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        return { ok: false, reason: message || 'Failed to open preview URL.' }
+        const fallback =
+          args.runtimeTarget.kind === 'local'
+            ? 'Failed to open system browser.'
+            : 'Failed to open preview URL.'
+        return { ok: false, reason: message || fallback }
       }
     }
   }
@@ -164,14 +173,13 @@ export async function openWorkspacePortInBrowser(args: {
         { worktree: toRuntimeWorktreeSelector(worktreeId), url },
         { timeoutMs: 30_000 }
       )
-      const tab = args.createBrowserTab(worktreeId, url, {
+      const browserPageId = createBrowserUuid()
+      args.createBrowserTab(worktreeId, url, {
         activate: true,
-        browserRuntimeEnvironmentId: args.runtimeTarget.environmentId
+        browserRuntimeEnvironmentId: args.runtimeTarget.environmentId,
+        browserPageId
       })
-      if (!tab.activePageId) {
-        return { ok: false, reason: 'Failed to create a browser page.' }
-      }
-      args.setRemoteBrowserPageHandle(tab.activePageId, {
+      args.setRemoteBrowserPageHandle(browserPageId, {
         environmentId: args.runtimeTarget.environmentId,
         remotePageId: remotePage.browserPageId
       })
