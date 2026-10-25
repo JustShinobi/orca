@@ -7,7 +7,8 @@ import {
 import { useAppStore } from '@/store'
 import { sendRuntimePtyInputVerified } from '@/runtime/runtime-terminal-inspection'
 import { getRemoteRuntimePtyEnvironmentId } from '@/runtime/runtime-terminal-stream'
-import { callRuntimeRpc, type RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
+import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
+import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
 import { translate } from '@/i18n/i18n'
 import { buildAgentResumeStartupPlan } from './tui-agent-startup'
 import {
@@ -215,7 +216,6 @@ export async function runAgentRateLimitAutoSwitch(args: {
   }
 
   const stopped = await stopForegroundAgent({
-    settings,
     ptyId: args.ptyId,
     agent: args.agent,
     expectedProcess: resumePlan.expectedProcess
@@ -246,7 +246,6 @@ export async function runAgentRateLimitAutoSwitch(args: {
   }
 
   const launched = await sendRuntimePtyInputVerified(
-    settings,
     args.ptyId,
     `${resumePlan.launchCommand}\r`,
     'launch'
@@ -263,7 +262,6 @@ export async function runAgentRateLimitAutoSwitch(args: {
   }
 
   const resumed = await waitForResumedAgent({
-    settings,
     ptyId: args.ptyId,
     agent: args.agent,
     expectedProcess: resumePlan.expectedProcess
@@ -280,7 +278,7 @@ export async function runAgentRateLimitAutoSwitch(args: {
   }
 
   await waitForAgentReadyInput()
-  const continued = await sendRuntimePtyInputVerified(settings, args.ptyId, 'continue\r', 'driving')
+  const continued = await sendRuntimePtyInputVerified(args.ptyId, 'continue\r', 'driving')
   if (!continued) {
     return {
       ok: false,

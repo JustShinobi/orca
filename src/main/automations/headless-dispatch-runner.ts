@@ -82,6 +82,8 @@ export async function runHeadlessAutomationDispatch(
     runId: run.id,
     status: 'dispatched',
     ...launchRunTarget,
+    // Kept here: a watched run's completion is written without it.
+    ...(precheckResult ? { precheckResult } : {}),
     launchDeadlineAt,
     launchEvidenceAt: null,
     error: null

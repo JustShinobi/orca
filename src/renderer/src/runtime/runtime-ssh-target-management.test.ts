@@ -1,74 +1,86 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { addSshTargetForOwner, importSshConfigForOwner } from './runtime-ssh-target-management'
+import { SSH_TARGET_MANAGEMENT_RUNTIME_CAPABILITY } from '../../../shared/ssh-target-management'
 
-const { callRuntimeRpcMock } = vi.hoisted(() => ({
-  callRuntimeRpcMock: vi.fn()
+const mocks = vi.hoisted(() => ({
+  callRuntimeRpc: vi.fn(),
+  runtimeEnvironmentSupportsCapability: vi.fn()
 }))
 
 vi.mock('./runtime-rpc-client', () => ({
-  callRuntimeRpc: callRuntimeRpcMock
+  callRuntimeRpc: mocks.callRuntimeRpc,
+  runtimeEnvironmentSupportsCapability: mocks.runtimeEnvironmentSupportsCapability
 }))
 
-const target = {
-  label: 'p8',
-  configHost: 'p8',
-  host: '192.0.2.8',
-  port: 22,
-  username: 'jae',
-  identityFile: '~/.ssh/id_ed25519_p8'
-}
+const {
+  addRuntimeSshRepo,
+  addRuntimeSshTarget,
+  browseRuntimeSshDirectory,
+  listRuntimeEditableSshTargets,
+  removeRuntimeSshTarget,
+  RuntimeSshTargetManagementUnsupportedError,
+  updateRuntimeSshTarget
+} = await import('./runtime-ssh-target-management')
 
-describe('runtime SSH target management', () => {
+const input = { label: 'Build', host: 'build.internal', port: 22, username: 'ci' }
+
+const CALLS: [string, () => Promise<unknown>][] = [
+  ['list', () => listRuntimeEditableSshTargets('env-1')],
+  ['add', () => addRuntimeSshTarget('env-1', input)],
+  ['update', () => updateRuntimeSshTarget('env-1', 'ssh-1', input)],
+  ['remove', () => removeRuntimeSshTarget('env-1', 'ssh-1')],
+  ['browse', () => browseRuntimeSshDirectory('env-1', 'ssh-1', '~')],
+  ['add project', () => addRuntimeSshRepo('env-1', { connectionId: 'ssh-1', remotePath: '~/app' })]
+]
+
+describe('managing a paired server SSH targets across versions', () => {
+  const sshApi = { addTarget: vi.fn(), listTargets: vi.fn(), browseDir: vi.fn() }
+
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.stubGlobal('window', {
-      api: {
-        ssh: {
-          addTarget: vi.fn(),
-          importConfig: vi.fn()
-        }
-      }
+    vi.stubGlobal('window', { api: { ssh: sshApi, repos: { addRemote: vi.fn() } } })
+  })
+
+  it.each(CALLS)(
+    'an old server without the capability refuses %s and nothing falls back to this client',
+    async (_name, call) => {
+      mocks.runtimeEnvironmentSupportsCapability.mockResolvedValue(false)
+
+      await expect(call()).rejects.toBeInstanceOf(RuntimeSshTargetManagementUnsupportedError)
+
+      expect(mocks.runtimeEnvironmentSupportsCapability).toHaveBeenCalledWith(
+        'env-1',
+        SSH_TARGET_MANAGEMENT_RUNTIME_CAPABILITY
+      )
+      expect(mocks.callRuntimeRpc).not.toHaveBeenCalled()
+      expect(sshApi.addTarget).not.toHaveBeenCalled()
+      expect(sshApi.listTargets).not.toHaveBeenCalled()
+      expect(sshApi.browseDir).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(CALLS)('a current server is called for %s', async (_name, call) => {
+    mocks.runtimeEnvironmentSupportsCapability.mockResolvedValue(true)
+    mocks.callRuntimeRpc.mockResolvedValue({ targets: [], target: {}, repo: {} })
+
+    await call()
+
+    expect(mocks.callRuntimeRpc.mock.calls[0]?.[0]).toEqual({
+      kind: 'environment',
+      environmentId: 'env-1'
     })
   })
 
-  it('saves a target on the selected Orca server', async () => {
-    const result = { target: { id: 'ssh-p8', ...target }, repoReadoptions: [] }
-    callRuntimeRpcMock.mockResolvedValueOnce(result)
+  it('sends a whole target so the server can clear omitted fields', async () => {
+    mocks.runtimeEnvironmentSupportsCapability.mockResolvedValue(true)
+    mocks.callRuntimeRpc.mockResolvedValue({ target: { id: 'ssh-1', ...input } })
 
-    await expect(
-      addSshTargetForOwner({ id: 'env-linux', label: 'linux-jae' }, target)
-    ).resolves.toEqual(result)
+    await updateRuntimeSshTarget('env-1', 'ssh-1', input)
 
-    expect(callRuntimeRpcMock).toHaveBeenCalledWith(
-      { kind: 'environment', environmentId: 'env-linux' },
-      'ssh.addTarget',
-      { target }
+    expect(mocks.callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'env-1' },
+      'ssh.updateTarget',
+      { targetId: 'ssh-1', target: input },
+      {}
     )
-    expect(window.api.ssh.addTarget).not.toHaveBeenCalled()
-  })
-
-  it('imports SSH config on the selected Orca server', async () => {
-    const result = { targets: [], repoReadoptions: [] }
-    callRuntimeRpcMock.mockResolvedValueOnce(result)
-
-    await expect(importSshConfigForOwner({ id: 'env-linux', label: 'linux-jae' })).resolves.toEqual(
-      result
-    )
-
-    expect(callRuntimeRpcMock).toHaveBeenCalledWith(
-      { kind: 'environment', environmentId: 'env-linux' },
-      'ssh.importConfig'
-    )
-    expect(window.api.ssh.importConfig).not.toHaveBeenCalled()
-  })
-
-  it('keeps local SSH management on the desktop host', async () => {
-    const result = { target: { id: 'ssh-local', ...target }, repoReadoptions: [] }
-    vi.mocked(window.api.ssh.addTarget).mockResolvedValueOnce(result)
-
-    await expect(addSshTargetForOwner(null, target)).resolves.toEqual(result)
-
-    expect(window.api.ssh.addTarget).toHaveBeenCalledWith({ target })
-    expect(callRuntimeRpcMock).not.toHaveBeenCalled()
   })
 })

@@ -47,8 +47,9 @@ import { createFeedbackDraftSlice } from './slices/feedback-draft'
 import { createTaskCreationDraftsSlice } from './slices/task-creation-drafts'
 import { createRemoteServerUpdatesSlice } from './slices/remote-server-updates'
 import { createTerminalQuickCommandHostsSlice } from './slices/terminal-quick-command-hosts'
+import { createStructuredSessionLaunchDirectorySlice } from './slices/structured-session-launch-directories'
 import { e2eConfig } from '@/lib/e2e-config'
-import type { createWebRuntimeSessionTerminal } from '@/runtime/web-runtime-session'
+import type { createWebRuntimeSessionTerminal } from '@/runtime/web-runtime-terminal-creation'
 import {
   registerHttpLinkStoreAccessor,
   registerWorkspaceHttpLinkBrowserOpener
@@ -123,7 +124,8 @@ export const useAppStore = create<AppState>()(
         ...createFeedbackDraftSlice(...a),
         ...createTaskCreationDraftsSlice(...a),
         ...createRemoteServerUpdatesSlice(...a),
-        ...createTerminalQuickCommandHostsSlice(...a)
+        ...createTerminalQuickCommandHostsSlice(...a),
+        ...createStructuredSessionLaunchDirectorySlice(...a)
       }
     })
   )
@@ -159,7 +161,9 @@ if ((import.meta.env.DEV || e2eConfig.exposeStore) && typeof window !== 'undefin
   if (e2eConfig.exposeStore) {
     testWindow.__webRuntimeSessionE2E = {
       createTerminal: async (args: Parameters<typeof createWebRuntimeSessionTerminal>[0]) =>
-        (await import('@/runtime/web-runtime-session')).createWebRuntimeSessionTerminal(args)
+        (await import('@/runtime/web-runtime-terminal-creation')).createWebRuntimeSessionTerminal(
+          args
+        )
     }
   }
 }

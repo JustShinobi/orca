@@ -1,15 +1,15 @@
+import { presentAgentLaunchTab } from '@/lib/agent-launch-tab-presentation'
+import { releaseAgentLaunchPaneSpawn } from '@/lib/agent-launch-pane-spawn-hold'
 import { requestBackgroundTerminalWorktreeMount } from '@/components/terminal/background-terminal-worktree-mount'
-import { hasRegisteredRuntimeTerminalTab } from '@/runtime/sync-runtime-graph'
+import { hasRegisteredRuntimeTerminalTab } from '@/runtime/mounted-terminal-tab-registry'
 import { planMobileTerminalTabMount } from '@/lib/mobile-terminal-tab-mount'
 import { resolveTerminalTabPtyOwnership } from '@/lib/terminal-tab-for-pty-id'
 import { SPLIT_TERMINAL_PANE_EVENT } from '@/constants/terminal'
 import type { SplitTerminalPaneDetail } from '@/constants/terminal'
 import { singlePaneLayoutSnapshot } from '@/store/slices/terminal-helpers'
 import { verifyTerminalRevealIdentity } from '@/lib/terminal-reveal-identity'
-import { initialAgentTabViewModeProps } from '@/lib/native-chat-initial-view-mode'
-import { getConnectionIdFromState } from '@/lib/connection-context'
-import { isNativeChatTranscriptLocalReadable } from '@/lib/native-chat-transcript-readability'
 import { tryMakePaneKey } from './agent-status-routing'
+import { wasAgentLaunchPaneClosedByUser } from '@/lib/agent-launch-pane-closes'
 import { useAppStore } from '../../store'
 import {
   activateExistingLeafInLayout,
@@ -39,6 +39,7 @@ export function registerTerminalPresentationIpcBridge(unsubs: (() => void)[]): v
         focus,
         presentation,
         surfaceOwner,
+        agentLaunchViewer,
         tabId,
         leafId,
         splitFromLeafId,
@@ -52,12 +53,23 @@ export function registerTerminalPresentationIpcBridge(unsubs: (() => void)[]): v
             activate,
             focus
           })
-          const shouldActivate = terminalPresentation === 'focused'
-          const shouldSurfaceOwner = terminalPresentation !== 'background' && surfaceOwner !== false
+          const shouldActivate =
+            agentLaunchViewer === undefined && terminalPresentation === 'focused'
+          const shouldSurfaceOwner =
+            agentLaunchViewer === undefined &&
+            terminalPresentation !== 'background' &&
+            surfaceOwner !== false
           if (shouldActivate) {
             activateTerminalInitiatedWorktree(store, worktreeId)
           }
           const worktreeTabs = store.tabsByWorktree[worktreeId] ?? []
+          if (ptyId && tabId && leafId && wasAgentLaunchPaneClosedByUser(tabId, leafId)) {
+            // The user closed the launch's tab or pane while it waited. That close wins: it stays
+            // closed, and its agent stops, as closing any tab stops what runs in it.
+            // The host stops the same agent; a second kill of a retired PTY may reject, harmlessly.
+            window.api.pty.kill(ptyId).catch(() => {})
+            throw new Error('agent_launch_tab_closed')
+          }
           // Why: a split pane revealed from mobile is only bound in the persisted
           // layout until its pane mounts; missing it minted a duplicate tab (#10486).
           const ownership = ptyId
@@ -80,25 +92,25 @@ export function registerTerminalPresentationIpcBridge(unsubs: (() => void)[]): v
             throw new Error(`Terminal tab ${tabId} not found`)
           }
           const reusedTab = existingTab ?? splitTargetTab
+          if (ptyId && tabId && leafId && reusedTab?.agentLaunchPane?.leafId === leafId) {
+            // A launch pane this window made and the host never showed early: the host now holds it,
+            // so its spawn may attach instead of waiting out the whole launch.
+            releaseAgentLaunchPaneSpawn(tabId, leafId)
+          }
           const tab =
             reusedTab ??
             (ptyId
               ? store.createTab(worktreeId, undefined, undefined, {
                   initialPtyId: ptyId,
-                  activate: shouldActivate,
+                  activate:
+                    shouldActivate ||
+                    agentLaunchViewer === 'focus-window' ||
+                    agentLaunchViewer === 'focus-in-workspace',
                   ...(launchAgent
                     ? {
                         launchAgent,
                         // Why: a paired client resolved explicit mode before PTY materialization; only omitted mode uses host defaults.
-                        ...(viewMode
-                          ? { viewMode }
-                          : initialAgentTabViewModeProps(store.settings, {
-                              agent: launchAgent,
-                              nativeChatTranscriptIsLocalReadable:
-                                isNativeChatTranscriptLocalReadable(
-                                  getConnectionIdFromState(store, worktreeId)
-                                )
-                            }))
+                        ...(viewMode ? { viewMode } : {})
                       }
                     : {}),
                   ...(cwd ? { startupCwd: cwd } : {}),
@@ -132,6 +144,9 @@ export function registerTerminalPresentationIpcBridge(unsubs: (() => void)[]): v
           if (shouldSurfaceOwner) {
             store.revealWorktreeInSidebar(worktreeId)
             focusTerminalInitiatedTab(tab.id, leafId, worktreeId)
+          }
+          if (agentLaunchViewer) {
+            presentAgentLaunchTab(agentLaunchViewer, worktreeId, tab.id, leafId)
           }
           // Why: only stamp the runtime title on fresh tabs; reused tabs may have a user customTitle it would overwrite on focus.
           if (title && !reusedTab) {

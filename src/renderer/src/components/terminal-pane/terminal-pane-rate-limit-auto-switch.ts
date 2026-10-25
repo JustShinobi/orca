@@ -5,7 +5,7 @@ import { getConnectionId } from '@/lib/connection-context'
 import { runAgentRateLimitAutoSwitch } from '@/lib/agent-rate-limit-auto-switch-runner'
 import type { AutoSwitchRateLimitAgent } from '../../../../shared/agent-rate-limit-detection'
 import type { AgentProviderSessionMetadata } from '../../../../shared/agent-session-resume'
-import type { PtyTransport } from './pty-transport'
+import type { PtyTransport } from './pty-transport-types'
 
 export type AgentRateLimitAutoSwitchEvent = {
   paneId: number

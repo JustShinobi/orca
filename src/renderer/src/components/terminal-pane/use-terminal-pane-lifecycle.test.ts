@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   applyTerminalPaneCloseRequest,
+  retireMountedTerminalPaneSurface,
+  suppressIntentionalPaneCloseExit
+} from './terminal-pane-lifecycle-close'
+import {
   applyTerminalScrollbackRowsToMountedPanes,
   clearQueuedInitialCwdAfterFirstPane,
   createQueuedStartupConsumer,
@@ -13,11 +17,9 @@ import {
   resolveQueuedInitialCwd,
   replayLayoutWithOneShotParkIntent,
   retryTerminalPaneRecoveriesOnVisibilityResume,
-  retireMountedTerminalPaneSurface,
   shouldDetachPaneTransportOnUnmount,
-  splitPaneWithOneShotStartup,
-  suppressIntentionalPaneCloseExit
-} from './use-terminal-pane-lifecycle'
+  splitPaneWithOneShotStartup
+} from './terminal-pane-lifecycle-primitives'
 
 describe('applyTerminalPaneCloseRequest', () => {
   it('detaches a rolled-back split surface without closing its PTY', () => {

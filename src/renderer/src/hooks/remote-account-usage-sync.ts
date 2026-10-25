@@ -53,7 +53,7 @@ export function useRemoteAccountUsageSync(): void {
       }
       watcher?.close()
       watcher = watchProviderAccounts(
-        { activeRuntimeEnvironmentId: environmentId },
+        { kind: 'environment', environmentId },
         {
           onSnapshot: (snapshot) => {
             if (disposed) {

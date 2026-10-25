@@ -2,7 +2,6 @@ import type {
   AgentProviderSessionMetadata,
   SleepingAgentLaunchConfig
 } from './agent-session-resume'
-import type { AgentPromptSubmitOutcome } from './agent-prompt-submission'
 import type { StartupCommandDelivery } from './codex-startup-delivery'
 import type { ExecutionHostId } from './execution-host'
 import type { PtyIncarnationId } from './pty-incarnation'
@@ -11,8 +10,12 @@ import type { RuntimeMobileSessionTabsResult } from './runtime-session-contracts
 import type { TabGroupLayoutNode } from './tab-types'
 import type { TerminalExitCause } from './terminal-exit-cause'
 import type { TerminalPaneLayoutNode } from './terminal-tab-types'
-import type { RuntimeTerminalWaitBlockedReason } from './terminal-wait-blocked-reason-legacy-alias'
 import type { TerminalAgent, TuiAgent } from './terminal-agent'
+export type {
+  RuntimeTerminalSend,
+  RuntimeTerminalPromptStage,
+  RuntimeTerminalPromptDelivery
+} from './runtime-terminal-send-contract'
 
 export type RuntimeTerminalSummary = {
   handle: string
@@ -212,31 +215,6 @@ export type RuntimeTerminalRename = {
   title: string | null
 }
 
-export type RuntimeTerminalSend = {
-  handle: string
-  accepted: boolean
-  bytesWritten: number
-  refusedReason?: 'no-agent' | 'permission'
-  submitted?: AgentPromptSubmitOutcome
-  prompt?: RuntimeTerminalPromptDelivery
-}
-
-export type RuntimeTerminalPromptStage = 'input_accepted' | 'turn_started'
-
-export type RuntimeTerminalPromptDelivery = {
-  requestId: string
-  stages: RuntimeTerminalPromptStage[]
-  provider: 'claude' | 'codex' | 'unsupported' | 'old-host'
-  observation: 'supported' | 'unsupported' | 'incarnation_replaced' | 'permission'
-  processIncarnation: string
-  generation: number
-  baselineWorkingSequence: number
-  /** Hook turn-start timestamp before this prompt was accepted. */
-  baselineExplicitWorkingStartedAt?: number | null
-  /** Permission observations seen before this prompt was accepted. */
-  baselinePermissionSequence?: number
-}
-
 export type RuntimeTerminalAgentStatusState = 'working' | 'permission' | 'idle' | null
 
 export type RuntimeTerminalAgentStatus = {
@@ -338,7 +316,23 @@ export type RuntimeTerminalClose = {
 
 export type RuntimeTerminalWaitCondition = 'exit' | 'tui-idle'
 
-export type { RuntimeTerminalWaitBlockedReason } from './terminal-wait-blocked-reason-legacy-alias'
+// Why both spellings: the codex-* members were published by every host before the agent-neutral
+// rename, so they are permanent — a client still has to read them off an older host. This build
+// keeps a codex-* reason only where the matched wording is plausibly Codex's own; every matcher
+// that inspects no agent publishes the agent-* spelling.
+export type RuntimeTerminalWaitBlockedReason =
+  | 'codex-update-prompt'
+  | 'codex-trust-workspace'
+  | 'codex-cwd-prompt'
+  | 'codex-model-migration-prompt'
+  | 'codex-hooks-review-prompt'
+  | 'codex-interactive-prompt'
+  | 'agent-update-prompt'
+  | 'agent-trust-workspace'
+  | 'agent-cwd-prompt'
+  | 'agent-hooks-review-prompt'
+  | 'agent-interactive-prompt'
+  | 'agent-approval-prompt'
 
 export type RuntimeTerminalWait = {
   handle: string

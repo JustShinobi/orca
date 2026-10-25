@@ -19,6 +19,7 @@ export type WebRuntimeTransportSubscription = {
 }
 
 export type WebRuntimeSubscribeOptions = {
+  signal?: AbortSignal
   timeoutMs?: number
   buildUnsubscribe?: (params: unknown) => { method: string; params: unknown } | null
 }

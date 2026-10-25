@@ -87,7 +87,7 @@ describe('useRemoteAccountUsageSync', () => {
     renderHook(() => useRemoteAccountUsageSync())
 
     expect(watchProviderAccounts).toHaveBeenCalledWith(
-      { activeRuntimeEnvironmentId: 'env-1' },
+      { kind: 'environment', environmentId: 'env-1' },
       expect.any(Object)
     )
 
@@ -115,7 +115,7 @@ describe('useRemoteAccountUsageSync', () => {
     expect(closeWatcher).toHaveBeenCalled()
     expect(useAppStore.getState().remoteRateLimits).toBeNull()
     expect(watchProviderAccounts).toHaveBeenLastCalledWith(
-      { activeRuntimeEnvironmentId: 'env-2' },
+      { kind: 'environment', environmentId: 'env-2' },
       expect.any(Object)
     )
   })

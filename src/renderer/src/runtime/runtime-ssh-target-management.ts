@@ -1,40 +1,107 @@
-import type {
-  SshConfigImportResult,
-  SshTarget,
-  SshTargetAddResult
-} from '../../../shared/ssh-types'
-import { callRuntimeRpc } from './runtime-rpc-client'
+import type { Repo } from '../../../shared/repo-types'
+import {
+  SSH_TARGET_MANAGEMENT_RUNTIME_CAPABILITY,
+  type SshEditableTarget,
+  type SshEditableTargetAddResult,
+  type SshEditableTargetInput
+} from '../../../shared/ssh-target-management'
+import type { FilesystemPathFlavor } from '../../../shared/filesystem-entry-types'
+import { callRuntimeRpc, runtimeEnvironmentSupportsCapability } from './runtime-rpc-client'
 
-export type SshTargetOwnerEnvironment = { id: string; label: string }
-
-/** Add an SSH target locally or through the paired runtime selected by the caller. */
-export function addSshTargetForOwner(
-  owner: SshTargetOwnerEnvironment | null,
-  target: Omit<SshTarget, 'id'>,
-  addLocalTarget: (args: { target: Omit<SshTarget, 'id'> }) => Promise<SshTargetAddResult> = (
-    args
-  ) => window.api.ssh.addTarget(args)
-): Promise<SshTargetAddResult> {
-  if (!owner) {
-    return addLocalTarget({ target })
+/** The paired server predates server SSH management; the caller shows "update the server". */
+export class RuntimeSshTargetManagementUnsupportedError extends Error {
+  constructor() {
+    super('Update this Orca server to manage its SSH hosts from here.')
+    this.name = 'RuntimeSshTargetManagementUnsupportedError'
   }
-  return callRuntimeRpc<SshTargetAddResult>(
-    { kind: 'environment', environmentId: owner.id },
-    'ssh.addTarget',
-    { target }
+}
+
+export function runtimeSupportsSshTargetManagement(environmentId: string): Promise<boolean> {
+  return runtimeEnvironmentSupportsCapability(
+    environmentId,
+    SSH_TARGET_MANAGEMENT_RUNTIME_CAPABILITY
   )
 }
 
-/** Import OpenSSH hosts locally or through the paired runtime selected by the caller. */
-export function importSshConfigForOwner(
-  owner: SshTargetOwnerEnvironment | null,
-  importLocalConfig: () => Promise<SshConfigImportResult> = () => window.api.ssh.importConfig()
-): Promise<SshConfigImportResult> {
-  if (!owner) {
-    return importLocalConfig()
+// Why every call checks: an old server would answer method_not_found at best; there is never a
+// local fallback, because this client's own SSH hosts are a different machine's.
+async function callSshTargetManagement<T>(
+  environmentId: string,
+  method: string,
+  params?: unknown,
+  timeoutMs?: number
+): Promise<T> {
+  if (!(await runtimeSupportsSshTargetManagement(environmentId))) {
+    throw new RuntimeSshTargetManagementUnsupportedError()
   }
-  return callRuntimeRpc<SshConfigImportResult>(
-    { kind: 'environment', environmentId: owner.id },
-    'ssh.importConfig'
+  return callRuntimeRpc<T>(
+    { kind: 'environment', environmentId },
+    method,
+    params,
+    timeoutMs === undefined ? {} : { timeoutMs }
   )
+}
+
+export async function listRuntimeEditableSshTargets(
+  environmentId: string
+): Promise<SshEditableTarget[]> {
+  const result = await callSshTargetManagement<{ targets: SshEditableTarget[] }>(
+    environmentId,
+    'ssh.listEditableTargets'
+  )
+  return result.targets
+}
+
+export function addRuntimeSshTarget(
+  environmentId: string,
+  target: SshEditableTargetInput
+): Promise<SshEditableTargetAddResult> {
+  return callSshTargetManagement(environmentId, 'ssh.addTarget', { target })
+}
+
+export async function updateRuntimeSshTarget(
+  environmentId: string,
+  targetId: string,
+  target: SshEditableTargetInput
+): Promise<SshEditableTarget> {
+  const result = await callSshTargetManagement<{ target: SshEditableTarget }>(
+    environmentId,
+    'ssh.updateTarget',
+    { targetId, target }
+  )
+  return result.target
+}
+
+export async function removeRuntimeSshTarget(
+  environmentId: string,
+  targetId: string
+): Promise<void> {
+  await callSshTargetManagement(environmentId, 'ssh.removeTarget', { targetId })
+}
+
+export type RuntimeSshDirectoryListing = {
+  entries: { name: string; isDirectory: boolean }[]
+  resolvedPath: string
+  pathFlavor: FilesystemPathFlavor
+}
+
+export function browseRuntimeSshDirectory(
+  environmentId: string,
+  targetId: string,
+  dirPath: string
+): Promise<RuntimeSshDirectoryListing> {
+  // Why 20s: the server bounds its own SSH listing at 15s.
+  return callSshTargetManagement(environmentId, 'ssh.browseDir', { targetId, dirPath }, 20_000)
+}
+
+export async function addRuntimeSshRepo(
+  environmentId: string,
+  args: { connectionId: string; remotePath: string; displayName?: string; kind?: 'git' | 'folder' }
+): Promise<Repo> {
+  const result = await callSshTargetManagement<{ repo: Repo }>(
+    environmentId,
+    'repo.addRemote',
+    args
+  )
+  return result.repo
 }

@@ -32,7 +32,7 @@ import { agentMainAgentVerdict } from '../../../../shared/agent-main-agent-verdi
 import { useStructuredAgentSessionLaunchLifecycle } from '@/lib/structured-agent-session-launch-registry'
 import { useStructuredAgentSessionLaunchFailedAt } from '@/lib/structured-agent-session-launch-failed-at'
 import { useAppStore } from '@/store'
-import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
+import type { RuntimeClientTarget } from '../../../../shared/runtime-client-target'
 import {
   structuredAgentSessionOwnerForTab,
   structuredAgentSessionTargetForHost
@@ -63,6 +63,23 @@ export function useStructuredAgentSessionStatusSummary(
   return { summary, observation }
 }
 
+/** The host status's option values as one stamp: another device's pick moves it, so options re-read. */
+export function useStructuredAgentSessionOptionStamp(
+  sessionId: string,
+  target: RuntimeClientTarget
+): string {
+  const feed = useMemo(() => getStructuredAgentSessionStatusFeed(target), [target])
+  useEffect(() => feed.activate(), [feed])
+  return useSyncExternalStore(
+    feed.subscribe,
+    () => {
+      const summary = feed.getSnapshot().get(sessionId)
+      return `${summary?.model ?? ''}|${summary?.permissionMode ?? ''}`
+    },
+    () => ''
+  )
+}
+
 /** Only the host's startup phase, so a chat re-renders when that changes, not on every status. */
 export function useStructuredAgentSessionHostExecutionPhase(
   sessionId: string,
@@ -73,6 +90,50 @@ export function useStructuredAgentSessionHostExecutionPhase(
   return useSyncExternalStore(
     feed.subscribe,
     () => feed.getSnapshot().get(sessionId)?.hostExecutionPhase ?? null,
+    () => null
+  )
+}
+
+/** Whether the host says a person's Stop is still ending the work; an older host never does. */
+export function useStructuredAgentSessionHostStopping(
+  sessionId: string,
+  target: RuntimeClientTarget
+): boolean {
+  const feed = useMemo(() => getStructuredAgentSessionStatusFeed(target), [target])
+  useEffect(() => feed.activate(), [feed])
+  return useSyncExternalStore(
+    feed.subscribe,
+    () => feed.getSnapshot().get(sessionId)?.stopping === true,
+    () => false
+  )
+}
+
+/** Startup phase, Stop and option stamp, each re-rendering the chat only on a change. */
+export function useStructuredAgentSessionHostExecution(
+  sessionId: string,
+  target: RuntimeClientTarget
+): {
+  phase: ReturnType<typeof useStructuredAgentSessionHostExecutionPhase>
+  stopping: boolean
+  optionStamp: string
+} {
+  return {
+    phase: useStructuredAgentSessionHostExecutionPhase(sessionId, target),
+    stopping: useStructuredAgentSessionHostStopping(sessionId, target),
+    optionStamp: useStructuredAgentSessionOptionStamp(sessionId, target)
+  }
+}
+
+/** Only the host's rewind recovery latch, so a chat re-renders when that changes, not on every status. */
+export function useStructuredAgentSessionRewindBlockedReason(
+  sessionId: string,
+  target: RuntimeClientTarget
+): NonNullable<AgentSessionStatusSummary['rewindBlockedReason']> | null {
+  const feed = useMemo(() => getStructuredAgentSessionStatusFeed(target), [target])
+  useEffect(() => feed.activate(), [feed])
+  return useSyncExternalStore(
+    feed.subscribe,
+    () => feed.getSnapshot().get(sessionId)?.rewindBlockedReason ?? null,
     () => null
   )
 }
@@ -159,7 +220,8 @@ function projectStatus(
   const agentStatus = structuredAgentSessionAgentStatus({
     status: summary.status,
     childWork: children ?? summary.backgroundTasks,
-    turnOutcome: summary.turnOutcome
+    turnOutcome: summary.turnOutcome,
+    ...(summary.stopping ? { stopping: summary.stopping } : {})
   })
   const current = store.agentStatusByPaneKey?.[paneKey]
   // Same continuity rule as the host ingest, on the main agent's own clock.
@@ -275,6 +337,21 @@ function StructuredAgentSessionOwnedStatusProjection({
   useEffect(() => {
     projectStatus(tab, summary, observation, launchFailedAt)
   }, [summary, observation, tab, launchFailedAt])
+  const launchDirectory = summary?.launchDirectory
+  useEffect(() => {
+    // Why local only: a remote host's path is in its syntax, and floating chats only run locally.
+    useAppStore
+      .getState()
+      .setStructuredSessionLaunchDirectory(
+        tab.id,
+        tab.entityId,
+        target.kind === 'local' ? launchDirectory : undefined
+      )
+  }, [launchDirectory, target.kind, tab.id, tab.entityId])
+  useEffect(
+    () => () => useAppStore.getState().clearStructuredSessionLaunchDirectory(tab.id, tab.entityId),
+    [tab.entityId, tab.id]
+  )
   useEffect(
     () => () =>
       useAppStore.getState().removeAgentStatus(structuredAgentSessionPaneKey(tab.id, tab.entityId)),

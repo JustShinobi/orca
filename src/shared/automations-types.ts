@@ -7,15 +7,8 @@ export type AutomationExecutionTargetType = 'local' | 'ssh'
 export type AutomationSchedulerOwner = 'local_host_service' | 'ssh_bridge' | 'remote_host_service'
 export type AutomationMissedRunPolicy = 'run_once_within_grace'
 export type AutomationRunStatus =
-  | 'pending'
-  | 'dispatching'
-  | 'dispatched'
-  | 'completed'
-  | 'skipped_precheck'
-  | 'skipped_missed'
-  | 'skipped_unavailable'
-  | 'skipped_needs_interactive_auth'
-  | 'dispatch_failed'
+  | 'pending' | 'dispatching' | 'dispatched' | 'completed' | 'skipped_precheck'
+  | 'skipped_missed' | 'skipped_unavailable' | 'skipped_needs_interactive_auth' | 'dispatch_failed'
 export type AutomationRunTrigger = 'scheduled' | 'manual'
 
 /** Statuses a run can never leave; only these are safe to evict from history. */
@@ -35,13 +28,8 @@ export type AutomationRunUsageProvider = 'claude' | 'codex'
 export type AutomationRunUsageStatus = 'known' | 'unavailable'
 export type AutomationRunUsageAttribution = 'provider_session_time_window'
 export type AutomationRunUsageUnavailableReason =
-  | 'run_not_finished'
-  | 'provider_unsupported'
-  | 'remote_usage_unavailable'
-  | 'usage_not_enabled'
-  | 'scan_failed'
-  | 'no_matching_session'
-  | 'ambiguous_session'
+  | 'run_not_finished' | 'provider_unsupported' | 'remote_usage_unavailable'
+  | 'usage_not_enabled' | 'scan_failed' | 'no_matching_session' | 'ambiguous_session'
 
 export type AutomationRunUsage = {
   status: AutomationRunUsageStatus
@@ -96,6 +84,8 @@ export type Automation = {
   prompt: string
   precheck: AutomationPrecheck | null
   agentId: TuiAgent
+  /** Saved text appended to the host's default agent Arguments on each fresh run; absent means none. */
+  extraAgentArgs?: string
   /** Why: runContext carries the logical project + host setup identity for
    *  multi-host projects; projectId remains only as the legacy repo-id storage
    *  field for pre-host-context automations.
@@ -186,6 +176,8 @@ export type AutomationCreateInput = {
   prompt: string
   precheck?: AutomationPrecheck | null
   agentId: TuiAgent
+  /** Empty or whitespace means no extras. */
+  extraAgentArgs?: string
   runContext?: WorkspaceRunContext | null
   sourceContext?: TaskSourceContext | null
   /** @deprecated Legacy repo-id compatibility field required for older stored
@@ -210,6 +202,7 @@ export type AutomationUpdateInput = Partial<
     | 'prompt'
     | 'precheck'
     | 'agentId'
+    | 'extraAgentArgs'
     | 'runContext'
     | 'sourceContext'
     | 'projectId'

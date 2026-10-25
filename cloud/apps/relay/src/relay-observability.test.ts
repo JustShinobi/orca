@@ -9,6 +9,7 @@ import {
   RelayObservability,
   type RelayProcessCounts
 } from './relay-observability.js'
+import { RELAY_FIX_LEVEL } from './relay-fix-level.js'
 
 const counts: RelayProcessCounts = {
   totalConnections: 9,
@@ -57,6 +58,39 @@ function renameStageKeys(bucket: unknown): unknown {
 }
 
 describe('relay observability', () => {
+  it('stamps every runtime metrics line with the fix level', () => {
+    const entries: Array<Record<string, unknown>> = []
+    const observability = new RelayObservability(
+      { role: 'cell', cellId: 'production-gce-c25', region: 'asia-east2' },
+      (entry) => entries.push(entry)
+    )
+    observability.flush(counts)
+    expect(entries[0]).toMatchObject({
+      event: 'orca_relay_runtime_metrics',
+      fixLevel: RELAY_FIX_LEVEL
+    })
+    expect(RELAY_FIX_LEVEL).toBeGreaterThanOrEqual(1)
+  })
+
+  // Why: a director whose loop froze for 134 s still reported a 68 ms p99 (staging 2026-10-11).
+  it('reports one long event-loop freeze as the window max', async () => {
+    const entries: Array<Record<string, unknown>> = []
+    const observability = new RelayObservability(
+      { role: 'director', cellId: 'director', region: 'us-central1' },
+      (entry) => entries.push(entry)
+    )
+    observability.start(() => counts, 3_600_000)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const frozenUntil = performance.now() + 300
+    while (performance.now() < frozenUntil) {
+      // Holds the loop the way a blocking connect() does.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    observability.flush(counts)
+    observability.stop()
+    expect(entries[0]!.eventLoopDelayMsMax).toBeGreaterThanOrEqual(250)
+  })
+
   it('emits safe readiness dependency outcomes', () => {
     const entries: Array<Record<string, unknown>> = []
     const observability = new RelayObservability(

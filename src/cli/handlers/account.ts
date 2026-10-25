@@ -1,116 +1,195 @@
-import { createHash } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import type { CommandHandler, HandlerContext } from '../dispatch'
 import { printResult } from '../format'
 import { RuntimeClientError } from '../runtime-client'
+import { stripElectronRunAsNode } from '../runtime/launch'
 import { rejectRemoteSelectionFlags } from '../remote-selection-flag-rejection'
 import {
-  deleteActiveClaudeKeychainCredentialsStrict,
-  readActiveClaudeKeychainCredentialsStrict,
-  writeActiveClaudeKeychainCredentials
-} from '../../main/claude-accounts/keychain'
-import { ACCOUNT_IMPORT_RUNTIME_CAPABILITY } from '../../shared/protocol-version'
+  buildWslExecArgs,
+  buildWslLoginShellCommand,
+  quotePosixShell
+} from '../../shared/wsl-login-shell-command'
+import {
+  getVersionManagerBinPaths,
+  resolveCliCommand,
+  withCliRuntimeOnPath
+} from '../../shared/node-cli-command-resolution'
+import {
+  getSpawnArgsForWindows,
+  UnsafeWindowsBatchArgumentsError,
+  WINDOWS_BATCH_UNSAFE_CHARACTERS_LABEL
+} from '../../shared/windows-batch-spawn'
+import { stdioForWindowsInteractiveChild } from '../../shared/windows-console-input'
+import {
+  ACCOUNT_IMPORT_RUNTIME_CAPABILITY,
+  CLAUDE_SIGN_IN_RUNTIME_CAPABILITY
+} from '../../shared/protocol-version'
+import type { RuntimeStatus } from '../../shared/runtime-types'
 import type {
-  RuntimeAccountProvider,
-  RuntimeAccountsSnapshot,
-  RuntimeStatus
-} from '../../shared/runtime-types'
-import type {
+  ClaudeAccountSignIn,
   ClaudeRateLimitAccountsState,
   CodexRateLimitAccountsState,
   ManagedDataAccountsState
 } from '../../shared/managed-account-types'
-import {
-  formatAccountRemoveResult,
-  formatAccountSelectResult,
-  formatAccountsBlock,
-  formatAccountsList
-} from '../accounts-format'
-import { addAccountRemote } from './account-remote-login'
-import { runAgentLoginInTerminal } from './account-terminal-login'
 import {
   type InteractiveLoginSession,
   withInteractiveLoginCleanup
 } from './interactive-login-interruption'
 import { getWslAccountTarget } from './account-wsl-location'
 import { addDataAccount, listDataAccounts, mutateDataAccount } from './data-account-commands'
-import { formatDataAccounts } from './account-list-format'
+import { formatAccountsBlock, formatDataAccounts } from './account-list-format'
 
-async function cleanupClaudeLoginArtifacts(
-  configDir: string,
-  legacyCredentials: string | null,
-  restoreLegacyCredentials: boolean
-): Promise<void> {
-  const errors: unknown[] = []
-  if (process.platform === 'darwin') {
-    try {
-      await deleteActiveClaudeKeychainCredentialsStrict(configDir)
-    } catch (error) {
-      errors.push(error)
-    }
-    if (restoreLegacyCredentials) {
-      try {
-        await (legacyCredentials
-          ? writeActiveClaudeKeychainCredentials(legacyCredentials)
-          : deleteActiveClaudeKeychainCredentialsStrict())
-      } catch (error) {
-        errors.push(error)
-      }
-    }
-  }
-  try {
-    rmSync(configDir, { recursive: true, force: true })
-  } catch (error) {
-    errors.push(error)
-  }
-  if (errors.length > 0) {
-    throw new AggregateError(errors, 'Failed to clean up Claude login artifacts.')
-  }
+// Why: add returns just that provider's state; list returns the full snapshot.
+type AccountsListSnapshot = {
+  opencode?: ManagedDataAccountsState
+  devin?: ManagedDataAccountsState
+  claude: ClaudeRateLimitAccountsState
+  codex: CodexRateLimitAccountsState
 }
 
-/** Logs into a Claude account in a temp config dir, then registers it with the local runtime. */
+function addAgentNodePaths(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const pathKey =
+    process.platform === 'win32' && env.Path !== undefined && env.PATH === undefined
+      ? 'Path'
+      : 'PATH'
+  const currentEntries = (env[pathKey] ?? '').split(delimiter).filter(Boolean)
+  const existing = new Set(currentEntries)
+  const missing = getVersionManagerBinPaths().filter((entry) => !existing.has(entry))
+  if (missing.length > 0) {
+    env[pathKey] = [...missing, ...currentEntries].join(delimiter)
+  }
+  return env
+}
+
+/**
+ * Runs the real agent login attached to the user's terminal so the OAuth
+ * URL/device-code prompt is visible and the code can be pasted back — the desktop
+ * GUI flow drives this via a browser Orca can't reach on a headless host.
+ */
+async function runAgentLoginInTerminal(
+  command: string,
+  args: string[],
+  extraEnv: Record<string, string>,
+  json: boolean,
+  session: InteractiveLoginSession
+): Promise<void> {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const resolvedCommand = resolveCliCommand(command)
+    let spawnCmd: string
+    let spawnArgs: string[]
+    try {
+      ;({ spawnCmd, spawnArgs } = getSpawnArgsForWindows(resolvedCommand, args))
+    } catch (error) {
+      // Why: the bare sentinel message reaches the user verbatim otherwise, with
+      // nothing naming the path or the characters that made it unspawnable.
+      rejectPromise(
+        error instanceof UnsafeWindowsBatchArgumentsError
+          ? new RuntimeClientError(
+              'invalid_environment',
+              `Cannot run \`${command}\` from "${resolvedCommand}": the path contains characters ` +
+                `cmd.exe would reinterpret. Install it somewhere without ` +
+                `${WINDOWS_BATCH_UNSAFE_CHARACTERS_LABEL} in the path.`
+            )
+          : error
+      )
+      return
+    }
+    // Why paired after the seed: addAgentNodePaths prepends the *newest* version
+    // manager bin, which is not necessarily where this CLI lives. Pairing last puts
+    // the CLI's own node in front of that seed (stablyai/orca#10932).
+    const env = withCliRuntimeOnPath(
+      resolvedCommand,
+      addAgentNodePaths({ ...stripElectronRunAsNode(process.env), ...extraEnv })
+    )
+    const consoleStdio = stdioForWindowsInteractiveChild(json)
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn(spawnCmd, spawnArgs, {
+        // Why: JSON mode reserves stdout for the response envelope while keeping
+        // the interactive login attached to the user's terminal via stderr.
+        stdio: consoleStdio.stdio,
+        env
+      })
+    } finally {
+      consoleStdio.dispose()
+    }
+    session.child = child
+    child.once('error', (error) =>
+      rejectPromise(
+        new RuntimeClientError(
+          'internal',
+          `Could not launch \`${command}\`. Is it installed and on PATH? (${
+            error instanceof Error ? error.message : String(error)
+          })`
+        )
+      )
+    )
+    child.once('exit', (code) => {
+      session.child = null
+      if (code === 0) {
+        resolvePromise()
+        return
+      }
+      rejectPromise(
+        new RuntimeClientError(
+          'internal',
+          `\`${command} ${args.join(' ')}\` exited with code ${code ?? 'null'}.`
+        )
+      )
+    })
+  })
+}
+
+/** Signs in to a new account folder the host created, then registers it (superset AddAccountDialog). */
 async function addClaudeAccount({ client, cwd, json }: HandlerContext): Promise<void> {
-  const configDir = mkdtempSync(join(tmpdir(), 'orca-account-add-claude-'))
+  const { result: signIn } = await client.call<ClaudeAccountSignIn>(
+    'accounts.beginClaudeSignIn',
+    getWslAccountTarget(cwd) ?? {},
+    { timeoutMs: 300_000 }
+  )
   const session: InteractiveLoginSession = {
     child: null,
     registering: false,
     terminationPromise: null
   }
-  let legacyCredentials: string | null = null
-  let restoreLegacyCredentials = false
   const result = await withInteractiveLoginCleanup(
     session,
+    // Why always: the host keeps a folder that became an account, and deletes an abandoned one.
+    // Never thrown: an older running Orca lacks the method, and the add itself already finished.
     async () => {
-      await cleanupClaudeLoginArtifacts(configDir, legacyCredentials, restoreLegacyCredentials)
+      const { accountId, runtime, wslDistro } = signIn
+      await client
+        .call('accounts.cancelClaudeSignIn', { accountId, runtime, wslDistro })
+        .catch((error: unknown) => console.warn('[account] Could not clean up sign-in:', error))
     },
     async () => {
-      if (process.platform === 'darwin') {
-        legacyCredentials = await readActiveClaudeKeychainCredentialsStrict()
-        restoreLegacyCredentials = true
+      if (signIn.runtime === 'wsl' && signIn.wslDistro) {
+        const login = `exec env CLAUDE_CONFIG_DIR=${quotePosixShell(signIn.configDir)} claude auth login`
+        await runAgentLoginInTerminal(
+          'wsl.exe',
+          buildWslExecArgs(signIn.wslDistro, ['/bin/sh', '-c', buildWslLoginShellCommand(login)]),
+          {},
+          json,
+          session
+        )
+      } else {
+        await runAgentLoginInTerminal(
+          'claude',
+          ['auth', 'login'],
+          { CLAUDE_CONFIG_DIR: signIn.configDir },
+          json,
+          session
+        )
       }
-      await runAgentLoginInTerminal(
-        'claude',
-        ['auth', 'login', '--claudeai'],
-        {
-          CLAUDE_CONFIG_DIR: configDir
-        },
-        json,
-        session
-      )
       session.registering = true
-      return client.call<ClaudeRateLimitAccountsState>('accounts.addClaudeFromConfigDir', {
-        configDir,
-        ...getWslAccountTarget(cwd),
-        ...(process.platform === 'darwin'
-          ? {
-              previousLegacyCredentialsSha256: legacyCredentials
-                ? createHash('sha256').update(legacyCredentials).digest('hex')
-                : null
-            }
-          : {})
-      })
+      return client.call<ClaudeRateLimitAccountsState>(
+        'accounts.finishClaudeSignIn',
+        { accountId: signIn.accountId, runtime: signIn.runtime, wslDistro: signIn.wslDistro },
+        { timeoutMs: 300_000 }
+      )
     }
   )
   printResult(result, json, (state) => formatAccountsBlock('Claude', state))
@@ -149,16 +228,6 @@ async function addCodexAccount({ client, cwd, json }: HandlerContext): Promise<v
   printResult(result, json, (state) => formatAccountsBlock('Codex', state))
 }
 
-async function assertAccountImportSupported({ client }: HandlerContext): Promise<void> {
-  const status = await client.call<RuntimeStatus>('status.get')
-  if (!status.result.capabilities?.includes(ACCOUNT_IMPORT_RUNTIME_CAPABILITY)) {
-    throw new RuntimeClientError(
-      'incompatible_runtime',
-      'The running Orca runtime is too old to add accounts from the CLI. Update or restart Orca and try again.'
-    )
-  }
-}
-
 /**
  * Rejects the runtime-selector flags instead of ignoring them. shouldIgnoreRemoteSelection
  * pins account commands to the local runtime, so honoring `--environment homelab`
@@ -173,137 +242,78 @@ function rejectAccountRemoteSelectionFlags(ctx: HandlerContext, command: string)
   )
 }
 
-/**
- * Reads and validates `--agent`. A valueless `--agent` parses as boolean
- * true; defaulting or accepting it would silently run a full OAuth login (or
- * RPC) for a provider the user did not ask for, so it is rejected instead.
- */
-function getAgentFlag(flags: Map<string, string | boolean>): string | undefined {
-  const value = flags.get('agent')
-  if (value === undefined) {
-    return undefined
-  }
-  if (typeof value !== 'string') {
+async function assertAccountImportSupported(
+  { client }: HandlerContext,
+  agent: 'claude' | 'codex'
+): Promise<void> {
+  const status = await client.call<RuntimeStatus>('status.get')
+  const capability =
+    agent === 'claude' ? CLAUDE_SIGN_IN_RUNTIME_CAPABILITY : ACCOUNT_IMPORT_RUNTIME_CAPABILITY
+  if (!status.result.capabilities?.includes(capability)) {
     throw new RuntimeClientError(
-      'invalid_argument',
-      'Missing a value for --agent. Use `--agent claude`, `--agent codex`, `--agent opencode`, or `--agent devin`.'
+      'incompatible_runtime',
+      'The running Orca runtime is too old to add accounts from the CLI. Update or restart Orca and try again.'
     )
   }
-  if (value !== 'claude' && value !== 'codex' && value !== 'opencode' && value !== 'devin') {
-    throw new RuntimeClientError(
-      'invalid_argument',
-      `Unsupported --agent "${value}". Use "claude", "codex", "opencode", or "devin".`
-    )
-  }
-  return value
 }
 
-function requireAgentFlag(flags: Map<string, string | boolean>): string {
-  const agent = getAgentFlag(flags)
-  if (!agent) {
-    throw new RuntimeClientError(
-      'invalid_argument',
-      'Missing required --agent. Use `--agent claude`, `--agent codex`, `--agent opencode`, or `--agent devin`.'
-    )
-  }
-  return agent
-}
-
-type RuntimeAccountsSnapshotWithData = RuntimeAccountsSnapshot & {
-  opencode?: ManagedDataAccountsState
-  devin?: ManagedDataAccountsState
-}
-
-/** CLI handlers for managed account enrollment, listing, selection, and removal. */
+/** CLI handlers for managed account enrollment and listing. */
 export const ACCOUNT_HANDLERS: Record<string, CommandHandler> = {
   'account add': async (ctx) => {
-    const agent = getAgentFlag(ctx.flags) ?? 'claude'
+    const agentFlag = ctx.flags.get('agent')
+    // Why: a valueless `--agent` parses as boolean true; defaulting it to claude
+    // would silently run a full OAuth login for the provider the user did not ask for.
+    if (agentFlag !== undefined && typeof agentFlag !== 'string') {
+      throw new RuntimeClientError(
+        'invalid_argument',
+        'Missing a value for --agent. Use `--agent claude`, `--agent codex`, `--agent opencode`, or `--agent devin`.'
+      )
+    }
+    const agent = agentFlag ?? 'claude'
+    if (agent !== 'claude' && agent !== 'codex' && agent !== 'opencode' && agent !== 'devin') {
+      throw new RuntimeClientError(
+        'invalid_argument',
+        `Unsupported --agent "${agent}". Use "claude", "codex", "opencode", or "devin".`
+      )
+    }
+    rejectAccountRemoteSelectionFlags(ctx, 'orca account add')
     if (agent === 'opencode' || agent === 'devin') {
-      rejectAccountRemoteSelectionFlags(ctx, 'orca account add')
       await addDataAccount(ctx, agent, runAgentLoginInTerminal)
       return
     }
-    // Why: main's import RPCs take a filesystem path that only resolves on
-    // this CLI's own machine, so a runtime-selector flag means the user wants
-    // the login to happen on the remote runtime host instead — the PR's
-    // server-side login (accounts.addCodex/addClaude) is the only flow that
-    // can honor that.
-    if (ctx.flags.has('environment') || ctx.flags.has('pairing-code')) {
-      await addAccountRemote(ctx.client, agent as RuntimeAccountProvider, ctx.json)
-      return
-    }
     // Why: fail on runtime version skew before burning a full OAuth round trip.
-    await assertAccountImportSupported(ctx)
+    await assertAccountImportSupported(ctx, agent)
     await ctx.client.call('accounts.list', { refreshUsage: false })
     await (agent === 'claude' ? addClaudeAccount(ctx) : addCodexAccount(ctx))
   },
   'account list': async (ctx) => {
+    rejectAccountRemoteSelectionFlags(ctx, 'orca account list')
     const provider = ctx.flags.get('agent')
-    if (provider === 'opencode' || provider === 'devin') {
-      rejectAccountRemoteSelectionFlags(ctx, 'orca account list')
+    if (provider !== undefined) {
       await listDataAccounts(ctx, provider)
       return
     }
-    const agent = getAgentFlag(ctx.flags) as RuntimeAccountProvider | undefined
     const { client, json } = ctx
-    // Why: this now renders usage numbers, so it needs the forced refresh
-    // (unlike the pre-consolidation local-only listing).
-    const result = await client.call<RuntimeAccountsSnapshotWithData>('accounts.list', {
-      refreshUsage: true
+    // Why: this command renders no usage numbers, so skip the forced provider
+    // refresh — it is one serial network round-trip per managed account.
+    const result = await client.call<AccountsListSnapshot>('accounts.list', {
+      refreshUsage: false
     })
-    printResult(result, json, (snapshot) => {
-      const parts = [formatAccountsList(snapshot, agent)]
-      if (!agent) {
-        if (snapshot.opencode) {
-          parts.push(formatDataAccounts('OpenCode', snapshot.opencode))
-        }
-        if (snapshot.devin) {
-          parts.push(formatDataAccounts('Devin', snapshot.devin))
-        }
-      }
-      return parts.join('\n\n')
-    })
+    printResult(result, json, (snapshot) =>
+      [
+        formatAccountsBlock('Claude', snapshot.claude),
+        formatAccountsBlock('Codex', snapshot.codex),
+        ...(snapshot.opencode ? [formatDataAccounts('OpenCode', snapshot.opencode)] : []),
+        ...(snapshot.devin ? [formatDataAccounts('Devin', snapshot.devin)] : [])
+      ].join('\n\n')
+    )
   },
   'account select': async (ctx) => {
-    const agent = requireAgentFlag(ctx.flags)
-    if (agent === 'opencode' || agent === 'devin') {
-      rejectAccountRemoteSelectionFlags(ctx, 'orca account select')
-      if (!ctx.flags.has('account') && ctx.flags.has('id')) {
-        ctx.flags.set('account', ctx.flags.get('id')!)
-      }
-      await mutateDataAccount(ctx, 'select')
-      return
-    }
-    const accountId = ctx.flags.get('id') ?? ctx.flags.get('account')
-    if (typeof accountId !== 'string' || !accountId) {
-      throw new RuntimeClientError('invalid_argument', 'Missing required --id.')
-    }
-    const result = await ctx.client.call<
-      CodexRateLimitAccountsState | ClaudeRateLimitAccountsState
-    >(agent === 'codex' ? 'accounts.selectCodex' : 'accounts.selectClaude', { accountId })
-    printResult(result, ctx.json, (state) =>
-      formatAccountSelectResult(agent as RuntimeAccountProvider, state)
-    )
+    rejectAccountRemoteSelectionFlags(ctx, 'orca account select')
+    await mutateDataAccount(ctx, 'select')
   },
   'account rm': async (ctx) => {
-    const agent = requireAgentFlag(ctx.flags)
-    if (agent === 'opencode' || agent === 'devin') {
-      rejectAccountRemoteSelectionFlags(ctx, 'orca account rm')
-      if (!ctx.flags.has('account') && ctx.flags.has('id')) {
-        ctx.flags.set('account', ctx.flags.get('id')!)
-      }
-      await mutateDataAccount(ctx, 'remove')
-      return
-    }
-    const accountId = ctx.flags.get('id') ?? ctx.flags.get('account')
-    if (typeof accountId !== 'string' || !accountId) {
-      throw new RuntimeClientError('invalid_argument', 'Missing required --id.')
-    }
-    const result = await ctx.client.call<
-      CodexRateLimitAccountsState | ClaudeRateLimitAccountsState
-    >(agent === 'codex' ? 'accounts.removeCodex' : 'accounts.removeClaude', { accountId })
-    printResult(result, ctx.json, (state) =>
-      formatAccountRemoveResult(agent as RuntimeAccountProvider, state)
-    )
+    rejectAccountRemoteSelectionFlags(ctx, 'orca account rm')
+    await mutateDataAccount(ctx, 'remove')
   }
 }

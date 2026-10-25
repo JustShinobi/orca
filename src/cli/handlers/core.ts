@@ -4,6 +4,8 @@ import { formatCliStatus, formatStatus, printResult } from '../format'
 import { RuntimeClientError, serveOrcaApp } from '../runtime-client'
 import { stripElectronRunAsNode } from '../runtime/launch'
 import { resolveCliStatusCaller } from '../runtime/status-caller'
+import { getServeSuperviseValidationError } from '../runtime/serve-supervised-service'
+import { getOptionalServePort } from '../runtime/serve-port-flag'
 import { getServeOptionValidationError } from '../../shared/serve-option-validation'
 
 function envRecord(): Record<string, string> {
@@ -44,13 +46,10 @@ async function runClaudeAgentTeams(env: Record<string, string>, args: string[]):
   })
 }
 
-function getOptionalServePort(
+function getOptionalPreviewPort(
   flags: Map<string, string | boolean>,
-  flag = 'port',
-  // Why: `--port 0` means "pick an ephemeral port", which serve reports back.
-  // The preview listener is the fixed target of an external reverse-proxy
-  // route, so a port it cannot predict is a misconfiguration, not a request.
-  minimum = 0
+  flag = 'preview-port',
+  minimum = 1
 ): string | null {
   if (!flags.has(flag)) {
     return null
@@ -84,7 +83,7 @@ function getServePreviewFlags(flags: Map<string, string | boolean>): {
   previewAuth?: string | null
   previewToken?: string | null
 } {
-  const previewPort = getOptionalServePort(flags, 'preview-port', 1)
+  const previewPort = getOptionalPreviewPort(flags, 'preview-port', 1)
   const previewBind = getOptionalStringFlag(flags, 'preview-bind')
   const previewDomain = getOptionalStringFlag(flags, 'preview-domain')
   const previewAuth = getOptionalStringFlag(flags, 'preview-auth')
@@ -107,8 +106,6 @@ function getServePreviewFlags(flags: Map<string, string | boolean>): {
       `Invalid --preview-auth value: ${previewAuth} (use open or token).`
     )
   }
-  // Why: omit the keys entirely when the preview proxy is not requested so the
-  // spawned argv (and call-shape assertions) stay identical to pre-preview serves.
   if (!anyPreviewFlag) {
     return {}
   }
@@ -120,7 +117,6 @@ function getServePreviewFlags(flags: Map<string, string | boolean>): {
     previewToken
   }
 }
-
 export const CORE_HANDLERS: Record<string, CommandHandler> = {
   'claude-teams': async ({ client, rawArgs }) => {
     if (process.platform === 'win32') {
@@ -164,10 +160,18 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
     const projectRoot = typeof projectRootValue === 'string' ? projectRootValue : null
     const noPairing = flags.get('no-pairing') === true
     const mobilePairing = flags.get('mobile-pairing') === true
+    const grantDesktopControl = flags.get('grant-desktop-control') === true
     const recipeJson = flags.get('recipe-json') === true
+    const force = flags.get('force') === true
+    const supervise = flags.get('supervise') === true
+    const superviseError = getServeSuperviseValidationError({ supervise, recipeJson })
+    if (superviseError) {
+      throw new RuntimeClientError('invalid_argument', superviseError)
+    }
     const validationError = getServeOptionValidationError({
       noPairing,
       mobilePairing,
+      grantDesktopControl,
       recipeJson,
       projectRoot
     })
@@ -182,8 +186,11 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
       pairingAddress: typeof pairingAddressValue === 'string' ? pairingAddressValue : null,
       noPairing,
       mobilePairing,
+      grantDesktopControl,
       recipeJson,
       projectRoot,
+      ...(force ? { force: true } : {}),
+      ...(supervise ? { supervise: true } : {}),
       ...getServePreviewFlags(flags)
     })
     process.exitCode = exitCode

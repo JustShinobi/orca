@@ -18,11 +18,14 @@ import {
   resolveAutomationWorkspaceProvenance
 } from '../../../automations/workspace-provenance'
 import type { AgentLaunchWorkspaceFactory } from '../../../agent-launch/agent-launch-surface-factories'
+import { combineLaunchWarnings } from '../../../agent-launch/agent-launch-executor'
 import type { RpcContext } from '../core'
 import { resolveRpcWorkspaceCreatorProvenance } from '../workspace-creator-context'
 import { buildManagedWorktreeCreateArgs } from './worktree-create-args'
 import { toAgentLaunchPreferences } from '../../../../shared/agent-launch-preferences'
-import type { AgentLaunchParams } from './agent-launch-schemas'
+import type { AgentLaunchParams } from '../../../../shared/rpc-contract/agent-launch-params'
+import { agentLaunchFolderWorkspaceCreator } from './agent-launch-folder-workspace-creation'
+import { agentLaunchMovesHostWindow } from './agent-launch-tab-publication'
 
 type WorktreeCreateParams = Extract<
   AgentLaunchParams['target'],
@@ -36,6 +39,7 @@ export function agentLaunchWorkspaceFactory(
   agent: TuiAgent
 ): AgentLaunchWorkspaceFactory {
   return {
+    createFolderWorkspace: agentLaunchFolderWorkspaceCreator(context, agent),
     createWorktree: async ({
       create,
       startupAgent,
@@ -63,7 +67,7 @@ export function agentLaunchWorkspaceFactory(
         const result = await runtime.createManagedWorktree({
           ...buildManagedWorktreeCreateArgs(
             {
-              ...params,
+              ...(agentLaunchMovesHostWindow(context) ? params : withoutHostActivation(params)),
               ...(startupAgent ? { startupAgent } : {}),
               // Only ever set alongside `startupAgent`, which is what the create requires; the
               // executor offers it only to an agent that takes its prompt on argv, and it rides only
@@ -105,22 +109,41 @@ export function agentLaunchWorkspaceFactory(
           await waitForStructuredSetup(runtime, result.setupReceipt)
         }
         finishAutomationWorkspaceProvenanceRequest(params.automationProvenanceRequest)
+        const warning =
+          result.warnings?.reduce(
+            (combined, lineage) => combineLaunchWarnings(combined, lineage.message),
+            result.warning
+          ) ?? result.warning
         return {
           worktreeId: result.worktree.id,
+          connectionId: repo.connectionId ?? null,
           startupTerminalHandle: result.startupTerminal?.handle,
           ...(promptRodeLaunchCommand ? { promptRodeLaunchCommand } : {}),
           ...(result.startupTerminal?.paneKey
             ? { startupTerminalPaneKey: result.startupTerminal.paneKey }
             : {}),
-          // Carried, not dropped: `createManagedWorktree` reports a failed startup terminal or an
-          // uncopied working tree here, and it is the only place the host says so.
-          ...(result.warning ? { warning: result.warning } : {})
+          ...(warning ? { warning } : {})
         }
       } catch (error) {
         releaseAutomationWorkspaceProvenanceRequest(params.automationProvenanceRequest)
         throw error
       }
     }
+  }
+}
+
+/**
+ * A paired device's create leaves the host window where it is, as the rest of its launch does:
+ * activating would switch the desktop to the new workspace and reveal the startup terminal there.
+ * Without it, setup and default tabs are provisioned in the background instead. `runHooks` means
+ * "run setup, and activate", so only its setup half is kept.
+ */
+function withoutHostActivation(params: WorktreeCreateParams): WorktreeCreateParams {
+  return {
+    ...params,
+    activate: false,
+    runHooks: false,
+    ...(params.runHooks === true ? { setupDecision: 'run' as const } : {})
   }
 }
 

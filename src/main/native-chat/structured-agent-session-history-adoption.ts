@@ -11,12 +11,14 @@ import {
   agentSessionWireProviderHandle,
   type AgentSessionWireProviderHandle
 } from '../../shared/agent-session-provider-handle-encoding'
+import type { StructuredAgentId } from '../../shared/agent-session-provider-handle'
 import type { AgentSessionLease, AgentSessionRecord } from '../../shared/agent-session-record'
 import { agentSessionLeaseAdmitsWriter } from '../../shared/agent-session-lease-adjudication'
 
 export type StructuredAgentSessionAdoptionOwnership = {
   sessionId: string
-  provider: 'claude' | 'codex'
+  /** Any agent's chat may hold the conversation, though only one with an importer adopts. */
+  provider: StructuredAgentId
   providerSessionId: string
   lease: AgentSessionLease
 }
@@ -34,7 +36,7 @@ export type CommittedStructuredAgentSessionAdoptionReplay = {
 
 /** Exact committed-operation identity; attach still validates its fingerprint. */
 export function findCommittedStructuredAgentSessionAdoptionReplay(input: {
-  agent: 'claude' | 'codex'
+  agent: StructuredAgentId
   providerSessionId: string
   selfSessionId: string
   callerKey: string
@@ -80,7 +82,7 @@ export function findCommittedStructuredAgentSessionAdoptionReplay(input: {
  * ownership index — without this exemption the replay refuses instead of replaying.
  */
 export function findConflictingStructuredAdoption(input: {
-  agent: 'claude' | 'codex'
+  agent: StructuredAgentId
   providerSessionId: string
   selfSessionId: string
   ownership: readonly StructuredAgentSessionAdoptionOwnership[]
@@ -120,11 +122,9 @@ export function structuredAdoptionConflictError(
  * (selected account before the system default).
  */
 export async function resolveStructuredAgentSessionAdoption(input: {
-  agent: 'claude' | 'codex'
   providerSessionId: string
   candidateAccountHomes: readonly string[]
   resolveTranscript: (args: {
-    agent: 'claude' | 'codex'
     providerSessionId: string
     accountHomePath: string
   }) => Promise<string | null>
@@ -137,7 +137,6 @@ export async function resolveStructuredAgentSessionAdoption(input: {
     }
     seen.add(trimmed)
     const transcriptPath = await input.resolveTranscript({
-      agent: input.agent,
       providerSessionId: input.providerSessionId,
       accountHomePath: trimmed
     })

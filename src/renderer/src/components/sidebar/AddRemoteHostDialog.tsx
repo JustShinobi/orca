@@ -19,23 +19,19 @@ import {
   prefillFormFromSshConfigHost,
   saveNewSshHostFromForm
 } from './add-remote-host-ssh-actions'
-import { hydrateRuntimeEnvironmentSshState } from '@/runtime/runtime-environment-ssh-state'
-import type { SshTargetOwnerEnvironment } from '@/runtime/runtime-ssh-target-management'
 
 export type AddRemoteHostMode = 'ssh' | 'server'
 
 type AddRemoteHostDialogProps = {
   mode: AddRemoteHostMode | null
   onOpenChange: (mode: AddRemoteHostMode | null) => void
-  sshOwnerEnvironment?: SshTargetOwnerEnvironment | null
 }
 
 type SshDialogView = 'form' | 'config-picker'
 
 export function AddRemoteHostDialog({
   mode,
-  onOpenChange,
-  sshOwnerEnvironment = null
+  onOpenChange
 }: AddRemoteHostDialogProps): React.JSX.Element {
   const open = mode !== null
   // Why: `mode` drives both open-state and which form renders. On close it goes null while the
@@ -110,28 +106,17 @@ export function AddRemoteHostDialog({
     onOpenChange(null)
   }
 
-  const refreshSshTargetMetadata = async () => {
-    if (sshOwnerEnvironment) {
-      await hydrateRuntimeEnvironmentSshState(sshOwnerEnvironment.id, { force: true })
-      return
-    }
-    const targets = await window.api.ssh.listTargets()
-    setSshTargetsMetadata(targets)
-  }
-
   const saveSshHost = async () => {
     setIsSaving(true)
     try {
       const outcome = await saveNewSshHostFromForm({
         form: sshForm,
         ssh: window.api.ssh,
-        owner: sshOwnerEnvironment,
         recordSshRepoReadoptions,
         setSshTargetsMetadata,
         recordFeatureInteraction
       })
       if (outcome === 'saved') {
-        await refreshSshTargetMetadata()
         reset()
         onOpenChange(null)
       }
@@ -233,13 +218,11 @@ export function AddRemoteHostDialog({
     try {
       const result = await addAllSshConfigHostsToOrca({
         ssh: window.api.ssh,
-        owner: sshOwnerEnvironment,
         recordSshRepoReadoptions,
         setSshTargetsMetadata,
         recordFeatureInteraction
       })
       if (result.kind === 'added') {
-        await refreshSshTargetMetadata()
         reset()
         onOpenChange(null)
         return
@@ -358,7 +341,6 @@ export function AddRemoteHostDialog({
           </div>
         ) : renderMode === 'ssh' ? (
           <AddRemoteHostSshFormPanel
-            ownerLabel={sshOwnerEnvironment?.label ?? null}
             form={sshForm}
             disabled={busy}
             preferAdvancedOpen={preferAdvancedOpen}

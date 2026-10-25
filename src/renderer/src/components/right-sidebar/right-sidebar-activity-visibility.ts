@@ -3,7 +3,8 @@ import type { ActivityBarItem } from './activity-bar-buttons'
 type RightSidebarActivityVisibilityState = {
   isFolder: boolean
   isFolderWorkspace: boolean
-  isSshRepo: boolean
+  /** The workspace runs on an SSH host, reached directly or through its managed server. */
+  hasSshHost: boolean
   isPreviewProxyActive?: boolean
 }
 
@@ -12,7 +13,7 @@ export function getVisibleRightSidebarActivityItems(
   {
     isFolder,
     isFolderWorkspace,
-    isSshRepo,
+    hasSshHost,
     isPreviewProxyActive = false
   }: RightSidebarActivityVisibilityState
 ): ActivityBarItem[] {
@@ -23,6 +24,6 @@ export function getVisibleRightSidebarActivityItems(
       // Why: ports were SSH-only because a local workspace's ports are already
       // reachable. A live preview proxy breaks that — it mints a shareable URL
       // per port that no other surface lists in full.
-      (!item.sshOnly || isSshRepo || isPreviewProxyActive)
+      (!item.sshOnly || hasSshHost || isPreviewProxyActive)
   )
 }

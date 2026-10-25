@@ -21,6 +21,7 @@ import type {
   StructuredAgentSessionAdapter
 } from './structured-agent-session-adapter'
 import { StructuredAgentSessionHost } from './structured-agent-session-host'
+import { claudeAndCodexAgents } from './structured-agent-session-adapter-router-test-support'
 import type { StructuredAgentSessionHostDeps } from './structured-agent-session-host-types'
 import {
   HOST_TEST_NOW,
@@ -48,6 +49,7 @@ export type RestTestAdapter = {
     NonNullable<StructuredAgentSessionAdapter['acknowledgeSessionRelease']>
   >
   holdsDispatch: Mock<NonNullable<StructuredAgentSessionAdapter['holdsDispatch']>>
+  startUnavailable: Mock<NonNullable<StructuredAgentSessionAdapter['startUnavailable']>>
   readOptions: Mock<NonNullable<StructuredAgentSessionAdapter['readOptions']>>
 }
 
@@ -158,10 +160,12 @@ export async function createRestTestRig(
     dispatch: vi.fn(async () => acceptedDispatch()),
     acknowledgeSessionRelease: vi.fn(),
     holdsDispatch: vi.fn(() => false),
+    startUnavailable: vi.fn(() => undefined),
     readOptions: vi.fn(async () => ({ models: [], current: { model: 'gpt-live' } }))
   }
   const hostFor = (overrides: Partial<StructuredAgentSessionHostDeps>) =>
     new StructuredAgentSessionHost({
+      agents: claudeAndCodexAgents(),
       logger: createStructuredAgentSessionLogger(),
       store,
       adapter: {

@@ -8,7 +8,6 @@ import type { AutoSwitchRateLimitAgent } from '../../../../shared/agent-rate-lim
 import type { AgentProviderSessionMetadata } from '../../../../shared/agent-session-resume'
 import type { TerminalLayoutSnapshot } from '../../../../shared/terminal-tab-types'
 import type { SetupSplitDirection } from '../../../../shared/worktree/launch-types'
-import type { DirectSshPaneRetryAttemptId } from '@/store/slices/direct-ssh-terminal-recovery'
 import type {
   PaneExternalDropHandler,
   PaneExternalDropResolver,
@@ -17,12 +16,12 @@ import type {
 import type { EffectiveMacOptionAsAlt } from '@/lib/keyboard-layout/detect-option-as-alt'
 import type { PaneCwdMap } from './resolve-split-cwd'
 import type { PaneProcessExit, PtyPaneStartup } from './pty-connection-types'
-import type { PtyTransport } from './pty-transport'
-import type { PtyTransportRecoveryState } from './pty-transport-types'
+import type { PtyTransport, PtyTransportRecoveryState } from './pty-transport-types'
 import type { ReplayingPanesRef } from './replay-guard'
 import type { TerminalLinkActionRequester } from './terminal-link-action-request'
 import type { TerminalLinkRoutingPreferenceRequester } from './terminal-url-link-hit-testing'
 import type { SessionRestoredBannerReason } from './session-restored-banner-pane-state'
+import type { PaneLayoutEditIntent } from '../../../../shared/rpc-contract/session-tabs-schemas-params'
 
 export type TerminalPaneStartup = Exclude<PtyPaneStartup, null>
 
@@ -95,12 +94,7 @@ export type UseTerminalPaneLifecycleDeps = {
   updateTabTitle: (tabId: string, title: string) => void
   setRuntimePaneTitle: (tabId: string, paneId: number, title: string) => void
   clearRuntimePaneTitle: (tabId: string, paneId: number) => void
-  updateTabPtyId: (
-    tabId: string,
-    ptyId: string,
-    replacedPtyId?: string,
-    directSshRetryAttemptId?: DirectSshPaneRetryAttemptId
-  ) => void
+  updateTabPtyId: (tabId: string, ptyId: string, replacedPtyId?: string) => void
   markWorktreeUnread: (worktreeId: string) => void
   markTerminalTabUnread: (tabId: string, reason: AgentAttentionUnreadReason) => void
   markTerminalPaneUnread: (paneKey: string, reason: AgentAttentionUnreadReason) => void
@@ -131,7 +125,7 @@ export type UseTerminalPaneLifecycleDeps = {
   setTabCanExpandPane: (tabId: string, canExpand: boolean) => void
   setExpandedPane: (paneId: number | null) => void
   syncExpandedLayout: () => void
-  persistLayoutSnapshot: () => void
+  persistLayoutSnapshot: (intent?: PaneLayoutEditIntent) => void
   setPaneTitles: React.Dispatch<React.SetStateAction<Record<number, string>>>
   paneTitlesRef: React.RefObject<Record<number, string>>
   setRenamingPaneId: React.Dispatch<React.SetStateAction<number | null>>

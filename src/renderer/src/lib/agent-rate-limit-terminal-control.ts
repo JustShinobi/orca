@@ -1,5 +1,4 @@
 import type { AutoSwitchRateLimitAgent } from '../../../shared/agent-rate-limit-detection'
-import type { GlobalSettings } from '../../../shared/global-settings-types'
 import { isExpectedAgentProcess } from '../../../shared/agent-process-recognition'
 import {
   inspectRuntimeTerminalProcess,
@@ -31,18 +30,16 @@ function isForegroundAgent(
 
 /** Inspects the PTY without mutating it, so stop/resume decisions stay terminal-safe. */
 async function isAgentStillForeground(args: {
-  settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined
   ptyId: string
   agent: AutoSwitchRateLimitAgent
   expectedProcess: string
 }): Promise<boolean> {
-  const process = await inspectRuntimeTerminalProcess(args.settings, args.ptyId)
+  const process = await inspectRuntimeTerminalProcess(args.ptyId)
   return isForegroundAgent(process.foregroundProcess, args.agent, args.expectedProcess)
 }
 
 /** Exits only the foreground agent process by sending Ctrl+C to the existing PTY. */
 export async function stopForegroundAgent(args: {
-  settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined
   ptyId: string
   agent: AutoSwitchRateLimitAgent
   expectedProcess: string
@@ -52,7 +49,7 @@ export async function stopForegroundAgent(args: {
   }
 
   for (let attempt = 0; attempt < AGENT_STOP_ATTEMPTS; attempt += 1) {
-    const sent = await sendRuntimePtyInputVerified(args.settings, args.ptyId, '\x03', 'driving')
+    const sent = await sendRuntimePtyInputVerified(args.ptyId, '\x03', 'driving')
     if (!sent) {
       return false
     }
@@ -67,7 +64,6 @@ export async function stopForegroundAgent(args: {
 
 /** Waits for the resumed provider process to take foreground control of the same PTY. */
 export async function waitForResumedAgent(args: {
-  settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined
   ptyId: string
   agent: AutoSwitchRateLimitAgent
   expectedProcess: string

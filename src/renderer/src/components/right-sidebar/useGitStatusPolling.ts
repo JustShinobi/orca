@@ -6,8 +6,11 @@ import { getConnectionId } from '@/lib/connection-context'
 import { getExecutionHostIdForWorktree, getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { refreshGitStatusForWorktree } from './git-status-refresh'
 import { isWindowVisible } from '@/lib/window-visibility-interval'
-import { hasInteractiveActiveGitStatusConsumer, shouldPollActiveGitStatus } from '@/lib/passive-macos-app-data-access'
-import { getRightSidebarWorktreeRuntimeSettings } from './file-explorer-runtime-owner'
+import {
+  hasInteractiveActiveGitStatusConsumer,
+  shouldPollActiveGitStatus
+} from '@/lib/passive-macos-app-data-access'
+import { getWorktreeGitOwnerTarget } from './worktree-git-owner-target'
 import { useGitStatusFileWatchRefresh } from './git-status-file-watch-refresh'
 import { useGitStatusPushSignalRefresh } from './git-status-push-signal-refresh'
 import { useStaleConflictOperationPolling } from './stale-conflict-operation-poll'
@@ -23,15 +26,9 @@ const STATUS_ACTIVITY_DEBOUNCE_MS = 125
 const STATUS_ACTIVITY_MIN_GAP_MS = 3000
 // Why: status scans and remote conflict probes can take longer than their
 // timers; duration-aware spacing prevents a slow task from running nonstop.
-export const SLOW_GIT_POLL_BACKOFF = {
-  idleMultiplier: 1,
-  changeSignalMultiplier: 1,
-  maxIntervalMs: 5 * 60_000
-}
+export const SLOW_GIT_POLL_BACKOFF = { idleMultiplier: 1, changeSignalMultiplier: 1, maxIntervalMs: 5 * 60_000 }
 
-export function admissionTierForGitStatusRefreshReason(
-  reason: GitStatusRefreshReason
-): 'status' | 'background' {
+export function admissionTierForGitStatusRefreshReason(reason: GitStatusRefreshReason): 'status' | 'background' {
   return reason === 'safety' ? 'background' : 'status'
 }
 
@@ -91,12 +88,7 @@ export function useGitStatusPolling(options: { enabled?: boolean } = {}): void {
     [activeWorktreeId, runtimeStatusByEnvironmentId, sshConnectionStates, sshStateByEnvironment]
   )
   const activeGitStatusPollingArgs = {
-    activeWorktreeId,
-    worktreePath,
-    rightSidebarOpen,
-    rightSidebarTab,
-    rightSidebarExplorerView,
-    openFiles
+    activeWorktreeId, worktreePath, rightSidebarOpen, rightSidebarTab, rightSidebarExplorerView, openFiles
   }
   const isActiveConnectionReady = isConnectionReady(activeConnectionId)
   const canFetchActiveWorktreeGitStatus =
@@ -150,9 +142,12 @@ export function useGitStatusPolling(options: { enabled?: boolean } = {}): void {
       }
       try {
         const connectionId = getConnectionId(activeWorktreeId) ?? undefined
-        const runtimeSettings = getRightSidebarWorktreeRuntimeSettings(activeWorktreeId)
+        const target = getWorktreeGitOwnerTarget(activeWorktreeId)
+        if (!target) {
+          return
+        }
         await refreshGitStatusForWorktree({
-          settings: runtimeSettings,
+          target,
           worktreeId: activeWorktreeId,
           worktreePath,
           connectionId,

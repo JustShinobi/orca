@@ -54,6 +54,8 @@ export class AutomationService {
   private readonly headlessDispatcher: HeadlessAutomationDispatcher | null
   private readonly codexHeadlessLaunchTimeoutMs: number
   private readonly headlessLaunchCleanups = new HeadlessLaunchCleanupRegistry()
+  /** Set on a headless host: closes completed, unused run terminals now; resolves how many. */
+  releaseFinishedRunTerminals: (() => Promise<number>) | null = null
   private readonly publish: PublishAutomationsChanged | null
   private readonly runs: AutomationRunWriter
   private readonly completionWatcher: AutomationRunCompletionWatcher | null

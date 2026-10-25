@@ -13,6 +13,7 @@ import { useRemoteFileBrowserPathPreview } from './use-remote-file-browser-path-
 import { translate } from '@/i18n/i18n'
 import type { FilesystemPathFlavor } from '../../../../shared/filesystem-entry-types'
 
+// Both set: an SSH host the paired server owns, listed by that server.
 type RemoteFileBrowserProps = (
   | { targetId: string; runtimeEnvironmentId?: string }
   | { runtimeEnvironmentId: string; targetId?: never }

@@ -219,15 +219,25 @@ whether a US cell belongs there is decided at promotion, not assumed. Both were 
 on 2026-10-01, so the same-cap job now rolls them as general cells. They stay out of the fleet pool
 list because their pool is the US default of 10.
 
-C34 is an Asia spare at the C31 shape in `asia-east2-c`, so the six Asia cells spread 2/2/2. It is
-its own topology wave and registers alone as migration-only, then the director is configured with
-`cell-ids` set to C34. It has no promotion wave: the Asia admission script and workflow refuse
-`promote` for it, and placement and regional rehome select only general cells. It is a
-migration-only landing zone that only an explicit evacuation or migration naming it can target.
-Do not name it in the multi-target `promote-general-cell` or `retire-migration-cell` modes, which
-accept any migration-only cell. It is a declared rehome source, sits in the same-cap migration-only
-list, and stays out of the fleet pool list. Promoting it later takes its own reviewed change adding a
-promotion wave and canary entry.
+C34 is a sixth Asia cell at the C31 shape in `asia-east2-c`, so the six Asia cells spread 2/2/2. It
+was its own topology wave, registered alone as migration-only, and the director was configured with
+`cell-ids` set to C34, all on 2026-10-05. It launched as a migration-only spare and has a promotion
+wave of its own, with the same five-minute canary C30 and C31 ran. Promotion compares the
+director's serving digest and C34's runtime digest with the one `image-digest` input, so C34 was
+first rolled to the director's image as a migration-only same-cap wave. Once its canary promoted
+it, it moved to the same-cap general list and the fleet pool list together, so the same-cap job now
+rolls it as a general cell and a rollback restores it general. It is a declared rehome source.
+
+C35 is a seventh Asia cell at the C34 shape in `asia-east2-a`, starting a third zone round. It was
+its own topology wave on image F (`sha256:41cba995…`), registered alone as migration-only, and then
+the director was configured with `cell-ids` set to C35. It launched as a migration-only spare and has
+a promotion wave of its own, with the same five-minute canary C30, C31 and C34 ran. Promotion
+compares the director's serving digest and C35's runtime digest with the one `image-digest` input,
+so C35 was first rolled to the director's image as a migration-only same-cap wave. Once its canary
+promoted it, it moved to the same-cap general list and the fleet pool list together, so the same-cap
+job now rolls it as a general cell and a rollback restores it general. It is a declared rehome source.
+Its pool of 16 leaves 3 connections under the usable Cloud SQL ceiling
+(`relay-cloud-sql-connection-budget.mjs`).
 Rollback returns
 Asia cells to migration-only; it does not destroy the network or use
 existing-only. The production topology dispatch remains unavailable until the
@@ -531,22 +541,34 @@ drained host re-dials the director as soon as it reads `drain`, so the window se
 arrival rate: hosts / window, about 1.8-2.7 hosts/s for a US cell at the default. The window also
 sets two waits: restart-safe needs an empty runtime for (ceil(window / 5 s) + 1) consecutive
 5-second samples, and the drain step's overall timeout is the 15-minute migration lease plus the
-window (20 minutes at the default).
+window, plus the window's excess over `300000` (20 minutes at the default, 50 at `1200000`).
+Because the quiet starts only once the last host has left, a drain step takes about twice the
+window: about 30 minutes at `900000` and 40 at `1200000`.
 
-- Allowed values are `300000` (the default, and every wave before this input), `60000`, and
-  `30000`. The wave validator refuses anything else, and each cell job checks again.
+- Allowed values are `300000` (the default, and every wave before this input), `60000`,
+  `30000`, `900000`, and `1200000`. The wave validator refuses anything else, and each cell job
+  checks again.
 - Below `300000` is for US general cells only (C7-C10, C13-C16, C19-C26, C32, C33). Asia drains
   are bound by the target cells' own accept rate (about 4-6 hosts/s per Asia cell), not by the
-  window. Migration-only cells hold no hosts. Both stay at `300000`.
+  window. Migration-only cells hold no hosts. Both stay at `300000` or slower.
+- `900000` and `1200000` are for any cell. They exist because c28's 1,901-host drain at `300000`
+  (about 6.3 hosts/s, 2026-10-07) held database lock time above its bar for about 10 minutes.
+  At `1200000` a 2,000-host Asia cell re-places about 1.7 hosts/s.
 - A non-default window must be named at the end of the confirmation, for example
   `ROLL_RELAY_SAME_CAP <target-digest> <cells> drain-pace-window-ms=60000`. A confirmation that
   names no window confirms `300000`, so a form left at another value fails closed.
 - A canary's authority records its window and its pace verdict (below). A batch may use that
   window or a slower one, never a faster one. A batch below `300000` also needs the canary's pace
-  verdict to be PASS. Stepping back to `300000` mid-ladder needs no new canary.
+  verdict to be PASS. Stepping back to `300000` or slower mid-ladder needs no new canary.
 - A cell on an image without paced drains rejects the window, and the job falls back to an
   unpaced drain. The job records what the cell accepted, and a canary that did not drain at its own
   window seals `UNVERIFIED`.
+- A window above `300000` needs the cell being drained to already run an image that accepts it
+  (the cap rose with this ladder's slow rungs). Before the isolate, the job reads the cap the cell
+  advertises on `/health` (`drainPaceWindowMaxMs`; an image without it has `300000`) and stops
+  with the cell untouched if the window is above it. Re-dispatch at `300000`, or after the cell's
+  next roll. If a cell still rejects the window at the drain, the job fails rather than drain
+  unpaced, and the cell stays isolated for an operator, as any failed cell does.
 
 **What judges a paced drain.** The shadow health gate (report only, after each cell) judges two
 checks the pace can move. Together they are the report's `paceVerdict`, which the canary seals:
@@ -720,11 +742,14 @@ do, so it never reports success over a pause it cannot explain.
 
 The sequence:
 
-1. **Preflight, read-only.** No `cloud-*` workflow is queued or running (all pages; the hourly
-   clock-skew monitor and `cloud-verify` excepted), and `main` is the reviewed commit.
-2. **Publish**, after the operator types `DEPLOY <commit prefix>`. It runs before rehome is touched,
-   so a moved `main` or a bad build needs no cleanup. The digest is the registry digest of
-   `relay:sha-<commit>`, and the run's own push line must name the same digest.
+1. **Publish.** No `cloud-*` workflow is queued or running (all pages; the hourly clock-skew
+   monitor and `cloud-verify` excepted), and `main` is the reviewed commit. The publish workflow
+   builds whatever `main` is when it is dispatched, so the driver dispatches it straight after that
+   check, before the inspects and the typed phrase. It changes nothing serving, so a bad build needs
+   no cleanup. The digest is the registry digest of `relay:sha-<commit>`, and the run's own push
+   line must name the same digest. If `main` still moved in those seconds, the driver stops and
+   names the `--commit <built> --publish-run <run>` that deploys that build once it is reviewed.
+2. **Preflight, read-only**, then the operator types `DEPLOY <commit prefix>`.
 3. **Pause**, only if rehome is enabled, after the operator types `PAUSE_REGIONAL_REHOMING`.
 4. **Deploy** with that digest, the paused generation, `preserve` for both regional inputs, no
    prune, and the old serving digest as predecessor.

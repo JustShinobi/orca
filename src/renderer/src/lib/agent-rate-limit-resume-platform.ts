@@ -1,5 +1,6 @@
 import type { RateLimitRuntimeTarget } from '../../../shared/rate-limit-types'
-import { callRuntimeRpc, type RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
+import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
+import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
 import { CLIENT_PLATFORM } from '@/lib/new-workspace'
 
 /** Resolves the host platform used for quoting resume commands on remote runtimes. */

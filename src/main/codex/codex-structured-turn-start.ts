@@ -1,3 +1,4 @@
+import type { AgentSessionAccountKind } from '../../shared/agent-session-availability'
 import { agentSessionFailureFact, providerDiagnosticOf } from '../../shared/agent-session-failure'
 import type {
   AgentJournalMessageItem,
@@ -11,17 +12,16 @@ import {
 } from './codex-app-server-connection'
 import { isCodexAppServerUnsupportedError } from './codex-app-server-session'
 import type { CodexDispatchEchoes } from './codex-structured-dispatch-echo'
-import { codexTurnLifecycleIdentity } from './codex-structured-journal-translation-turns'
 import { readCodexTurnId } from './codex-structured-thread-facts'
 import {
   codexRunningOrOpeningTurn,
   type CodexTurnOpenWaits
 } from './codex-structured-turn-open-wait'
 import {
+  codexAnsweredTurn,
   codexDispatchRejection,
   codexTurnEndRejection
 } from './codex-structured-turn-end-settlement'
-import { decodeStructuredAgentSessionOptionValue } from '../../shared/structured-agent-session-option-codec'
 
 // Writing a Codex turn and learning which message landed where, which are not
 // the same event. The answer proves admission and nothing about identity, which
@@ -34,16 +34,9 @@ import { decodeStructuredAgentSessionOptionValue } from '../../shared/structured
 // the turn to open and steers it.
 
 /** Keys Codex accepts as per-turn overrides. An unlisted key would otherwise
- *  become an arbitrary client-controlled `turn/start` parameter. Permission posture is owned by
- *  Agent Permissions and applied when the thread opens. */
-const CODEX_TURN_OPTION_KEYS = new Set([
-  'model',
-  'effort',
-  'approvalsReviewer',
-  'personality',
-  'serviceTier',
-  'fastMode'
-])
+ *  become an arbitrary client-controlled `turn/start` parameter. Permission posture is the chat's
+ *  permission mode, stated when the thread opens: a saved reviewer here would override it. */
+const CODEX_TURN_OPTION_KEYS = new Set(['model', 'effort', 'personality', 'serviceTier'])
 
 export function isCodexTurnOptionKey(key: string): boolean {
   return CODEX_TURN_OPTION_KEYS.has(key)
@@ -51,13 +44,15 @@ export function isCodexTurnOptionKey(key: string): boolean {
 
 /** The session state one turn needs. */
 export type CodexTurnHost = {
+  account?: AgentSessionAccountKind
   connection: Pick<CodexAppServerConnection, 'request'>
   threadId: string
   options: Map<string, string>
   reportedOptions?: { model?: string }
-  fastModeTierByModel: ReadonlyMap<string, string>
   dispatchEchoes: CodexDispatchEchoes
   activeTurnIds?: ReadonlySet<string>
+  /** Running turns whose interrupt Codex already answered: aborted, so never steered. */
+  abortedTurnIds?: ReadonlySet<string>
   turnOpenWaits: Pick<CodexTurnOpenWaits, 'wait'>
 }
 
@@ -73,33 +68,6 @@ function turnInputFor(body: AgentJournalMessageItem): Record<string, unknown>[] 
     }
   }
   return input
-}
-
-function codexTurnOptions(host: CodexTurnHost): Record<string, string> {
-  const options = Object.fromEntries(
-    [...host.options].filter(([key]) => key !== 'fastMode' && key !== 'serviceTier')
-  )
-  const encodedFastMode = host.options.get('fastMode')
-  if (encodedFastMode === undefined) {
-    return options
-  }
-  const fastMode = decodeStructuredAgentSessionOptionValue('fastMode', encodedFastMode)
-  if (typeof fastMode !== 'boolean') {
-    throw new Error('codex fast mode must be encoded as true or false')
-  }
-  if (!fastMode) {
-    return { ...options, serviceTier: 'default' }
-  }
-  const model = host.options.get('model') ?? host.reportedOptions?.model
-  const tierId = model ? host.fastModeTierByModel.get(model) : undefined
-  // Fast is on but nothing has named the tier for this model yet, so there is no
-  // value to route to. Deliberately Standard rather than an omission: the tier
-  // persists on the thread, so omitting would silently keep routing a paid tier we
-  // cannot currently name, and discovery recovers the exact tier on a later turn.
-  if (!tierId) {
-    return { ...options, serviceTier: 'default' }
-  }
-  return { ...options, serviceTier: tierId }
 }
 
 /**
@@ -151,11 +119,15 @@ export async function startCodexTurn(
   if (!host.dispatchEchoes.arm(input.clientMessageId, input.requestedAt)) {
     return false
   }
+  // A turn whose interrupt Codex answered has aborted, though its end may still be on the wire:
+  // the send opens its own turn.
+  const steerable = (turnId: string | null | undefined): turnId is string =>
+    typeof turnId === 'string' && turnId !== '' && !host.abortedTurnIds?.has(turnId)
   const runningTurnId = await codexRunningOrOpeningTurn(host)
-  let steered = runningTurnId ? await steerCodexTurn(host, runningTurnId, input) : null
+  let steered = steerable(runningTurnId) ? await steerCodexTurn(host, runningTurnId, input) : null
   // Refused because a turn Orca heard of meanwhile is running: steer that one, once.
   const runningSince = steered ? undefined : [...(host.activeTurnIds ?? [])].at(-1)
-  if (runningSince && runningSince !== runningTurnId) {
+  if (steerable(runningSince) && runningSince !== runningTurnId) {
     steered = await steerCodexTurn(host, runningSince, input)
   }
   if (steered) {
@@ -167,7 +139,8 @@ export async function startCodexTurn(
       threadId: host.threadId,
       clientUserMessageId: input.clientMessageId,
       input: turnInputFor(input.body),
-      ...codexTurnOptions(host)
+      // Codex omits a tier the model does not list.
+      ...Object.fromEntries(host.options)
     },
     { timeoutMs: input.timeoutMs }
   )
@@ -221,14 +194,11 @@ export async function dispatchCodexTurn(
         answer.via
       )
     : null
-  const rejection = endedFirst ? codexTurnEndRejection(endedFirst) : null
+  const rejection = endedFirst ? codexTurnEndRejection(endedFirst, session.account) : null
   return rejection && answer.turnId
     ? {
         state: 'rejected',
-        answeredInTurn: {
-          turn: codexTurnLifecycleIdentity(input.sessionId, answer.turnId),
-          via: answer.via
-        },
+        ...codexAnsweredTurn(session, input.sessionId, answer.turnId, answer.via),
         ...rejection
       }
     : { state: 'admitted' }

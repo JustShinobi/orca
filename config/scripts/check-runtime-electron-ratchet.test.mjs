@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -7,10 +7,7 @@ import {
   collectElectronImporters,
   collectStructuredChatEntryPoints,
   defaultEntryPoints,
-  diffAgainstBaseline,
-  main,
-  readBaseline,
-  STRUCTURED_CHAT_LANES
+  main
 } from './check-runtime-electron-ratchet.mjs'
 
 describe('structured chat coverage', () => {
@@ -32,14 +29,18 @@ describe('structured chat coverage', () => {
     return root
   }
 
-  // Every lane that must exist; acp/ may be absent until it lands.
+  // Every lane that must exist.
   const requiredLanes = {
     'src/main/native-chat/reader.ts': 'export {}',
     'src/main/claude/claude-session.ts': 'export {}',
     'src/main/codex/codex-session.ts': 'export {}',
     'src/main/runtime/structured-agent-session-host.ts': 'export {}',
     'src/main/provider-process/provider-process-teardown.ts': 'export {}',
-    'src/shared/agent-session-record.ts': 'export {}'
+    'src/main/acp/acp-structured-session-adapter.ts': 'export {}',
+    'src/main/jsonl-rpc/peer.ts': 'export {}',
+    'src/main/pi/rpc-launch.ts': 'export {}',
+    'src/shared/agent-session-record.ts': 'export {}',
+    'src/packages/process-host/src/run-process.ts': 'export {}'
   }
 
   it('covers whole lane directories, structured runtime files at any depth, and no test code', () => {
@@ -51,11 +52,13 @@ describe('structured chat coverage', () => {
       'src/main/codex/codex-provider-timeline-identity.ts',
       'src/shared/nested/agent-session-account-home.ts',
       'src/shared/relay-runtime-self-test-report.ts',
+      'src/packages/process-host/src/nested/process-state.ts',
       'src/main/runtime/agent-session-record.ts',
       'src/main/runtime/structured-agent-runtime-registrations.ts',
       'src/main/runtime/rpc/methods/structured-agent-session-agents.ts',
       'src/main/acp/adapter.ts',
-      'src/main/provider-process/worker.ts'
+      'src/main/provider-process/worker.ts',
+      'src/main/jsonl-rpc/nested/dialect.ts'
     ]
     const excluded = [
       'src/main/native-chat/reader.test.ts',
@@ -72,8 +75,13 @@ describe('structured chat coverage', () => {
       'src/main/native-chat/test-support/reader.ts',
       'src/main/runtime/orca-runtime-tests/structured-agent-session-host.ts',
       'src/shared/types.d.ts',
+      'src/packages/process-host/src/run-process.test.ts',
+      'src/packages/process-host/src/__fixtures__/spawned-child.ts',
       'src/main/runtime/other.ts',
-      'src/main/runtime/rpc/methods/browser.ts'
+      'src/main/runtime/rpc/methods/browser.ts',
+      'src/main/jsonl-rpc/peer.test.ts',
+      'src/main/pi/rpc-launch.test.ts',
+      'src/main/pi/titlebar-extension-service.ts'
     ]
     const root = fixture(
       Object.fromEntries([...sources, ...excluded].map((file) => [file, 'export {}']))
@@ -90,25 +98,99 @@ describe('structured chat coverage', () => {
         Object.entries(requiredLanes).filter(([file]) => !file.startsWith(`${lane}/`))
       )
       expect(() => collectStructuredChatEntryPoints(fixture(without))).toThrow(`${lane} is missing`)
-      expect(collectStructuredChatEntryPoints(fixture(requiredLanes))).toHaveLength(6)
+      expect(collectStructuredChatEntryPoints(fixture(requiredLanes))).toHaveLength(
+        Object.keys(requiredLanes).length
+      )
     }
   )
 
-  it('finds Electron through a package imported by each unwired future lane', async () => {
-    const root = fixture({
-      ...requiredLanes,
-      'src/main/acp/adapter.ts': "import 'acp-desktop-package'",
-      'src/main/provider-process/worker.ts': "import 'provider-desktop-package'",
-      'node_modules/acp-desktop-package/package.json': '{"main":"index.js"}',
-      'node_modules/acp-desktop-package/index.js': "require('electron')",
-      'node_modules/provider-desktop-package/package.json': '{"main":"index.js"}',
-      'node_modules/provider-desktop-package/index.js': "require('electron')"
+  it.each([true, false])(
+    'finds Electron through an unwired lane package (sideEffects=%s)',
+    async (sideEffects) => {
+      const root = fixture({
+        ...requiredLanes,
+        'src/main/acp/adapter.ts': "import 'acp-desktop-package'",
+        'src/main/provider-process/worker.ts': "import 'provider-desktop-package'",
+        'src/main/jsonl-rpc/peer.ts': "import 'rpc-desktop-package'",
+        'src/main/pi/rpc-launch.ts': "import 'pi-desktop-package'",
+        'node_modules/acp-desktop-package/package.json': JSON.stringify({
+          main: 'index.js',
+          sideEffects
+        }),
+        'node_modules/acp-desktop-package/index.js': "require('electron')",
+        'node_modules/provider-desktop-package/package.json': JSON.stringify({
+          main: 'index.js',
+          sideEffects
+        }),
+        'node_modules/provider-desktop-package/index.js': "require('electron')",
+        'node_modules/rpc-desktop-package/package.json': JSON.stringify({
+          main: 'index.js',
+          sideEffects
+        }),
+        'node_modules/rpc-desktop-package/index.js': "require('electron')",
+        'node_modules/pi-desktop-package/package.json': JSON.stringify({
+          main: 'index.js',
+          sideEffects
+        }),
+        'node_modules/pi-desktop-package/index.js': "require('electron')"
+      })
+      const current = await collectElectronImporters(collectStructuredChatEntryPoints(root))
+      expect(current.map((file) => file.split('/node_modules/').pop())).toEqual([
+        'acp-desktop-package/index.js',
+        'pi-desktop-package/index.js',
+        'provider-desktop-package/index.js',
+        'rpc-desktop-package/index.js'
+      ])
+    }
+  )
+
+  it('checks public workspace imports against source without requiring a built package', async () => {
+    const root = fixture({ 'entry.ts': "import '@orca/process-host'" })
+    const target = path.join(process.cwd(), 'src/packages/process-host/src/run-process.ts')
+    const current = await collectElectronImporters([path.join(root, 'entry.ts')], {
+      plugins: [
+        {
+          name: 'inject-process-host-electron-import',
+          setup(pluginBuild) {
+            pluginBuild.onLoad({ filter: /run-process\.ts$/ }, (args) =>
+              args.path === target ? { contents: "import 'electron'", loader: 'ts' } : undefined
+            )
+          }
+        }
+      ]
     })
-    const current = await collectElectronImporters(collectStructuredChatEntryPoints(root))
-    expect(current.map((file) => file.split('/node_modules/').pop())).toEqual([
-      'acp-desktop-package/index.js',
-      'provider-desktop-package/index.js'
-    ])
+    expect(current).toEqual(['src/packages/process-host/src/run-process.ts'])
+  })
+
+  it('bounds shared dependency output without dropping any entry point', async () => {
+    const entries = Array.from({ length: 40 }, (_, index) => `entry-${index}.ts`)
+    const root = fixture({
+      'shared.ts': `export const payload = ${JSON.stringify('x'.repeat(64 * 1024))}`,
+      ...Object.fromEntries(
+        entries.map((file) => [file, "import 'electron'; export { payload } from './shared'"])
+      )
+    })
+    let emittedBytes = 0
+    const current = await collectElectronImporters(
+      entries.map((file) => path.join(root, file)),
+      {
+        plugins: [
+          {
+            name: 'measure-audit-output',
+            setup(builder) {
+              builder.onEnd((result) => {
+                emittedBytes = result.outputFiles.reduce(
+                  (bytes, file) => bytes + file.contents.byteLength,
+                  0
+                )
+              })
+            }
+          }
+        ]
+      }
+    )
+    expect(current.map((file) => path.basename(file)).sort()).toEqual(entries.sort())
+    expect(emittedBytes).toBeLessThan(128 * 1024)
   })
 })
 
@@ -124,18 +206,8 @@ describe('the default entry points', () => {
       'src/main/runtime/runtime-rpc.ts',
       'src/main/orcad/main.ts'
     ])
-    for (const lane of [...lanes, 'src/shared/']) {
+    for (const lane of [...lanes, 'src/shared/', 'src/packages/process-host/src/']) {
       expect(entries.some((file) => file.startsWith(lane))).toBe(true)
-    }
-  })
-
-  // Retires the temporary flag: the PR that adds acp/ must make it required.
-  it('lets only directories that have not landed yet be absent', () => {
-    for (const lane of STRUCTURED_CHAT_LANES.filter((candidate) => candidate.mayBeAbsent)) {
-      expect(
-        existsSync(path.join(process.cwd(), ...lane.directory)),
-        lane.directory.join('/')
-      ).toBe(false)
     }
   })
 })
@@ -166,53 +238,13 @@ describe('the command-line check', () => {
       }
     }
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-    expect(await main([], { plugins: [addElectron] })).toBe(1)
+    expect(await main({ plugins: [addElectron] })).toBe(1)
     expect(error.mock.calls.join('\n')).toContain('+ src/main/native-chat/transcript-read-cache.ts')
   }, 120_000)
 
   // Why real: the value of this gate is the transitive edges, which a fixture cannot model.
-  it('passes on the tree as it is, matching the checked-in baseline', async () => {
+  it('passes on the tree as it is, with nothing reachable importing electron', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {})
-    expect(await main([])).toBe(0)
+    expect(await main()).toBe(0)
   }, 120_000)
-})
-
-describe('readBaseline', () => {
-  it('drops comments and blank lines and sorts, so baseline formatting cannot cause a false diff', () => {
-    expect(readBaseline('# header\n\n  b/second.ts \na/first.ts\n')).toEqual([
-      'a/first.ts',
-      'b/second.ts'
-    ])
-  })
-})
-
-describe('diffAgainstBaseline', () => {
-  it('reports a module that started importing electron', () => {
-    expect(diffAgainstBaseline(['a.ts', 'b.ts'], ['a.ts'])).toEqual({
-      added: ['b.ts'],
-      removed: []
-    })
-  })
-
-  it('reports a module that stopped, so the baseline is forced to tighten rather than drift', () => {
-    expect(diffAgainstBaseline(['a.ts'], ['a.ts', 'b.ts'])).toEqual({
-      added: [],
-      removed: ['b.ts']
-    })
-  })
-
-  it('is quiet when the set is unchanged', () => {
-    expect(diffAgainstBaseline(['a.ts'], ['a.ts'])).toEqual({ added: [], removed: [] })
-  })
-})
-
-describe('the checked-in baseline', () => {
-  // Why an exact-empty assertion now: the reachable set reached zero, so "may only
-  // shrink" has no room left and any entry at all is a regression. This is strictly
-  // stronger than the old under-src/ check, which only stopped a node_modules path from
-  // padding a non-empty count.
-  it('stays empty, so nothing reachable from the runtime imports electron', () => {
-    const baseline = readBaseline(readFileSync('config/runtime-electron-baseline.txt', 'utf8'))
-    expect(baseline).toEqual([])
-  })
 })

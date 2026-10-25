@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { encrypt } from '../../../shared/e2ee-crypto'
 import { isRuntimeSubscriptionReplayResponse } from '../../../shared/runtime-subscription-replay'
+import type { PairedE2EEClientHandshake } from '../../../shared/paired-e2ee-client-handshake'
+import { createFixedKeyLegacyHandshakeForTest } from '../../../shared/paired-e2ee-fixed-key-test-fixture'
 import { WebRuntimeClient } from './web-runtime-client'
 
 const fakeSockets: FakeWebSocket[] = []
@@ -24,39 +25,44 @@ class FakeWebSocket {
 
 type ClientInternals = {
   ws: FakeWebSocket | null
-  sharedKey: Uint8Array | null
+  handshake: PairedE2EEClientHandshake | null
   state: string
   subscriptions: Map<string, { needsReplay: boolean; pendingReplayTag: boolean }>
-  subscribeOnCurrentConnection: WebRuntimeClient['subscribe']
-  handleInterruptedSubscriptions(): void
+  handleSocketClosed(socket: FakeWebSocket): void
   handleSocketMessage(rawData: unknown, sourceWs?: unknown): Promise<void>
   setState(next: string): void
+  subscribeOnCurrentConnection(
+    method: string,
+    params: unknown,
+    callbacks: unknown
+  ): Promise<{ unsubscribe: () => void }>
 }
 
 function createConnectedClient(): {
   client: WebRuntimeClient
   internals: ClientInternals
   sharedKey: Uint8Array
+  initialSocket: FakeWebSocket
 } {
   const client = new WebRuntimeClient({
-    v: 2,
     endpoint: 'ws://127.0.0.1:6768',
-    deviceToken: 'token',
-    publicKeyB64: Buffer.alloc(32).toString('base64')
+    hostPublicKeyB64: Buffer.alloc(32).toString('base64'),
+    credential: { kind: 'token', deviceToken: 'token' }
   })
-  fakeSockets[0]!.readyState = FakeWebSocket.OPEN
+  const initialSocket = fakeSockets[0]!
+  initialSocket.readyState = FakeWebSocket.OPEN
   const sharedKey = new Uint8Array(32)
   const internals = client as unknown as ClientInternals
-  internals.sharedKey = sharedKey
-  internals.state = 'connected'
-  return { client, internals, sharedKey }
+  internals.handshake = createFixedKeyLegacyHandshakeForTest(sharedKey)
+  internals.setState('connected')
+  return { client, internals, sharedKey, initialSocket }
 }
 
 function reconnect(internals: ClientInternals, sharedKey: Uint8Array): FakeWebSocket {
   const replacementSocket = new FakeWebSocket('ws://127.0.0.1:6768')
   replacementSocket.readyState = FakeWebSocket.OPEN
   internals.ws = replacementSocket
-  internals.sharedKey = sharedKey
+  internals.handshake = createFixedKeyLegacyHandshakeForTest(sharedKey)
   internals.setState('connected')
   return replacementSocket
 }
@@ -82,7 +88,7 @@ describe('WebRuntimeClient retained subscription replay', () => {
   it.each(['session.tabs.subscribeAll', 'notifications.subscribe'])(
     'replays retained %s subscriptions and tags the first snapshot',
     async (method) => {
-      const { client, internals, sharedKey } = createConnectedClient()
+      const { client, internals, sharedKey, initialSocket } = createConnectedClient()
       const onResponse = vi.fn()
       const onClose = vi.fn()
       const onTransportInterrupted = vi.fn()
@@ -94,7 +100,7 @@ describe('WebRuntimeClient retained subscription replay', () => {
       )
       const initialId = Array.from(internals.subscriptions.keys())[0]!
 
-      internals.handleInterruptedSubscriptions()
+      internals.handleSocketClosed(initialSocket)
 
       expect(onClose).not.toHaveBeenCalled()
       expect(onTransportInterrupted).toHaveBeenCalledOnce()
@@ -107,15 +113,14 @@ describe('WebRuntimeClient retained subscription replay', () => {
       expect(internals.subscriptions.get(replacementId)?.pendingReplayTag).toBe(true)
 
       await internals.handleSocketMessage(
-        encrypt(
+        internals.handshake!.channel.sealText(
           JSON.stringify({
             id: replacementId,
             ok: true,
             streaming: true,
             result: { type: 'snapshots', snapshots: [] },
             _meta: { runtimeId: 'runtime-after-serve-restart' }
-          }),
-          sharedKey
+          })
         ),
         replacementSocket
       )
@@ -130,7 +135,7 @@ describe('WebRuntimeClient retained subscription replay', () => {
   )
 
   it('closes a retained subscription when replay setup fails', async () => {
-    const { client, internals, sharedKey } = createConnectedClient()
+    const { client, internals, sharedKey, initialSocket } = createConnectedClient()
     const onResponse = vi.fn()
     const onClose = vi.fn()
     await internals.subscribeOnCurrentConnection(
@@ -138,19 +143,18 @@ describe('WebRuntimeClient retained subscription replay', () => {
       {},
       { onResponse, onClose }
     )
-    internals.handleInterruptedSubscriptions()
+    internals.handleSocketClosed(initialSocket)
 
     const replacementSocket = reconnect(internals, sharedKey)
     const replacementId = Array.from(internals.subscriptions.keys())[0]!
     await internals.handleSocketMessage(
-      encrypt(
+      internals.handshake!.channel.sealText(
         JSON.stringify({
           id: replacementId,
           ok: false,
           error: { code: 'method_not_found', message: 'subscription unavailable' },
           _meta: { runtimeId: 'runtime-after-serve-restart' }
-        }),
-        sharedKey
+        })
       ),
       replacementSocket
     )

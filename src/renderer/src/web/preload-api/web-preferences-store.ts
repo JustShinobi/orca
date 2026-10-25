@@ -1,26 +1,16 @@
 import type { PreloadApi } from '../../../../preload/api-types'
 import { normalizeAutoRenameBranchFromWorkDefaultOn } from '../../../../shared/auto-rename-branch-from-work-settings'
-import {
-  getDefaultSettings,
-  getDefaultUIState,
-  getWorktreeCardModeProperties
-} from '../../../../shared/constants'
+import { getDefaultSettings, getDefaultUIState, getWorktreeCardModeProperties } from '../../../../shared/constants'
 import { normalizeWorktreeVisibilityDefaults } from '../../../../shared/external-worktree-visibility'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
-import {
-  normalizeOsc52ClipboardDefaultOn,
-  osc52ClipboardDefaultOnOverridesPersistedOff
-} from '../../../../shared/osc52-clipboard-settings'
+import { normalizeOsc52ClipboardDefaultOn, osc52ClipboardDefaultOnOverridesPersistedOff } from '../../../../shared/osc52-clipboard-settings'
 import type { PersistedUIState } from '../../../../shared/persisted-ui-state-types'
-import {
-  applyPRBotAuthorOverride,
-  normalizePRBotAuthorOverrides
-} from '../../../../shared/pr-bot-author-overrides'
+import { applyPRBotAuthorOverride, normalizePRBotAuthorOverrides } from '../../../../shared/pr-bot-author-overrides'
 import { normalizeTerminalCursorStyleDefault } from '../../../../shared/terminal-cursor-style-settings'
 import { normalizeTerminalCustomThemes } from '../../../../shared/terminal-custom-themes'
 import { normalizeUiLanguage } from '../../../../shared/ui-language'
 import { readStoredWebRuntimeEnvironment } from '../web-runtime-environment'
-import { mergeSettings, mergeWebUIState } from './web-preference-normalization'
+import { mergeSettings, mergeWebUIState, runtimeChatPermissionSetting } from './web-preference-normalization'
 import { callRuntimeResult } from './web-runtime-calls'
 import { requireActiveEnvironmentOrNull, webRuntimeState } from './web-runtime-session'
 import { zcodePlanSiteOwner, settingsForZcodePlanSiteOwner } from './web-zcode-plan-site'
@@ -163,6 +153,7 @@ export async function getRuntimeBackedStoredSettings(): Promise<GlobalSettings> 
     if (result.settings.previewProxy && typeof result.settings.previewProxy === 'object') {
       runtimeSettings.previewProxy = result.settings.previewProxy
     }
+    Object.assign(runtimeSettings, runtimeChatPermissionSetting(result.settings))
     // Read-only mirror: the host owns this capability and `syncRuntimeBackedSettings` never
     // sends it back, so web shows what the host enforces instead of a local value it ignores.
     if (typeof result.settings.artifactSharingEnabled === 'boolean') {
@@ -235,6 +226,7 @@ export async function syncRuntimeBackedSettings(
   if (updates.previewProxy && typeof updates.previewProxy === 'object') {
     runtimeUpdates.previewProxy = updates.previewProxy
   }
+  Object.assign(runtimeUpdates, runtimeChatPermissionSetting(updates))
   if (Object.keys(runtimeUpdates).length === 0) {
     return localNext
   }

@@ -32,9 +32,12 @@ export type RuntimeServiceCommandSurface = {
   dispatchMobileNotification: RuntimeMobileNotificationController['dispatch']
   getMissedNotificationsSince: RuntimeMobileNotificationController['getMissedSince']
   configureNotificationDismissalStore: RuntimeMobileNotificationController['configureDismissalStore']
+  closeNotificationDismissals: RuntimeMobileNotificationController['closeDismissals']
   reconcileDismissedPushes: RuntimeMobileNotificationController['reconcileDismissedPushes']
   getMobileNotificationEpoch: RuntimeMobileNotificationController['getEpoch']
   dismissMobileNotification: RuntimeMobileNotificationController['dismiss']
+  retireStructuredAttention: RuntimeMobileNotificationController['retireStructuredAttention']
+  reconcileStructuredPromptAttention: RuntimeMobileNotificationController['reconcileStructuredPromptAttention']
   dispatchPluginNotification: RuntimeMobileNotificationController['dispatchPlugin']
   setMobilePushRegistrar: RuntimeMobileNotificationController['setPushRegistrar']
   testMobilePushDevice: RuntimeMobileNotificationController['testPushDevice']
@@ -52,7 +55,9 @@ export type RuntimeServiceCommandSurface = {
   selectCodexAccountForTarget: RuntimeAccountController['selectCodexForTarget']
   consumeCodexRateLimitResetCredit: RuntimeAccountController['consumeCodexResetCredit']
   removeClaudeAccount: RuntimeAccountController['removeClaude']
-  addClaudeAccountFromConfigDir: RuntimeAccountController['addClaudeFromConfigDir']
+  beginClaudeSignIn: RuntimeAccountController['beginClaudeSignIn']
+  finishClaudeSignIn: RuntimeAccountController['finishClaudeSignIn']
+  cancelClaudeSignIn: RuntimeAccountController['cancelClaudeSignIn']
   removeCodexAccount: RuntimeAccountController['removeCodex']
   addCodexAccountFromHome: RuntimeAccountController['addCodexFromHome']
   addDataAccountFromHome: RuntimeAccountController['addDataFromHome']
@@ -127,9 +132,13 @@ export function installRuntimeServiceCommandSurface(
     dispatchMobileNotification: notifications.dispatch.bind(notifications),
     getMissedNotificationsSince: notifications.getMissedSince.bind(notifications),
     configureNotificationDismissalStore: notifications.configureDismissalStore.bind(notifications),
+    closeNotificationDismissals: notifications.closeDismissals.bind(notifications),
     reconcileDismissedPushes: notifications.reconcileDismissedPushes.bind(notifications),
     getMobileNotificationEpoch: notifications.getEpoch.bind(notifications),
     dismissMobileNotification: notifications.dismiss.bind(notifications),
+    retireStructuredAttention: notifications.retireStructuredAttention.bind(notifications),
+    reconcileStructuredPromptAttention:
+      notifications.reconcileStructuredPromptAttention.bind(notifications),
     dispatchPluginNotification: notifications.dispatchPlugin.bind(notifications),
     setMobilePushRegistrar: notifications.setPushRegistrar.bind(notifications),
     testMobilePushDevice: notifications.testPushDevice.bind(notifications),
@@ -149,7 +158,9 @@ export function installRuntimeServiceCommandSurface(
     selectCodexAccountForTarget: accounts.selectCodexForTarget.bind(accounts),
     consumeCodexRateLimitResetCredit: accounts.consumeCodexResetCredit.bind(accounts),
     removeClaudeAccount: accounts.removeClaude.bind(accounts),
-    addClaudeAccountFromConfigDir: accounts.addClaudeFromConfigDir.bind(accounts),
+    beginClaudeSignIn: accounts.beginClaudeSignIn.bind(accounts),
+    finishClaudeSignIn: accounts.finishClaudeSignIn.bind(accounts),
+    cancelClaudeSignIn: accounts.cancelClaudeSignIn.bind(accounts),
     removeCodexAccount: accounts.removeCodex.bind(accounts),
     addCodexAccountFromHome: accounts.addCodexFromHome.bind(accounts),
     addDataAccountFromHome: accounts.addDataFromHome.bind(accounts),

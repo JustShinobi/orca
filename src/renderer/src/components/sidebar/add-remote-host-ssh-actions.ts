@@ -4,14 +4,9 @@ import {
   getEditingTargetFromSshConfigHost,
   getSshTargetDraftConnectionFields,
   hasAdvancedConnectionValues,
-  isRelayGracePeriodValid,
-  parseRelayGracePeriodSeconds,
   type EditingTarget
 } from '../settings/ssh-target-draft'
-import {
-  MAX_SSH_RELAY_GRACE_PERIOD_SECONDS,
-  SSH_CONFIG_HOST_RESULT_LIMIT
-} from '../../../../shared/ssh-types'
+import { SSH_CONFIG_HOST_RESULT_LIMIT } from '../../../../shared/ssh-types'
 import type {
   SshConfigHostSummary,
   SshConfigHostListArgs,
@@ -23,11 +18,6 @@ import type {
   SshTargetCreateInput
 } from '../../../../shared/ssh-types'
 import { isDuplicateSshTargetAlias } from './ssh-target-duplicate'
-import {
-  addSshTargetForOwner,
-  importSshConfigForOwner,
-  type SshTargetOwnerEnvironment
-} from '@/runtime/runtime-ssh-target-management'
 
 type SshApi = {
   listTargets: () => Promise<SshTarget[]>
@@ -40,20 +30,25 @@ type SshApi = {
   }>
 }
 
-export async function saveNewSshHostFromForm({
+type SavedSshHost = Pick<SshTarget, 'configHost' | 'label' | 'host'>
+
+/** `ssh` is this client's own API or a paired server's (whose hosts never touch local metadata). */
+export async function saveNewSshHostFromForm<T extends SavedSshHost>({
   form,
   ssh,
-  owner = null,
   recordSshRepoReadoptions,
   setSshTargetsMetadata,
   recordFeatureInteraction
 }: {
   form: EditingTarget
-  ssh: SshApi
-  /** When set, the target is added on the paired runtime server instead of locally. */
-  owner?: SshTargetOwnerEnvironment | null
+  ssh: {
+    listTargets: () => Promise<T[]>
+    addTarget: (args: {
+      target: SshTargetCreateInput
+    }) => Promise<{ repoReadoptions: SshRepoReadoption[] }>
+  }
   recordSshRepoReadoptions: (readoptions: readonly SshRepoReadoption[]) => void
-  setSshTargetsMetadata: (targets: SshTarget[]) => void
+  setSshTargetsMetadata: (targets: T[]) => void
   recordFeatureInteraction: (feature: 'ssh') => void
 }): Promise<'saved' | 'validation-failed' | 'failed'> {
   const { host, configHost, username, port } = getSshTargetDraftConnectionFields(form)
@@ -75,23 +70,10 @@ export async function saveNewSshHostFromForm({
     )
     return 'validation-failed'
   }
-  const graceSeconds = parseRelayGracePeriodSeconds(form)
-  if (!isRelayGracePeriodValid(form, graceSeconds)) {
-    toast.error(
-      translate(
-        'auto.components.sidebar.AddRemoteHostDialog.sshRelayGraceInvalid',
-        'Terminal timeout must be between 60 and {{value0}} seconds.',
-        { value0: MAX_SSH_RELAY_GRACE_PERIOD_SECONDS }
-      )
-    )
-    return 'validation-failed'
-  }
-
   const identityFile = form.identityFile.trim() || undefined
   const proxyCommand = form.proxyCommand.trim() || undefined
   const jumpHost = form.jumpHost.trim() || undefined
   const systemSshConnectionReuse = form.systemSshConnectionReuse ? undefined : false
-  const remoteRuntime = form.remoteRuntime === 'auto' ? undefined : form.remoteRuntime
   const target = {
     label: form.label.trim() || (username ? `${username}@${host}` : configHost || host),
     configHost,
@@ -99,43 +81,34 @@ export async function saveNewSshHostFromForm({
     port,
     username,
     ...(form.gssapiAuthentication ? { gssapiAuthentication: true } : {}),
-    relayGracePeriodSeconds: graceSeconds,
     ...(identityFile ? { identityFile } : {}),
     ...(proxyCommand ? { proxyCommand } : {}),
     ...(jumpHost ? { jumpHost } : {}),
-    ...(systemSshConnectionReuse === false ? { systemSshConnectionReuse } : {}),
-    ...(remoteRuntime ? { remoteRuntime } : {})
+    ...(systemSshConnectionReuse === false ? { systemSshConnectionReuse } : {})
   }
 
   try {
-    // Why: the dedup check only sees this client's local target list, so it's
-    // skipped for server-owned targets — the paired runtime is the source of
-    // truth for what's already configured there.
-    if (!owner) {
-      const existingTargets = await ssh.listTargets()
-      if (
-        isDuplicateSshTargetAlias({
-          existingTargets,
-          configHost: target.configHost,
-          label: target.label,
-          host: target.host
-        })
-      ) {
-        toast.error(
-          translate(
-            'auto.components.sidebar.AddRemoteHostDialog.sshAlreadyExists',
-            'That SSH host is already in Orca.'
-          )
+    const existingTargets = await ssh.listTargets()
+    if (
+      isDuplicateSshTargetAlias({
+        existingTargets,
+        configHost: target.configHost,
+        label: target.label,
+        host: target.host
+      })
+    ) {
+      toast.error(
+        translate(
+          'auto.components.sidebar.AddRemoteHostDialog.sshAlreadyExists',
+          'That SSH host is already in Orca.'
         )
-        return 'validation-failed'
-      }
+      )
+      return 'validation-failed'
     }
 
-    const result = await addSshTargetForOwner(owner, target, ssh.addTarget)
-    if (!owner) {
-      recordSshRepoReadoptions(result.repoReadoptions)
-      setSshTargetsMetadata(await ssh.listTargets())
-    }
+    const result = await ssh.addTarget({ target })
+    recordSshRepoReadoptions(result.repoReadoptions)
+    setSshTargetsMetadata(await ssh.listTargets())
     recordFeatureInteraction('ssh')
     toast.success(
       translate('auto.components.sidebar.AddRemoteHostDialog.sshSaved', 'SSH host added.')
@@ -183,14 +156,11 @@ export async function prefillFormFromSshConfigHost(
 /** Bulk-load ~/.ssh/config hosts into Orca’s host list (sidebar targets). */
 export async function addAllSshConfigHostsToOrca({
   ssh,
-  owner = null,
   recordSshRepoReadoptions,
   setSshTargetsMetadata,
   recordFeatureInteraction
 }: {
   ssh: SshApi
-  /** When set, ~/.ssh/config is imported on the paired runtime server instead of locally. */
-  owner?: SshTargetOwnerEnvironment | null
   recordSshRepoReadoptions: (readoptions: readonly SshRepoReadoption[]) => void
   setSshTargetsMetadata: (targets: SshTarget[]) => void
   recordFeatureInteraction: (feature: 'ssh') => void
@@ -199,11 +169,9 @@ export async function addAllSshConfigHostsToOrca({
     // Why: no reAdopt — the button counts and promises only the *new* hosts the picker
     // showed. Re-adopting would resurrect hosts the user deleted, which the count omits.
     // Settings → Import stays the explicit re-adopt path.
-    const result = await importSshConfigForOwner(owner, ssh.importConfig)
-    if (!owner) {
-      recordSshRepoReadoptions(result.repoReadoptions)
-      setSshTargetsMetadata(await ssh.listTargets())
-    }
+    const result = await ssh.importConfig()
+    recordSshRepoReadoptions(result.repoReadoptions)
+    setSshTargetsMetadata(await ssh.listTargets())
     recordFeatureInteraction('ssh')
     if (result.targets.length === 0) {
       toast(

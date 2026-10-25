@@ -39,8 +39,7 @@ export default React.memo(function AddRepoDialog({
   const fetchWorktrees = useAppStore((s) => s.fetchWorktrees)
   const setHideDefaultBranchWorkspace = useAppStore((s) => s.setHideDefaultBranchWorkspace)
   const settings = useAppStore((s) => s.settings)
-  const { closeModal, closeForFolderHandoff, finishProjectAdd, handleOpenSshSettings } =
-    useAddRepoHostedController(hosted)
+  const { closeModal, closeForFolderHandoff, finishProjectAdd } = useAddRepoHostedController(hosted)
   const [step, setStep] = useState<AddRepoDialogStep>('add')
   const [isAdding, setIsAdding] = useState(false)
   const [addProjectBusyLabel, setAddProjectBusyLabel] = useState<string | null>(null)
@@ -68,8 +67,6 @@ export default React.memo(function AddRepoDialog({
     setActiveNestedScanId,
     handleStopNestedScan,
     resetNestedRepoReviewState,
-    showRemoteNestedRepoReview,
-    trackRemoteNestedScanResult,
     handleImportNestedRepos,
     handleOpenNestedRootFolder,
     resetNestedImportFlow,
@@ -91,24 +88,19 @@ export default React.memo(function AddRepoDialog({
     remotePath,
     remoteError,
     isAddingRemote,
-    isScanningNested: isScanningRemoteNested,
     setSelectedTargetId,
     setRemotePath,
     setRemoteError,
     resetRemoteState,
     handleOpenRemoteStep,
     handleAddRemoteRepo,
-    handleConnectTarget,
-    stopRemoteNestedScan
+    handleConnectTarget
   } = useRemoteRepo(
     fetchWorktrees,
     setStep,
     // Why: useRemoteRepo closes only for the non-git → confirm-dialog handoff.
     closeForFolderHandoff,
     (repoId, executionHostId) => completeGitRepoAdd(repoId, 'ssh_remote_path', executionHostId),
-    scanNestedRepos,
-    showRemoteNestedRepoReview,
-    trackRemoteNestedScanResult,
     selectedRuntimeEnvironmentId
   )
   const {
@@ -128,8 +120,7 @@ export default React.memo(function AddRepoDialog({
     (repoId, executionHostId) => completeGitRepoAdd(repoId, 'create_project', executionHostId),
     {
       hostId: hostSelection.selectedHostId,
-      runtimeEnvironmentId: selectedRuntimeEnvironmentId,
-      sshTargetId: hostSelection.selectedSshTargetId
+      runtimeEnvironmentId: selectedRuntimeEnvironmentId
     }
   )
 
@@ -143,7 +134,6 @@ export default React.memo(function AddRepoDialog({
   } = useCreateProjectDefaults({
     step,
     activeRuntimeEnvironmentId: selectedRuntimeEnvironmentId,
-    sshTargetId: hostSelection.selectedSshTargetId,
     createParent,
     setCreateParent
   })
@@ -162,8 +152,8 @@ export default React.memo(function AddRepoDialog({
     handleClone
   } = useAddRepoCloneFlow({
     step,
+    hostId: hostSelection.selectedHostId,
     activeRuntimeEnvironmentId: selectedRuntimeEnvironmentId,
-    sshTargetId: hostSelection.selectedSshTargetId,
     workspaceDir: settings?.workspaceDir,
     fetchWorktrees,
     onGitRepoReady: completeGitRepoAdd
@@ -293,7 +283,6 @@ export default React.memo(function AddRepoDialog({
         step={step}
         isRuntimeEnvironmentActive={isRuntimeEnvironmentActive}
         activeRuntimeEnvironmentId={selectedRuntimeEnvironmentId}
-        isSshLikely={false}
         repoCount={repos.length}
         isAdding={isAdding}
         addProjectBusyLabel={addProjectBusyLabel}
@@ -308,16 +297,13 @@ export default React.memo(function AddRepoDialog({
         isCloning={isCloning}
         sshTargets={sshTargets}
         selectedTargetId={selectedTargetId}
-        selectedSshTargetId={hostSelection.selectedSshTargetId}
         selectedHostLabel={
           hostSelection.hostOptions.find((host) => host.id === hostSelection.selectedHostId)
             ?.label ?? null
         }
-        lockSshTargetSelection={hostSelection.selectedParsedHost?.kind === 'ssh'}
         remotePath={remotePath}
         remoteError={remoteError}
         isAddingRemote={isAddingRemote}
-        isScanningRemoteNested={isScanningRemoteNested}
         nestedScan={nestedScan}
         nestedSelectedPaths={nestedSelectedPaths}
         nestedGroupName={nestedGroupName}
@@ -326,21 +312,17 @@ export default React.memo(function AddRepoDialog({
         createError={createError}
         isCreating={isCreating}
         hostSelector={<AddRepoHostSelectorSlot hostSelection={hostSelection} />}
-        showRemoteAction={selectedHostKind === 'runtime'}
         actionsDisabled={!hostSelection.selectedHostId}
-        browseHostKind={
-          selectedHostKind === 'ssh' || selectedHostKind === 'runtime' ? selectedHostKind : 'local'
-        }
+        browseHostKind={selectedHostKind === 'local' ? 'local' : 'runtime'}
         createDefaultParent={createDefaultParent}
         createGitAvailability={createGitAvailability}
         createRuntimeParentStatus={createRuntimeParentStatus}
         createParentDefaultPending={createParentDefaultPending}
-        manualCreateParentEntry={isRuntimeEnvironmentActive || selectedHostKind === 'ssh'}
+        manualCreateParentEntry={isRuntimeEnvironmentActive}
         onBrowse={() =>
           routeAddRepoBrowse(hostSelection.selectedParsedHost, {
             browseLocal: () => void handleBrowse(),
-            browseRuntime: () => setStep('server-path'),
-            browseSsh: (targetId) => void handleOpenRemoteStep(targetId)
+            browseRuntime: () => setStep('server-path')
           })
         }
         onOpenCloneStep={() => {
@@ -370,18 +352,7 @@ export default React.memo(function AddRepoDialog({
           setRemoteError(null)
         }}
         onAddRemoteRepo={handleAddRemoteRepo}
-        onOpenSshSettings={() => {
-          // Why: a paired server's SSH targets are managed from the Add SSH
-          // host step scoped to that server, not the desktop's local Settings
-          // page — Settings → SSH only edits the Desktop's own targets.
-          if (selectedRuntimeEnvironmentId) {
-            setStep('add')
-            return
-          }
-          handleOpenSshSettings()
-        }}
         onConnectTarget={handleConnectTarget}
-        onStopRemoteNestedScan={stopRemoteNestedScan}
         onCloneUrlChange={(value) => {
           setCloneUrl(value)
           setCloneError(null)
