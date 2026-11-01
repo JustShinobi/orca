@@ -27,7 +27,9 @@ const {
   netFetchMock: vi.fn()
 }))
 
-vi.mock('electron', () => ({ net: { fetch: netFetchMock } }))
+vi.mock('../../network/http-client', () => ({
+  getMainHttpClient: () => ({ fetch: netFetchMock })
+}))
 
 vi.mock('../serve-sim-execution', async (importOriginal) => ({
   execServeSimCommand: execServeSimCommandMock,
@@ -392,5 +394,21 @@ describe('IosEmulatorBackend', () => {
 
     const unreachable = new IosEmulatorBackend({ waitForEndpointReady: async () => false })
     expect(await unreachable.isSessionReusable(info)).toBe(false)
+  })
+
+  it('keeps a reachable helper when its process lookup fails', async () => {
+    listServeSimHelperProcessesForDeviceMock.mockRejectedValueOnce(new Error('ps failed'))
+    parseServeSimDetachedSessionMock.mockReturnValue({
+      deviceUdid: 'device-1',
+      streamUrl: 'http://127.0.0.1:3102/stream.mjpeg',
+      wsUrl: 'ws://127.0.0.1:3102',
+      helperPid: 1234
+    })
+    const backend = new IosEmulatorBackend({ waitForEndpointReady: async () => true })
+
+    await expect(backend.startSession('device-1')).resolves.toMatchObject({
+      deviceUdid: 'device-1'
+    })
+    expect(killServeSimHelperProcessesForDeviceMock).not.toHaveBeenCalled()
   })
 })

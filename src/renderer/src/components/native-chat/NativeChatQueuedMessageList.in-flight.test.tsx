@@ -1,7 +1,5 @@
 // @vitest-environment happy-dom
 
-// A queue action still on its way to the host greys its controls until the host answers.
-
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
@@ -23,7 +21,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { NativeChatQueuedMessageList } from './NativeChatQueuedMessageList'
 import { useStructuredAgentSessionQueuedMessages } from './use-structured-agent-session-queued-messages'
 import type { StructuredAgentSessionWrite } from './use-structured-agent-session-mutate'
-import type { AgentSessionQueuedMessage } from '../../../../shared/agent-session-wire'
+import type { AgentSessionQueuedMessage } from '../../../../shared/agent-session/requests/agent-session-queued-message-wire'
 
 function waitingDraft(messageId: string, position: number): AgentSessionQueuedMessage {
   return {

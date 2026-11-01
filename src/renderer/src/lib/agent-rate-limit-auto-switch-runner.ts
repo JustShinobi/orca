@@ -1,5 +1,5 @@
 import type { AutoSwitchRateLimitAgent } from '../../../shared/agent-rate-limit-detection'
-import type { AgentProviderSessionMetadata } from '../../../shared/agent-session-resume'
+import type { AgentProviderSessionMetadata } from '../../../shared/agent-session/lifecycle/agent-session-resume'
 import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv

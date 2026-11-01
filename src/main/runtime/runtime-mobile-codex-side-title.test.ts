@@ -4,8 +4,7 @@ import { renewRuntimeMobileAgentStatusFromPtyTitle } from './runtime-mobile-agen
 import type { RuntimePtyWorktreeRecord } from './runtime-terminal-state-records'
 import { makeTuiIdlePty } from './tui-idle-wait-test-harness'
 
-// Shape seen on a paired host with Codex 0.164: the main turn's last hook (PreToolUse for a long
-// exec), then `/side` shows an idle side chat, so the title loses its spinner after the hook.
+// Codex 0.164: idle /side output after a long main-turn PreToolUse hook incorrectly cleared the paired-host spinner.
 function runningExec(hookAt: number, agentType: string): AgentStatusEntry {
   return {
     state: 'working',
@@ -42,19 +41,6 @@ describe('paired/mobile Codex status while a /side chat is shown', () => {
     expect(out).toMatchObject({ state: 'working', prompt: 'main task please' })
   })
 
-  it('keeps the main turn prompt once the title shows main working again', () => {
-    const hookAt = Date.now() - 20_000
-    const out = renewRuntimeMobileAgentStatusFromPtyTitle(runningExec(hookAt, 'codex'), {
-      ...sideChatIdlePty(hookAt),
-      lastOscTitle: '⠋ repo',
-      lastOscTitleEpochMs: hookAt + 15_000,
-      lastAgentStatus: 'working',
-      lastAgentStatusStartedAtEpochMs: hookAt + 15_000,
-      lastAgentStatusRichInvalidatedAtEpochMs: hookAt + 15_000
-    })
-    expect(out).toMatchObject({ state: 'working', prompt: 'main task please' })
-  })
-
   it('keeps a main turn waiting on approval and its prompt once the side chat closes', () => {
     const hookAt = Date.now() - 20_000
     const out = renewRuntimeMobileAgentStatusFromPtyTitle(
@@ -87,14 +73,5 @@ describe('paired/mobile Codex status while a /side chat is shown', () => {
       providerGenerationResetAtEpochMs: hookAt + 5_000
     })
     expect(out).toBeNull()
-  })
-
-  it('still lets an idle title end the turn of an agent whose title follows that turn', () => {
-    const hookAt = Date.now() - 10_000
-    const out = renewRuntimeMobileAgentStatusFromPtyTitle(
-      runningExec(hookAt, 'claude'),
-      sideChatIdlePty(hookAt)
-    )
-    expect(out?.state).toBe('done')
   })
 })

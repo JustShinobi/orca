@@ -26,38 +26,43 @@ export function recoveryFromError(error: unknown): string | undefined {
   return undefined
 }
 
-export function federatedFailedReceipt(args: {
-  runId: string
-  taskId: string
-  dispatchId: string
-  worker: { state: string; stage: string; last_error: string | null }
-  server: { environmentId: string; name: string }
-  launch: OrchestrationWorkerLaunchReceipt
-  setup?: unknown
-  includeSetup?: boolean
-  effects?: unknown[]
-  residualResources?: unknown[]
-  recovery?: string
-}): unknown {
+type FederatedStartWorker = {
+  dispatch_id: string
+  state: string
+  stage: string
+  last_error: string | null
+}
+
+export function federatedFailedReceipt(
+  worker: FederatedStartWorker,
+  ids: { runId: string; taskId: string },
+  server: { environmentId: string; name: string },
+  outcome: {
+    launch: OrchestrationWorkerLaunchReceipt
+    setup?: { state: string } | unknown
+    effects?: unknown[]
+    residualResources?: unknown[]
+    recovery?: string
+  }
+): unknown {
+  const { recovery, ...rest } = outcome
   return {
-    runId: args.runId,
-    taskId: args.taskId,
-    dispatchId: args.dispatchId,
-    state: args.worker.state,
-    stage: args.worker.stage,
-    server: { environmentId: args.server.environmentId, name: args.server.name },
-    failedStage: args.worker.stage,
-    lastError: args.worker.last_error,
-    ...(args.includeSetup ? { setup: args.setup } : {}),
-    launch: args.launch,
-    effects: args.effects ?? [],
-    residualResources: args.residualResources ?? [],
-    ...(args.recovery ? { recovery: args.recovery } : {})
+    ...ids,
+    dispatchId: worker.dispatch_id,
+    state: worker.state,
+    stage: worker.stage,
+    server: { environmentId: server.environmentId, name: server.name },
+    failedStage: worker.stage,
+    lastError: worker.last_error,
+    ...rest,
+    effects: outcome.effects ?? [],
+    residualResources: outcome.residualResources ?? [],
+    ...(recovery ? { recovery } : {})
   }
 }
 
 export function federatedUnknownReceipt(
-  worker: { dispatch_id: string; state: string; stage: string; last_error: string | null },
+  worker: FederatedStartWorker,
   taskId: string,
   serverName: string,
   launch: OrchestrationWorkerLaunchReceipt,

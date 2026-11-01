@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { isRootAgentJournalItem } from '../../shared/agent-session-journal-producer'
+import { isRootAgentJournalItem } from '../../shared/agent-session/journal/agent-session-journal-producer'
 import { encodeClaudeProjectPaths } from '../ai-vault/claude-project-dir-encoding'
 import { wslGatedStat } from '../native-chat/wsl-transcript-fs-access'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
@@ -15,9 +15,7 @@ type ClaudeHistoryView = {
   newest: { key: string; sequence: number; index: number } | null
 }
 
-// A chat's turn-end leaf is the newest transcript row it has shown. Anything Claude wrote after it
-// came from another process on the same conversation (a terminal `claude --resume`), or from this
-// chat's own turn cut off before its end was recorded; rows the chat already holds are skipped.
+// Rows after the saved turn-end leaf come from an external resume or interrupted local turn; skip items already held.
 
 /** Display only and optional: it never settles a send and never gates opening. */
 export async function catchUpClaudeTranscript(input: {

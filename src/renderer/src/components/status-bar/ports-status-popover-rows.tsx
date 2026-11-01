@@ -87,7 +87,14 @@ export function PortRow({
   const runtimeTarget = useWorktreeRuntimeTarget(
     port.kind === 'workspace' ? port.owner.worktreeId : activeWorktreeId
   )
-  const processLabel = port.processName ?? (port.pid ? `PID ${port.pid}` : 'Unknown process')
+  const processLabel =
+    port.processName ??
+    (port.pid
+      ? `PID ${port.pid}`
+      : translate(
+          'auto.components.status.bar.ports.status.popover.rows.unknownProcess',
+          'Unknown process'
+        ))
   const canStop = canStopWorkspacePort(port)
   // Why: the bind address means nothing to a browser client; the preview host is
   // the one that resolves for whoever is reading this popover.
@@ -113,8 +120,7 @@ export function PortRow({
       recordFeatureInteraction('ports')
       const openInOrcaBrowser = resolvePortOpenInOrcaBrowser({
         settings,
-        // Why: keyboard activations have detail=0; only pointer clicks carry
-        // the modifier intent for the system-browser escape hatch.
+        // Keyboard activation has no pointer modifier intent for the system-browser escape hatch.
         event: event.detail > 0 ? event : null,
         isMac: navigator.userAgent.includes('Mac')
       })

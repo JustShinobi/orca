@@ -4,7 +4,7 @@ import type {
   AutomationPrecheckResult,
   AutomationRun
 } from '../../shared/automations-types'
-import type { Store } from '../persistence'
+import type { Store } from '../persistence/loading-store/store'
 import type { HeadlessAutomationDispatcher } from './headless-dispatch'
 import type { AutomationRunTargetResult } from './run-target-resolution'
 import {

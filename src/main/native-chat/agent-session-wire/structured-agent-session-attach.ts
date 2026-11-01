@@ -1,41 +1,42 @@
-import { activeProviderContext } from '../../../shared/agent-session-provider-context'
+import { activeProviderContext } from '../../../shared/agent-session/agent-session-provider-context'
 // Store CAS and idempotency rows make retried create/ensure replay instead of reserving another owner.
 
-import type { AgentSessionJournalIdentity } from '../../../shared/agent-session-journal-types'
-import type { AgentSessionOwnerProbe } from '../../../shared/agent-session-lease-adjudication'
+import type { AgentSessionJournalIdentity } from '../../../shared/agent-session-journal-identity'
+import type { AgentSessionOwnerProbe } from '../../../shared/agent-session/lifecycle/agent-session-lease-adjudication'
 import type {
   StructuredAgentId,
   AgentSessionProviderHandle,
   AgentSessionProviderHandleLink
-} from '../../../shared/agent-session-provider-handle'
+} from '../../../shared/agent-session/lifecycle/agent-session-provider-handle'
 import {
   agentSessionProviderHandleBelongsTo,
   agentSessionProviderHandleFromWire,
   type AgentSessionWireProviderHandle
-} from '../../../shared/agent-session-provider-handle-encoding'
+} from '../../../shared/agent-session/lifecycle/agent-session-provider-handle-encoding'
+import type { AgentSessionAccountHome } from '../../../shared/agent-session/lifecycle/agent-session-account-home'
 import type {
-  AgentSessionAccountHome,
   AgentSessionExecutionLocation,
   AgentSessionLaunchArgs,
   AgentSessionLaunchEnv,
   AgentSessionRecord
-} from '../../../shared/agent-session-record'
+} from '../../../shared/agent-session/lifecycle/agent-session-record'
 import {
   AgentSessionRefusalError,
   agentSessionRefusalFromReference,
   agentSessionRefusalReference,
   isAgentSessionWireRefusalCode,
   refuse,
-  type AgentSessionMutationEnvelope,
   type AgentSessionRefusalReference,
   type AgentSessionWireRefusal
-} from '../../../shared/agent-session-wire'
+} from '../../../shared/agent-session/failures/agent-session-wire-refusals'
+import type { AgentSessionMutationEnvelope } from '../../../shared/agent-session/agent-session-wire'
 import {
   agentSessionFingerprintConflict,
   computeAgentSessionPayloadFingerprint
-} from '../../../shared/agent-session-mutation-envelope'
-import type { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
+} from '../../../shared/agent-session/lifecycle/agent-session-mutation-envelope'
+import type { AgentSessionRecordStore } from '../../runtime/agent-session/records/agent-session-record-store'
 import type { AgentSessionJournal } from '../agent-session-journal/journal-store'
+import type { AdoptedTranscriptSource } from '../agent-session-journal/adopted-transcript-source'
 import { structuredAgentSessionRefusalMessage } from './structured-agent-session-refusal-message'
 
 /** Clients cannot assert spawn tokens, claim keys or owner death; only host observations grant authority. */
@@ -59,7 +60,7 @@ export type AgentSessionAttachParams = {
     providerHandle: AgentSessionProviderHandle
     /** Omit only for exact replay of an already-imported journal. */
     transcriptPath?: string
-    source?: { providerSessionId: string; workspaceCwd: string }
+    source?: AdoptedTranscriptSource
   }
 }
 
@@ -128,7 +129,7 @@ export function admitAttachOrRefuse(
 }
 
 export function journalIdentityFor(
-  record: AgentSessionRecord,
+  record: Pick<AgentSessionRecord, 'sessionId' | 'providerHandleChain' | 'providerContextBoundary'>,
   params: AgentSessionAttachParams
 ): AgentSessionJournalIdentity {
   const active = activeProviderContext(record)
@@ -153,11 +154,7 @@ export type AttachedJournal = {
   unconfirmedClientMessageIds: string[]
 }
 
-/**
- * The conversation's journal, opened — and its crash boundary settled — by the conversation's own
- * open. A send the boundary could only doubt stays `unknown`: whether the provider took it is never
- * inferred from provider history, since absence from a log Orca does not own proves nothing.
- */
+/** Open settles the crash boundary; missing provider history cannot turn unknown delivery into proven refusal. */
 export async function attachJournal(input: {
   record: AgentSessionRecord
   /** The host's open conversation, whose journal the attach adopts. */
@@ -173,14 +170,7 @@ export async function attachJournal(input: {
   }
 }
 
-/**
- * The first link of an adopting session's chain.
- *
- * `adopted` is the only origin besides `created` a chain will accept at its head, and it is the
- * honest one here: this session did not create the conversation. The adapter appends its own
- * `resumed` link once the provider proves the same identity root — or, when it proves the identical
- * handle at the same fence, the validator elides that as a retry and this link stays the head.
- */
+/** Adopted conversations start with adopted, never created; provider proof appends resumed unless identical handle/fence makes it a retry. */
 const ADOPTED_HANDLE_FENCE = 1
 
 function adoptedProviderHandleLink(

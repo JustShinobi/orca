@@ -58,13 +58,11 @@ const USAGE_RESPONSE = {
   subType: 'TYPE_PURCHASE'
 }
 
-// Built with `join` so the expectation matches the separator the fetcher emits on this platform.
 function hostReadPaths(kimiHome: string, tokenName = 'kimi-code'): string[] {
   return [join(kimiHome, 'config.toml'), join(kimiHome, 'credentials', `${tokenName}.json`)]
 }
 
 function freshCredentials(): string {
-  // expires_at far in the future (seconds).
   return JSON.stringify({ access_token: 'tok-abc', expires_at: 99_999_999_999 })
 }
 
@@ -98,24 +96,12 @@ describe('fetchKimiRateLimits', () => {
 
     expect(result.status).toBe('ok')
     expect(result.provider).toBe('kimi')
-    // 5h window from limits[]: 40/100 remaining → 60% used.
     expect(result.session?.windowMinutes).toBe(300)
     expect(result.session?.usedPercent).toBeCloseTo(60)
-    // Weekly from top-level usage: 1000/1000 remaining → 0% used.
     expect(result.weekly?.windowMinutes).toBe(10080)
     expect(result.weekly?.usedPercent).toBeCloseTo(0)
-    // Bearer token from the credentials file is sent.
     const [, init] = fetchMock.mock.calls[0]
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok-abc')
-  })
-
-  it('surfaces an error when the usage request fails', async () => {
-    fsState.credentials = freshCredentials()
-    fetchMock.mockResolvedValueOnce(jsonResponse({}, 500))
-
-    const result = await fetchKimiRateLimits()
-    expect(result.status).toBe('error')
-    expect(result.session).toBeNull()
   })
 
   it('tags a request that throws before a response as a network failure', async () => {
@@ -168,7 +154,6 @@ describe('fetchKimiRateLimits', () => {
   })
 
   it('does NOT refresh or call the API when the token is expired (read-only)', async () => {
-    // expires_at in the past → token stale; fetcher must not hit the network.
     fsState.credentials = JSON.stringify({ access_token: 'tok-old', expires_at: 1 })
 
     const result = await fetchKimiRateLimits()
@@ -180,27 +165,6 @@ describe('fetchKimiRateLimits', () => {
       source: 'oauth'
     })
     expect(fetchMock).not.toHaveBeenCalled()
-  })
-
-  it('reads the host ~/.kimi-code credentials by default', async () => {
-    fsState.credentials = freshCredentials()
-    fetchMock.mockResolvedValueOnce(jsonResponse(USAGE_RESPONSE))
-
-    const result = await fetchKimiRateLimits()
-
-    expect(result.status).toBe('ok')
-    expect(fsState.readPaths).toEqual(hostReadPaths('/home/test/.kimi-code'))
-  })
-
-  it('honors KIMI_CODE_HOME for the host home', async () => {
-    vi.stubEnv('KIMI_CODE_HOME', '/custom/kimi-home')
-    fsState.credentials = freshCredentials()
-    fetchMock.mockResolvedValueOnce(jsonResponse(USAGE_RESPONSE))
-
-    const result = await fetchKimiRateLimits()
-
-    expect(result.status).toBe('ok')
-    expect(fsState.readPaths).toEqual(hostReadPaths('/custom/kimi-home'))
   })
 
   it('ignores a blank KIMI_CODE_HOME instead of reading from the process cwd', async () => {

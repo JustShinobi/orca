@@ -5,7 +5,7 @@ import {
 } from '../../shared/automations-types'
 import type { ClaudeUsageStore } from '../claude-usage/store'
 import type { CodexUsageStore } from '../codex-usage/store'
-import type { Store } from '../persistence'
+import type { Store } from '../persistence/loading-store/store'
 import { clearAutomationDispatchTokens } from './dispatch-tokens'
 import { writeAutomationRunUsage } from './run-usage-collection'
 import type { AutomationRunWriter } from './automation-run-writer'

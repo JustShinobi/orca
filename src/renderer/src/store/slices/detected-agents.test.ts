@@ -6,7 +6,7 @@ import type { Worktree } from '../../../../shared/worktree/types'
 import { createDetectedAgentsSlice } from './detected-agents'
 import { createRuntimeDetectedAgentsSlice } from './runtime-detected-agents'
 import { clearRuntimeCompatibilityCacheForTests } from '@/runtime/runtime-rpc-client'
-import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
+import { getDefaultSettings, FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 
 const detectAgents = vi.fn()
 const refreshAgents = vi.fn()
@@ -119,6 +119,7 @@ describe('createDetectedAgentsSlice WSL context', () => {
     await expect(store.getState().ensureDetectedAgents()).resolves.toEqual(['claude'])
 
     expect(detectAgents).toHaveBeenCalledWith({
+      enabledOnly: true,
       wslDistro: 'Ubuntu',
       projectRuntime: {
         status: 'resolved',
@@ -197,6 +198,7 @@ describe('createDetectedAgentsSlice WSL context', () => {
     await expect(store.getState().refreshDetectedAgents()).resolves.toEqual(['codex'])
 
     expect(refreshAgents).toHaveBeenCalledWith({
+      enabledOnly: true,
       wslDistro: 'Debian',
       projectRuntime: {
         status: 'resolved',
@@ -238,6 +240,7 @@ describe('createDetectedAgentsSlice WSL context', () => {
     expect(store.getState().detectedAgentIds).toEqual([])
 
     expect(detectAgents).toHaveBeenCalledWith({
+      enabledOnly: true,
       projectRuntime: {
         status: 'repair-required',
         repair: {
@@ -265,6 +268,7 @@ describe('createDetectedAgentsSlice WSL context', () => {
     await expect(store.getState().ensureDetectedAgents()).resolves.toEqual(['claude'])
 
     expect(detectAgents).toHaveBeenCalledWith({
+      enabledOnly: true,
       wslDistro: 'Debian',
       projectRuntime: {
         status: 'resolved',
@@ -295,6 +299,7 @@ describe('createDetectedAgentsSlice WSL context', () => {
     await expect(store.getState().ensureDetectedAgents()).resolves.toEqual(['claude'])
 
     expect(detectAgents).toHaveBeenCalledWith({
+      enabledOnly: true,
       projectRuntime: {
         status: 'resolved',
         runtime: {
@@ -323,6 +328,7 @@ describe('createDetectedAgentsSlice WSL context', () => {
     await expect(store.getState().ensureDetectedAgents()).resolves.toEqual(['claude'])
 
     expect(detectAgents).toHaveBeenCalledWith({
+      enabledOnly: true,
       wslDistro: 'Fedora',
       projectRuntime: {
         status: 'resolved',
@@ -350,6 +356,7 @@ describe('createDetectedAgentsSlice WSL context', () => {
     await expect(store.getState().ensureDetectedAgents()).resolves.toEqual(['claude'])
 
     expect(detectAgents).toHaveBeenCalledWith({
+      enabledOnly: true,
       wslDistro: 'Ubuntu',
       projectRuntime: {
         status: 'resolved',
@@ -368,10 +375,11 @@ describe('createDetectedAgentsSlice WSL context', () => {
   it('detects agents in the project override runtime instead of legacy agent location', async () => {
     const store = createTestStore({
       settings: {
+        ...getDefaultSettings('/tmp'),
         localWindowsRuntimeDefault: { kind: 'wsl', distro: 'Ubuntu' },
         localAgentRuntime: 'wsl',
         localAgentWslDistro: 'Ubuntu'
-      } as AppState['settings'],
+      },
       projects: [
         {
           id: 'repo-1',
@@ -386,11 +394,12 @@ describe('createDetectedAgentsSlice WSL context', () => {
       repos: [makeRepo({ id: 'repo-1', path: 'C:\\repo' })],
       activeRepoId: 'repo-1',
       activeWorktreeId: null
-    } as Partial<AppState>)
+    })
 
     await expect(store.getState().ensureDetectedAgents()).resolves.toEqual(['claude'])
 
     expect(detectAgents).toHaveBeenCalledWith({
+      enabledOnly: true,
       projectRuntime: {
         status: 'resolved',
         runtime: {

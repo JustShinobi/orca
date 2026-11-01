@@ -1,5 +1,5 @@
 import type { AutomationPrecheckResult } from '../../shared/automations-types'
-import type { Store } from '../persistence'
+import type { Store } from '../persistence/loading-store/store'
 import { runAutomationPrecheck } from './precheck-runner'
 import { resolveAutomationRunTarget } from './run-target-resolution'
 

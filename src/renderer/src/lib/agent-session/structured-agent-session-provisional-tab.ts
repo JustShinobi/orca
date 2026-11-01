@@ -1,3 +1,10 @@
+import {
+  readNativeChatComposerDraft,
+  structuredAgentSessionDraftScopeKey
+} from '@/components/native-chat/native-chat-composer-draft-store'
+import { nativeChatDraftPositions } from '@/components/native-chat/native-chat-composer-draft-memory'
+import { structuredAgentSessionTabId } from '../../../../shared/agent-session/view/structured-agent-session-projection'
+import { afterPendingTab } from '@/runtime/layout-owner-pending-tabs'
 import type { NativeChatComposerFocusIntent } from '@/components/native-chat/use-native-chat-composer-reveal-focus'
 import type {
   AgentSessionLaunchPlan,
@@ -14,7 +21,7 @@ import {
   type DeclinedStructuredLaunchTerminalOptions,
   type HostAdmittedStructuredLaunch,
   type StructuredLaunchTerminal
-} from '@/lib/structured-agent-session-launch-admission'
+} from '@/lib/agent-session/launch/structured-agent-session-launch-admission'
 import {
   resolveStructuredAgentSessionOwner,
   structuredAgentSessionTargetForHost
@@ -24,23 +31,21 @@ import {
   openTerminalForDeclinedChat,
   openDeclinedTerminal,
   opensAtAction
-} from '../structured-agent-session-action-launch'
+} from './launch/structured-agent-session-action-launch'
 import { holdEmptyWorkspaceDefaultSurfaceForLaunch } from '../empty-workspace-default-surface-claims'
 import type { OpenedAgentSessionTab } from '../structured-agent-session-tab-open-through-layout-owner'
 import {
   captureStructuredLaunchSurfaceAddress,
   openStructuredAgentSessionProvisionalTab
-} from '../structured-agent-session-launch-surface'
+} from './launch/structured-agent-session-launch-surface'
 
 type LocalProvisionalLaunch = StructuredAgentLaunchHandle & { tab: OpenedAgentSessionTab }
 
-/** A chat's tab opens once its host admits it; a launch with no host to ask takes the direct path. */
 export type StructuredAgentSessionProvisionalLaunch =
   | LocalProvisionalLaunch
   | HostAdmittedStructuredLaunch
   | (StructuredAgentLaunchHandle & { tab: null })
 
-/** The host a structured launch would run on, which admits the chat before it exists. */
 export function structuredLaunchOwner(
   plan: Pick<AgentSessionLaunchPlan, 'route' | 'executionHostId'>,
   worktreeId: string,
@@ -68,14 +73,14 @@ export type ProvisionalLaunchArgs = {
   focusIntent?: NativeChatComposerFocusIntent
   target?: AgentSessionLaunchTarget
   targetGroupId?: string
-  /** The tab the chat opens right after, in that tab's group. */
   afterTabId?: string
   activate?: boolean
   /** Identity-only resumes publish on commit; unknown outcomes keep their recovery tab. */
   deferPublication?: true
-  /** Lets workspace flows reveal before the chat's tab is owned: before its host is asked, when no
-   *  session id exists yet. */
+  /** Allow workspace reveal before host acquisition, when the launch has no session ID or owned chat tab yet. */
   beforeOpen?: (sessionId?: string) => boolean | void
+  /** The published tab, or null when the layout owner refuses or the launch ends without a chat. */
+  onTabOpenSettled?: (tabId: string | null, reason?: 'layout-refused') => void
   /** The terminal the host's "no" opens; a caller without one gets a new agent tab's. */
   onHostDeclined?: (
     target: RuntimeClientTarget,
@@ -87,8 +92,6 @@ export type ProvisionalLaunchArgs = {
   declinedOpensCallerSurface?: true
 }
 
-/** Binds the launch to a chat tab: at once for a New Chat the user asked for, otherwise once its
- *  host, this machine included, admits the chat. */
 export function beginStructuredAgentSessionProvisionalLaunch(
   args: ProvisionalLaunchArgs
 ): StructuredAgentSessionProvisionalLaunch | null {
@@ -98,9 +101,10 @@ export function beginStructuredAgentSessionProvisionalLaunch(
   }
   const worktreeId = args.target?.worktreeId ?? args.plan.worktreeId
   let tabOpened = false
-  const cancelIfNoTab = (): void => {
+  const settleWithoutTab = (): void => {
     if (!tabOpened) {
       focusIntent?.cancel()
+      args.onTabOpenSettled?.(null)
     }
   }
   const open = (
@@ -112,18 +116,17 @@ export function beginStructuredAgentSessionProvisionalLaunch(
         focusIntent?.request(launch.tab.id)
       }
     } else if (!launch) {
-      cancelIfNoTab()
+      settleWithoutTab()
     }
     return launch
   }
   try {
     const owner = worktreeId ? structuredLaunchOwner(args.plan, worktreeId, args.target) : null
     if (owner && worktreeId && !args.deferPublication && args.beforeOpen?.() === false) {
-      cancelIfNoTab()
+      settleWithoutTab()
       return null
     }
     if (!owner || !worktreeId) {
-      // No host to ask: the launch path refuses it with its own message.
       return open(beginLocalProvisionalLaunch(args))
     }
     if (opensAtAction(args)) {
@@ -177,10 +180,10 @@ export function beginStructuredAgentSessionProvisionalLaunch(
       onHostDeclined: (target) => openDeclinedTerminal(args, worktreeId, target),
       ...(args.declinedOpensCallerSurface ? { declinedOpensCallerSurface: true as const } : {})
     })
-    void launch.settlement.then(cancelIfNoTab, cancelIfNoTab)
+    void launch.settlement.then(settleWithoutTab, settleWithoutTab)
     return launch
   } catch (error) {
-    cancelIfNoTab()
+    settleWithoutTab()
     throw error
   }
 }
@@ -199,8 +202,16 @@ function beginLocalProvisionalLaunch(
   if (!worktreeId) {
     throw new Error('A provisional structured launch needs its workspace.')
   }
+  const draft = readNativeChatComposerDraft(structuredAgentSessionDraftScopeKey(handle.sessionId))
+  const position = nativeChatDraftPositions.get(draft)
+  const retirePosition = (target = structuredAgentSessionTabId(handle.sessionId)) => {
+    if (position?.at === 'end' && position.target === target) {
+      position.pending = false
+    }
+  }
   try {
     if (args.beforeOpen?.(handle.sessionId) === false) {
+      retirePosition()
       handle.cancel()
       return null
     }
@@ -213,8 +224,20 @@ function beginLocalProvisionalLaunch(
       ...(args.afterTabId ? { afterTabId: args.afterTabId } : {}),
       ...(args.activate !== undefined ? { activate: args.activate } : {})
     })
+    afterPendingTab(tab.id, (shown) => {
+      if (!shown || !useAppStore.getState().getTab(shown)) {
+        retirePosition(tab.id)
+      }
+      if (shown === null) {
+        handle.cancel()
+        args.onTabOpenSettled?.(null, 'layout-refused')
+      } else {
+        args.onTabOpenSettled?.(shown)
+      }
+    })
     return { ...handle, tab }
   } catch (error) {
+    retirePosition()
     // Why: a launch without its owning surface would strand a late publication.
     handle.cancel()
     throw error

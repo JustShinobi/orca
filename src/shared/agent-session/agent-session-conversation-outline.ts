@@ -1,43 +1,35 @@
-// The conversation outline: every user message a structured session's transcript
-// draws, loaded by the client or not, so the message rail can map the whole
-// thread instead of only the pages a client happens to hold.
-//
-// Derived here from journal items with the same projection the transcript runs,
-// so an outline entry's id, order, preview and image count are what the client's
-// own row would show for that message — not a second reading that could disagree.
+// Project every journal user row, including unloaded pages, with the transcript projection so rail identity, order and preview cannot disagree.
 
+import type { AgentJournalCursor } from '../agent-session-journal-identity'
 import type {
-  AgentJournalCursor,
   AgentJournalRenderItem,
   AgentJournalSubmission
-} from '../agent-session-journal-types'
-import type { NativeChatBlock, NativeChatMessage } from '../native-chat-types'
-import { deriveNativeChatRowContent, nativeChatRowRendersContent } from '../native-chat-row-content'
+} from './journal/agent-session-journal-types'
+import type { NativeChatBlock, NativeChatMessage } from '../native-chat/native-chat-types'
+import {
+  deriveNativeChatRowContent,
+  nativeChatRowRendersContent
+} from '../native-chat/transcript/native-chat-row-content'
 import { iterateProcessOutputLines } from '../process-output-field-scanner'
-import { agentJournalSubmissionKey } from '../agent-session-journal-item-key'
-import { dispatchWasWithdrawn } from '../structured-agent-session-dispatch-rejection'
-import { projectStructuredAgentSessionMessages } from '../structured-agent-session-message-projection'
-import { projectNativeChatTranscriptMessages } from '../native-chat-transcript-projection'
-import { nativeChatTurnMembership } from '../native-chat-turn-membership'
+import { agentJournalSubmissionKey } from './journal/agent-session-journal-item-key'
+import { dispatchWasWithdrawn } from './requests/structured-agent-session-dispatch-rejection'
+import { projectStructuredAgentSessionMessages } from './view/structured-agent-session-message-projection'
+import { projectNativeChatTranscriptMessages } from '../native-chat/transcript/native-chat-transcript-projection'
+import { nativeChatTurnMembership } from '../native-chat/transcript/native-chat-turn-membership'
 
-/** Previews are cut on the host: the rail clamps to two lines, so a whole prompt
- *  would cross the wire only to be hidden. */
+/** Cap previews on the host because the rail hides prose beyond two lines. */
 export const AGENT_SESSION_OUTLINE_PREVIEW_MAX_CHARS = 200
 
 export type AgentSessionConversationOutlineEntry = {
-  /** The journal item id, which is also the transcript row's message id. */
   itemId: string
   /** Creation sequence, so a client can tell which entries its loaded window already covers. */
   sequence: number
-  /** Prose with whitespace collapsed, at most the preview cap. Empty when the
-   *  message is images only, or when the host dropped previews to fit the reply. */
+  /** Collapsed prose capped for preview; empty for images-only messages or when omitted to fit the reply. */
   preview: string
   imageCount: number
-  /** The message that opened this one's turn, when this one did not: a steer sent
-   *  into a running turn. Absent from a host that predates the field. */
+  /** The opening message of this steer's running turn; absent on older hosts. */
   turnKey?: string
-  /** What the agent answered, as preview prose. Absent when it said nothing, from a
-   *  host that predates the field, or when the host dropped replies to fit. */
+  /** Reply prose; absent for no reply, an older host or omission to fit the reply. */
   reply?: string
 }
 
@@ -55,8 +47,7 @@ export type NativeChatUserMessagePreview = { text: string; imageCount: number }
 
 const previews = new WeakMap<readonly NativeChatBlock[], NativeChatUserMessagePreview>()
 
-/** What the rail shows for one user message; shared so a loaded row and an
- *  outline entry for the same message cannot preview differently. */
+/** Share preview formatting between loaded transcript rows and outline entries. */
 export function nativeChatUserMessagePreview(
   blocks: readonly NativeChatBlock[]
 ): NativeChatUserMessagePreview {
@@ -114,10 +105,7 @@ function assistantReplyProse(blocks: readonly NativeChatBlock[]): string {
   return prose
 }
 
-/** What the agent answered each turn with, by turn key: the prose of the turn's
- *  last assistant row that has any. Turns are the transcript's own (`turnKeys` from
- *  `nativeChatTurnMembership`), so a steer or a queued prompt cannot cut a reply
- *  short. `only` limits the read to one turn. */
+/** Last assistant prose per transcript turn. Use nativeChatTurnMembership turnKeys so steers/queued prompts cannot truncate a reply; only limits the read to one turn. */
 export function nativeChatTurnReplyPreviews(
   messages: readonly Pick<NativeChatMessage, 'role' | 'blocks'>[],
   turnKeys: readonly (string | undefined)[],
@@ -156,10 +144,7 @@ export function truncateOutlinePreview(text: string, maxChars: number): string {
   return text.slice(0, end).trimEnd()
 }
 
-/** User messages that draw a transcript row, in transcript order. Projected over the
- *  whole journal, not user items alone: whether a user row survives depends on its
- *  neighbours (a harness sidecar folds into the turn before it), and its order is
- *  its journal position. Previews are uncut; the reply bound owns length. */
+/** Project the whole journal: neighbours decide whether a user row survives, and journal position sets its order. Leave previews uncut for the reply bound. */
 export function projectAgentSessionConversationOutline(
   items: readonly AgentJournalRenderItem[],
   submissions: readonly AgentJournalSubmission[]

@@ -1,6 +1,4 @@
-// The crash boundary: the host wrote a submission row, dispatched, and died
-// before it learned whether the provider took the message. Replay keeps the message, once, in
-// doubt: it is neither re-sent nor guessed undelivered.
+// A crash after dispatch leaves delivery permanently unknown: replay preserves one message without resending or inferring refusal.
 
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -9,18 +7,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   agentJournalItemKey,
   agentJournalSubmissionKey
-} from '../../../shared/agent-session-journal-item-key'
+} from '../../../shared/agent-session/journal/agent-session-journal-item-key'
 import type {
   AgentJournalItemIdentity,
-  AgentJournalMessageItem,
   AgentSessionJournalIdentity
-} from '../../../shared/agent-session-journal-types'
-import { hasUnansweredStructuredAgentSessionDispatch } from '../../../shared/structured-agent-session-projection'
-import { agentSessionFailureFact } from '../../../shared/agent-session-failure'
-import { agentSessionFailureWords } from '../../../shared/agent-session-failure-words'
+} from '../../../shared/agent-session-journal-identity'
+import type { AgentJournalMessageItem } from '../../../shared/agent-session/journal/agent-session-journal-types'
+import { hasUnansweredStructuredAgentSessionDispatch } from '../../../shared/agent-session/requests/structured-agent-session-unanswered-dispatch'
+import { agentSessionFailureFact } from '../../../shared/agent-session/failures/agent-session-failure'
+import { agentSessionFailureWords } from '../../../shared/agent-session/failures/agent-session-failure-words'
 import { digestPayload } from './journal-payload-bounds'
 import { createTrackedJournalOpener } from './journal-host-database-test-support'
-import { codexProviderHandle } from '../../../shared/agent-session-provider-handle-encoding'
+import { codexProviderHandle } from '../../../shared/agent-session/lifecycle/agent-session-provider-handle-encoding'
 
 export function registerJournalCrashBoundaryTests(): void {
   const IDENTITY: AgentSessionJournalIdentity = {

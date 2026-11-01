@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { formatScreenshot, prepareBrowserScreenshotCliJsonResult } from './browser-format'
+import { formatScreenshot, saveBrowserScreenshot } from './browser-format'
 import type { RuntimeRpcSuccess } from './runtime-client'
 import type { BrowserScreenshotResult } from '../shared/runtime-types'
 
@@ -26,17 +26,15 @@ function screenshotResponse(data: string | undefined): RuntimeRpcSuccess<Browser
   }
 }
 
-describe('prepareBrowserScreenshotCliJsonResult', () => {
+describe('saveBrowserScreenshot', () => {
   it('exports inline screenshot data to a temp file', () => {
     testScreenshotDir = mkdtempSync(join(tmpdir(), 'orca-browser-format-test-'))
     process.env.ORCA_BROWSER_SCREENSHOT_TMPDIR = testScreenshotDir
     const screenshotData = Buffer.from('png-data').toString('base64')
 
-    const output = prepareBrowserScreenshotCliJsonResult(screenshotResponse(screenshotData))
+    const output = saveBrowserScreenshot(screenshotResponse(screenshotData))
 
     const result = output.result
-    expect(result.data).toBeUndefined()
-    expect(result.dataOmitted).toBe(true)
     expect(result.expiresAt).toBeDefined()
     expect(result.path).toContain('req_1-screenshot.png')
     expect(readFileSync(result.path as string, 'utf8')).toBe('png-data')
@@ -51,55 +49,39 @@ describe('prepareBrowserScreenshotCliJsonResult', () => {
     const expired = new Date(Date.now() - 48 * 60 * 60 * 1000)
     utimesSync(expiredPath, expired, expired)
 
-    prepareBrowserScreenshotCliJsonResult(
-      screenshotResponse(Buffer.from('png-data').toString('base64'))
-    )
+    saveBrowserScreenshot(screenshotResponse(Buffer.from('png-data').toString('base64')))
 
     expect(existsSync(expiredPath)).toBe(false)
-  })
-
-  it('keeps inline screenshot data when temp export fails', () => {
-    testScreenshotDir = join(tmpdir(), `orca-browser-format-blocked-${Date.now()}`)
-    writeFileSync(testScreenshotDir, 'not-a-directory')
-    process.env.ORCA_BROWSER_SCREENSHOT_TMPDIR = testScreenshotDir
-    const screenshotData = Buffer.from('png-data').toString('base64')
-
-    const output = prepareBrowserScreenshotCliJsonResult(screenshotResponse(screenshotData))
-
-    expect(output.result.data).toBe(screenshotData)
-    expect(output.result.path).toBeUndefined()
-    expect(output.result.dataOmitted).toBeUndefined()
   })
 
   it('leaves results without inline data untouched', () => {
     const response = screenshotResponse(undefined)
 
-    const output = prepareBrowserScreenshotCliJsonResult(response)
+    const output = saveBrowserScreenshot(response)
 
-    expect(output).toBe(response)
+    expect(output.result.path).toBeUndefined()
   })
 })
 
 describe('formatScreenshot', () => {
-  it('reports the base64 payload size when data is inline', () => {
-    const output = formatScreenshot({
-      data: Buffer.from('png-data').toString('base64'),
-      format: 'png'
-    })
-
-    expect(output).toBe('Screenshot captured (png, 8 bytes)')
-  })
-
-  it('reports the temp file path when data was exported', () => {
+  it('reports the temp file path when saved', () => {
     const output = formatScreenshot({
       format: 'jpeg',
       path: '/tmp/orca-browser-screenshots/req_1-screenshot.jpeg',
-      dataOmitted: true,
       expiresAt: new Date().toISOString()
     })
 
     expect(output).toBe(
-      'Screenshot captured (jpeg, saved to /tmp/orca-browser-screenshots/req_1-screenshot.jpeg)'
+      'Screenshot saved to /tmp/orca-browser-screenshots/req_1-screenshot.jpeg (jpeg)'
     )
+  })
+
+  it('reports when screenshot is unchanged', () => {
+    const output = formatScreenshot({
+      format: 'png',
+      changed: false
+    })
+
+    expect(output).toBe('Screenshot unchanged since the last --if-changed capture; nothing saved')
   })
 })

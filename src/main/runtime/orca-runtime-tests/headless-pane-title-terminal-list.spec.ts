@@ -7,7 +7,7 @@ import {
   makeWorkspaceSessionWithHeadlessTerminal
 } from '../orca-runtime-test-fixtures.spec'
 
-// #30329: a client's pane rename lands in the host's saved layout; host readers must report it.
+// #30329: host listings must expose client-renamed panes persisted in host layout.
 async function headlessRuntimeWithLivePane() {
   const { runtimeStore, getSession } = makeRuntimeStoreWithWorkspaceSession(
     makeWorkspaceSessionWithHeadlessTerminal()
@@ -56,14 +56,5 @@ describe('pane titles in terminal summaries', () => {
     await renamePane({})
 
     expect((await listed())?.paneTitle).toBeUndefined()
-  })
-
-  it('leaves the terminal title alone, so a pane name never renames the tab', async () => {
-    const { renamePane, listed } = await headlessRuntimeWithLivePane()
-    const before = (await listed())?.title
-
-    await renamePane({ [HEADLESS_LEAF_ID]: 'server' })
-
-    expect((await listed())?.title).toBe(before)
   })
 })

@@ -1,5 +1,5 @@
+import { writeCliScreenshotTempFile } from './cli-screenshot-temp-file'
 import { formatBase64PayloadByteCount } from './base64-payload-byte-count'
-import { exportScreenshotToTempFile } from './screenshot-temp-export'
 import { quoteCliCommandArgument } from './shell-command-quote'
 import type {
   ComputerActionMetadata,
@@ -65,13 +65,13 @@ export function prepareComputerCliJsonResult<TResult>(
     return response
   }
   try {
-    const exported = exportScreenshotToTempFile({
-      fileStem: response.id,
-      data: screenshot.data,
-      format: screenshot.format,
-      tempDirEnvVar: 'ORCA_COMPUTER_SCREENSHOT_TMPDIR',
-      tempDirName: 'orca-computer-use'
-    })
+    const { path, expiresAt } = writeCliScreenshotTempFile(
+      COMPUTER_SCREENSHOT_TEMP_DIR,
+      response.id,
+      screenshot.data,
+      screenshot.format === 'png' ? 'png' : 'img'
+    )
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: only the screenshot field is rewritten; every other TResult field is spread through unchanged.
     return {
       ...response,
       result: {
@@ -79,7 +79,9 @@ export function prepareComputerCliJsonResult<TResult>(
         screenshot: {
           ...screenshot,
           data: undefined,
-          ...exported
+          path,
+          dataOmitted: true,
+          expiresAt
         }
       }
     } as RuntimeRpcSuccess<TResult>
@@ -87,6 +89,11 @@ export function prepareComputerCliJsonResult<TResult>(
     // Preserve inline screenshot data if the optional temp-file export fails.
     return response
   }
+}
+
+const COMPUTER_SCREENSHOT_TEMP_DIR = {
+  envVar: 'ORCA_COMPUTER_SCREENSHOT_TMPDIR',
+  dirName: 'orca-computer-use'
 }
 
 export function formatListApps(result: ComputerListAppsResult): string {
@@ -148,7 +155,7 @@ export function formatComputerAction(
   const inspectTail = unverified
     ? 'Inspect with the command above or use the --json result before assuming it worked.'
     : 'Use the --json result or rerun state before choosing the next element index.'
-  return `${formatActionVerb(verb)} ${outcome}${path}${verification}; ${result.snapshot.elementCount} visible elements in current window.${screenshotFailure} Use \`${followUpCommand}\` to inspect. ${inspectTail}`
+  return `${formatActionVerb(verb)} ${outcome}${path}${verification}; ${result.snapshot.elementCount} visible elements in current window.${screenshotFailure} Use \`${followUpCommand}\` to inspect. ${inspectTail}${result.snapshot.treeText ? `\n\n${result.snapshot.treeText}` : ''}`
 }
 
 function formatComputerFollowUpCommand(

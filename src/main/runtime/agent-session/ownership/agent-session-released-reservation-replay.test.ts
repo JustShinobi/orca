@@ -1,7 +1,6 @@
-// A create the host was running when it died is retried under the same operation id. Recovery has
-// released its reservation by then, so the retry continues it at the next fence; a reservation that
-// is still held keeps answering exactly as it did.
+// Retry crash-interrupted create ids at the next fence only after recovery releases the old reservation; held reservations replay unchanged.
 
+import { closeTestJournalHostDatabases } from '../../../native-chat/agent-session-journal/journal-host-database-test-support'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,13 +8,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AGENT_SESSION_MAX_NEW_OPERATION_AGE_MS,
   AGENT_SESSION_OPERATION_FUTURE_SKEW_MS
-} from '../../../../shared/agent-session-host-authority'
-import type { AgentSessionOwnerProbe } from '../../../../shared/agent-session-lease-adjudication'
-import type { AgentSessionLease } from '../../../../shared/agent-session-record'
-import type { AgentSessionRecordStore } from '../../agent-session-record-store'
-import { openTestAgentSessionRecordStore } from '../../agent-session-record-store-test-harness'
+} from '../../../../shared/agent-session/agent-session-host-authority'
+import type { AgentSessionOwnerProbe } from '../../../../shared/agent-session/lifecycle/agent-session-lease-adjudication'
+import type { AgentSessionLease } from '../../../../shared/agent-session/lifecycle/agent-session-record'
+import type { AgentSessionRecordStore } from '../records/agent-session-record-store'
+import { openTestAgentSessionRecordStore } from '../records/agent-session-record-store-test-harness'
 import type { AgentSessionReserveRequest } from './agent-session-reservation-admission'
-import { codexProviderHandle } from '../../../../shared/agent-session-provider-handle-encoding'
+import { codexProviderHandle } from '../../../../shared/agent-session/lifecycle/agent-session-provider-handle-encoding'
 
 const NOW = 1_800_000_000_000
 const SESSION = 'session-alpha'
@@ -31,6 +30,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  await closeTestJournalHostDatabases()
   await rm(directory, { recursive: true, force: true })
 })
 
@@ -62,7 +62,6 @@ function createRequest(
   }
 }
 
-/** The create reserved, then a restart that could prove nothing released it at fence 2. */
 async function releasedByRestart(now: number): Promise<AgentSessionRecordStore> {
   const first = await open()
   await first.reserveOwner(createRequest())
@@ -97,7 +96,7 @@ describe('a create retried after recovery released its reservation', () => {
       expect.objectContaining({ operationId: OPERATION, outcome: { status: 'pending' } })
     ])
 
-    // A spawn from the first reservation reports in late: refused at its fence, and by token.
+    // Reject late identity from the first reservation by fence and token.
     const lateSpawn = { hostId: 'local', pid: 4242, processStartTimeMs: NOW, spawnToken: 'spawn-a' }
     await expect(
       store.commitProcessIdentity({ sessionId: SESSION, fence: 1, process: lateSpawn, now })
@@ -106,7 +105,6 @@ describe('a create retried after recovery released its reservation', () => {
       store.commitProcessIdentity({ sessionId: SESSION, fence: 3, process: lateSpawn, now })
     ).rejects.toThrow('agent_session_ownership_unknown')
 
-    // Retried again while that reservation stands: the same reservation, never a second spawn.
     const mint = vi.fn(() => 'spawn-c')
     const retried = await store.reserveOwner(createRequest({ spawnToken: mint, now }))
     expect(retried.disposition).toBe('replayed')

@@ -11,7 +11,7 @@ function admitFetched(
   snapshots: WorktreeCatalogSnapshotClient,
   fetched: WorktreeCatalogFetchResult
 ) {
-  return snapshots.admit(fetched.kind === 'response' ? fetched.pending : null)
+  return fetched.kind === 'response' ? snapshots.admit(fetched.pending) : null
 }
 
 describe('admitWorktreeCatalogResponse', () => {
@@ -110,6 +110,31 @@ describe('WorktreeCatalogSnapshotClient', () => {
     expect(second).toEqual(rows)
   })
 
+  it('rebuilds a row delta from the confirmed rows and asks for a full catalog when it cannot', async () => {
+    const a = { worktreeId: 'a' }
+    const b = { worktreeId: 'b' }
+    const c = { worktreeId: 'c' }
+    const client = clientWithResults(
+      { worktrees: [a, b], snapshotId: 'snapshot-1' },
+      { snapshotId: 'snapshot-2', baseSnapshotId: 'snapshot-1', rowsFromBase: [1, c, 0] },
+      { snapshotId: 'snapshot-3', baseSnapshotId: 'snapshot-2', rowsFromBase: [7] },
+      { worktrees: [], snapshotId: 'snapshot-4' }
+    )
+    const snapshots = new WorktreeCatalogSnapshotClient()
+
+    // A caller sorting what it was given must not reorder the base the next delta indexes into.
+    admitFetched(snapshots, await snapshots.fetch(client, 'host-1'))?.reverse()
+    expect(admitFetched(snapshots, await snapshots.fetch(client, 'host-1'))).toEqual([b, c, a])
+    expect(admitFetched(snapshots, await snapshots.fetch(client, 'host-1'))).toBeNull()
+    await snapshots.fetch(client, 'host-1')
+
+    expect(client.sendRequest).toHaveBeenNthCalledWith(4, 'worktree.ps', {
+      limit: 10_000,
+      afterSnapshotId: null,
+      acceptRowDelta: true
+    })
+  })
+
   it('does not advance the token until the caller admits a response', async () => {
     const client = clientWithResults(
       { worktrees: [], snapshotId: 'snapshot-1' },
@@ -122,7 +147,8 @@ describe('WorktreeCatalogSnapshotClient', () => {
 
     expect(client.sendRequest).toHaveBeenNthCalledWith(2, 'worktree.ps', {
       limit: 10_000,
-      afterSnapshotId: null
+      afterSnapshotId: null,
+      acceptRowDelta: true
     })
   })
 
@@ -140,7 +166,8 @@ describe('WorktreeCatalogSnapshotClient', () => {
 
     expect(client.sendRequest).toHaveBeenNthCalledWith(3, 'worktree.ps', {
       limit: 10_000,
-      afterSnapshotId: 'snapshot-1'
+      afterSnapshotId: 'snapshot-1',
+      acceptRowDelta: true
     })
   })
 
@@ -158,7 +185,8 @@ describe('WorktreeCatalogSnapshotClient', () => {
 
     expect(client.sendRequest).toHaveBeenNthCalledWith(3, 'worktree.ps', {
       limit: 10_000,
-      afterSnapshotId: null
+      afterSnapshotId: null,
+      acceptRowDelta: true
     })
   })
 
@@ -172,7 +200,8 @@ describe('WorktreeCatalogSnapshotClient', () => {
 
     expect(secondClient.sendRequest).toHaveBeenCalledWith('worktree.ps', {
       limit: 10_000,
-      afterSnapshotId: null
+      afterSnapshotId: null,
+      acceptRowDelta: true
     })
   })
 
@@ -184,7 +213,6 @@ describe('WorktreeCatalogSnapshotClient', () => {
     )
     const snapshots = new WorktreeCatalogSnapshotClient()
 
-    // Host A's response is still in flight when the screen switches to host B.
     const stale = await snapshots.fetch(firstClient, 'host-1')
     admitFetched(snapshots, await snapshots.fetch(secondClient, 'host-2'))
     expect(admitFetched(snapshots, stale)).toBeNull()
@@ -192,12 +220,33 @@ describe('WorktreeCatalogSnapshotClient', () => {
     await snapshots.fetch(secondClient, 'host-2')
     expect(secondClient.sendRequest).toHaveBeenNthCalledWith(2, 'worktree.ps', {
       limit: 10_000,
-      afterSnapshotId: 'snapshot-2'
+      afterSnapshotId: 'snapshot-2',
+      acceptRowDelta: true
     })
   })
 
-  // Why (STA-3123): a failed worktree.ps rendered as "0 worktrees"; callers need the
-  // failure code to show an error state instead of an empty host.
+  // A slow reply from before an A→B→A switch names a token whose rows were replaced.
+  it('drops a late unchanged reply that answers a token this client no longer holds', async () => {
+    const rows = [{ worktreeId: 'worktree-2' }]
+    const clientA = clientWithResults(
+      { worktrees: [{ worktreeId: 'worktree-1' }], snapshotId: 'snapshot-1' },
+      { unchanged: true, snapshotId: 'snapshot-1' },
+      { worktrees: rows, snapshotId: 'snapshot-2' },
+      { unchanged: true, snapshotId: 'snapshot-2' }
+    )
+    const clientB = clientWithResults({ worktrees: [], snapshotId: 'snapshot-b' })
+    const snapshots = new WorktreeCatalogSnapshotClient()
+
+    admitFetched(snapshots, await snapshots.fetch(clientA, 'host-1'))
+    const late = await snapshots.fetch(clientA, 'host-1')
+    admitFetched(snapshots, await snapshots.fetch(clientB, 'host-1'))
+    admitFetched(snapshots, await snapshots.fetch(clientA, 'host-1'))
+
+    expect(admitFetched(snapshots, late)).toBeNull()
+    expect(admitFetched(snapshots, await snapshots.fetch(clientA, 'host-1'))).toEqual(rows)
+  })
+
+  // Catalog failure must remain distinct from an empty host (STA-3123).
   it('surfaces the RPC error code on failure and keeps the admitted token', async () => {
     const responses: unknown[] = [
       { id: 'request', ok: true, result: { worktrees: [], snapshotId: 'snapshot-1' } },
@@ -217,13 +266,12 @@ describe('WorktreeCatalogSnapshotClient', () => {
     await snapshots.fetch(client, 'host-1')
     expect(client.sendRequest).toHaveBeenNthCalledWith(3, 'worktree.ps', {
       limit: 10_000,
-      afterSnapshotId: 'snapshot-1'
+      afterSnapshotId: 'snapshot-1',
+      acceptRowDelta: true
     })
   })
 
-  // Why this belongs here: `use-host-worktree-catalog.ts:125` keys its `invalid_response` state on
-  // the error *class*, and no adapter mounts that screen, so this is the only place the class is
-  // pinned. Deleting the reader leaves a host-payload defect reported to the user as a network one.
+  // The screen keys invalid_response on the error class; pin it here so host payload defects cannot become network failures.
   it('rejects with RpcIncompatibleReplyError when the host answers a result the reader refuses', async () => {
     const client = clientWithResults('all')
     const snapshots = new WorktreeCatalogSnapshotClient()

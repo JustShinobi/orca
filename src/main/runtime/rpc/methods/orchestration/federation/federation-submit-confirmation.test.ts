@@ -146,7 +146,8 @@ describe('federated worker submit confirmation', () => {
       },
       runtime: created.runtime,
       db: created.db,
-      runId: created.runId,
+      bindRunId: () => created.runId,
+      taskDeps: undefined,
       task: created.task,
       orchestrationMutation: {
         callerFingerprint: 'caller',

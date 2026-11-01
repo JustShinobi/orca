@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type WebSocket from 'ws'
-import { REMOTE_RUNTIME_MAX_PENDING_REQUESTS } from '../../remote-runtime-memory-limits'
+import { REMOTE_RUNTIME_MAX_PENDING_REQUESTS } from '../remote-runtime-memory-limits'
 import { getRemoteRuntimeRequestAdmissionEvidence } from '../requests/remote-runtime-prepared-request-admission'
 import { RemoteRuntimeSharedControlConnection } from './remote-runtime-shared-control-connection'
 import {

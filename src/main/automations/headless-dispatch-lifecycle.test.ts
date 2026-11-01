@@ -23,7 +23,8 @@ async function createStore() {
   vi.resetModules()
   // Why: userData resolves through AppEnvironment; point it at this file's temp dir.
   installFakeAppEnvironment({ getPath: () => testState.dir })
-  const { Store, initDataPath } = await import('../persistence')
+  const { Store } = await import('../persistence/loading-store/store')
+  const { initDataPath } = await import('../persistence/loading-store/user-data-path')
   initDataPath()
   return createSqliteTestStore(Store, { dataFile: join(testState.dir, 'orca-data.json') })
 }
@@ -42,7 +43,9 @@ async function createAutomation(
   store: Awaited<ReturnType<typeof createStore>>,
   agentId: 'claude' | 'codex'
 ) {
-  store.addRepo(makeRepo())
+  if (!store.getRepos().some((r) => r.id === 'r1')) {
+    store.addRepo(makeRepo())
+  }
   return store.createAutomation({
     name: `${agentId} check`,
     prompt: 'Check the repo',

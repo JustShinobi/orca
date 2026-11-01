@@ -1,5 +1,5 @@
 import type WebSocket from 'ws'
-import { RemoteRuntimeClientError } from '../../remote-runtime-client-error'
+import { RemoteRuntimeClientError } from '../remote-runtime-client-error'
 import type { RuntimeRpcResponse } from '../../runtime-rpc-envelope'
 import { toRemoteRuntimeClientError } from './remote-runtime-shared-control-protocol'
 import type { RemoteRuntimeSharedControlConnectionOptions } from './remote-runtime-shared-control-types'

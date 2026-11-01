@@ -1,15 +1,12 @@
-// The published shapes the queued-message hook tests feed the mobile session: host answers,
-// drafts, submissions and stream frames.
-
 import type {
   AgentJournalRenderItem,
   AgentJournalSubmission
-} from '../../../src/shared/agent-session-journal-types'
+} from '../../../src/shared/agent-session/journal/agent-session-journal-types'
 import type {
   AgentSessionQueuedMessage,
-  AgentSessionQueuePause,
-  AgentSessionSubscribeEvent
-} from '../../../src/shared/agent-session-wire'
+  AgentSessionQueuePause
+} from '../../../src/shared/agent-session/requests/agent-session-queued-message-wire'
+import type { AgentSessionSubscribeEvent } from '../../../src/shared/agent-session/agent-session-wire'
 import type { RpcResponse } from '../transport/types'
 import type { StructuredAgentSessionHostSupport } from './mobile-structured-agent-session-host-support'
 
@@ -39,7 +36,6 @@ export function ok(result: unknown): RpcResponse {
   return { id: 'request-1', ok: true, result, _meta: { runtimeId: 'runtime-1' } }
 }
 
-/** The fields one recorded request carried, read without asserting their shape. */
 export function fieldsOf(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null
     ? Object.fromEntries(Object.entries(value))
@@ -56,7 +52,6 @@ export function mutationOk(value: unknown) {
   })
 }
 
-/** A settled submission; `queuedMessageId` marks it as that draft's hand-off. */
 export function acceptedSubmission(
   clientMessageId: string,
   queuedMessageId?: string

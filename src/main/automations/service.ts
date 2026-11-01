@@ -1,10 +1,11 @@
 import {
   AutomationDispatchCancelledError,
   requestAutomationDispatch,
+  runAutomationRequestPrecheck,
   type AutomationRendererChannel
 } from './automation-dispatch-request'
 export type { AutomationRendererChannel } from './automation-dispatch-request'
-import type { Store } from '../persistence'
+import type { Store } from '../persistence/loading-store/store'
 import type {
   Automation,
   AutomationDispatchResult,
@@ -13,7 +14,6 @@ import type {
 } from '../../shared/automations-types'
 import type { ClaudeUsageStore } from '../claude-usage/store'
 import type { CodexUsageStore } from '../codex-usage/store'
-import { evaluateAutomationRunPrecheck } from './automation-run-precheck'
 import {
   captureLegacyRunTarget,
   resolveAutomationRunTarget,
@@ -34,12 +34,11 @@ import {
 import { createAutomationRunWriter, type AutomationRunWriter } from './automation-run-writer'
 import { reportAutomationScheduleDrift } from './schedule-drift-report'
 import {
-  describeScheduledRefusal,
+  describeScheduledTickRefusal,
   missedBeyondGrace,
   recordMissedRun,
   recordRefusedAutomationRun,
-  recordUnevaluableAutomation,
-  WSL_MOVE_OWNED_BY_HOST
+  recordUnevaluableAutomation
 } from './dispatch-refusal'
 import type {
   AutomationsChangedPayload,
@@ -63,6 +62,7 @@ export class AutomationService {
   private readonly headlessDispatcher: HeadlessAutomationDispatcher | null
   private readonly codexHeadlessLaunchTimeoutMs: number
   private readonly headlessLaunchCleanups = new HeadlessLaunchCleanupRegistry()
+  private readonly chatDispatcher: HeadlessAutomationDispatcher | null
   private readonly automationLanes = new Map<string, Promise<void>>()
   /** Close unused completed terminals on headless hosts; return the count. */
   releaseFinishedRunTerminals: (() => Promise<number>) | null = null
@@ -81,6 +81,7 @@ export class AutomationService {
       allowRemoteHostScheduling?: boolean
       headlessDispatcher?: HeadlessAutomationDispatcher
       codexHeadlessLaunchTimeoutMs?: number
+      chatDispatcher?: HeadlessAutomationDispatcher
       terminalObserver?: AutomationRunTerminalObserver
       onAutomationsChanged?: PublishAutomationsChanged
     } = {}
@@ -93,6 +94,7 @@ export class AutomationService {
     this.headlessDispatcher = opts.headlessDispatcher ?? null
     this.codexHeadlessLaunchTimeoutMs =
       opts.codexHeadlessLaunchTimeoutMs ?? DEFAULT_CODEX_HEADLESS_LAUNCH_TIMEOUT_MS
+    this.chatDispatcher = opts.chatDispatcher ?? null
     this.publish = opts.onAutomationsChanged ?? null
     this.runs = createAutomationRunWriter(store, this.publish)
     this.completionWatcher = opts.terminalObserver
@@ -175,12 +177,9 @@ export class AutomationService {
   }
 
   async runPrecheck(automationId: string, runId: string): Promise<AutomationPrecheckResult | null> {
-    return await evaluateAutomationRunPrecheck({
-      store: this.store,
-      automationId,
-      runId,
-      allowRemoteHostScheduling: this.allowRemoteHostScheduling
-    })
+    return runAutomationRequestPrecheck(this.store, automationId, runId, (automation) =>
+      this.resolveTarget(automation)
+    )
   }
 
   async markDispatchResult(result: AutomationDispatchResult): Promise<AutomationRun> {
@@ -253,13 +252,13 @@ export class AutomationService {
     // Fold recurring refusals before creating rows so they do not evict real run history.
     const target = this.resolveTarget(automation)
     const canDispatch = this.canDispatchToRenderer() || Boolean(this.headlessDispatcher)
-    const refusal = describeScheduledRefusal({ target, canDispatch })
+    const refusal = await describeScheduledTickRefusal(this.store, { target, canDispatch })
     // Once WSL owns the schedule, avoid churning skips on the retained local copy.
-    if (refusal === WSL_MOVE_OWNED_BY_HOST) {
+    if (refusal?.errorCode === 'wslMoveOwnedByHost') {
       await this.runs.advanceNextRun(automation.id, now)
       return
     }
-    if (refusal && (await this.runs.repeatSkip(automation.id, refusal, scheduledFor))) {
+    if (refusal && (await this.runs.repeatSkip(automation.id, refusal.error, scheduledFor))) {
       await this.runs.advanceNextRun(automation.id, now)
       return
     }
@@ -303,6 +302,10 @@ export class AutomationService {
           isActive: () => !this.stopped && generation === this.dispatchGeneration,
           getRenderer: () => (this.canDispatchToRenderer() ? this.webContents : null),
           headlessDispatcher: this.headlessDispatcher,
+          chatDispatcher:
+            this.allowRemoteHostScheduling || this.canDispatchToRenderer()
+              ? this.chatDispatcher
+              : null,
           resolveTarget: (current) => this.resolveTarget(current),
           runPrecheck: () => this.runPrecheck(automation.id, run.id),
           markDispatchResult: (result) => this.markDispatchResult(result),

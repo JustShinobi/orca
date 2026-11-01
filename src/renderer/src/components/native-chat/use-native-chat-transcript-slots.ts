@@ -2,16 +2,15 @@ import { useMemo } from 'react'
 import {
   nativeChatLiveLine,
   type NativeChatLiveLine
-} from '../../../../shared/native-chat-live-line'
-import { isNativeChatRowInLiveWorkingTurn } from '../../../../shared/native-chat-turn-membership'
+} from '../../../../shared/native-chat/transcript/native-chat-live-line'
+import { isNativeChatRowInLiveWorkingTurn } from '../../../../shared/native-chat-live-turn-membership'
 import {
   buildNativeChatTranscriptSlots,
   type NativeChatTranscriptSlot,
   type NativeChatTranscriptSlotsInput
 } from './native-chat-transcript-slots'
 
-/** The transcript's slots and its live activity line, decided together: the open reasoning block
- *  the line discloses takes no slot, so a row is hidden exactly while the line shows it. */
+/** Choose slots/activity together so reasoning shown by the activity line never also gets a transcript row. */
 export function useNativeChatTranscriptSlots({
   line,
   ...input

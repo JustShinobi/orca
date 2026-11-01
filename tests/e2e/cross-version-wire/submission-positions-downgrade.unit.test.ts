@@ -2,14 +2,12 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { codexProviderHandle } from '../../../src/shared/agent-session-provider-handle-encoding'
-import { agentSessionFailureFact } from '../../../src/shared/agent-session-failure'
-import { agentSessionFailureWords } from '../../../src/shared/agent-session-failure-words'
-import type {
-  AgentJournalSubmission,
-  AgentSessionJournalIdentity
-} from '../../../src/shared/agent-session-journal-types'
-import type { AgentSessionHistoryPage } from '../../../src/shared/agent-session-wire'
+import { codexProviderHandle } from '../../../src/shared/agent-session/lifecycle/agent-session-provider-handle-encoding'
+import { agentSessionFailureFact } from '../../../src/shared/agent-session/failures/agent-session-failure'
+import { agentSessionFailureWords } from '../../../src/shared/agent-session/failures/agent-session-failure-words'
+import type { AgentJournalSubmission } from '../../../src/shared/agent-session/journal/agent-session-journal-types'
+import type { AgentSessionJournalIdentity } from '../../../src/shared/agent-session-journal-identity'
+import type { AgentSessionHistoryPage } from '../../../src/shared/agent-session/agent-session-wire'
 import {
   createTrackedJournalOpener,
   type TrackedJournalOpener
@@ -22,9 +20,7 @@ import {
   releaseModuleExport
 } from './release-checkout'
 
-// Released clients that predate the published submission position and answered turn: each must
-// fold and draw a history page and an incremental batch carrying them exactly as it draws the same
-// without them, whether the turn is named or stated as none.
+// Pin readers before submission position/answered turn; new fields must not change their page or incremental rendering.
 const BASELINE_REFS = ['v1.4.219', 'v1.4.220'] as const
 
 const IDENTITY: AgentSessionJournalIdentity = {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { AgentSessionProcessIdentity } from '../../../../shared/agent-session-record'
+import type { AgentSessionProcessIdentity } from '../../../../shared/agent-session/lifecycle/agent-session-record'
 import {
   PROCESS_START_TIME_TOLERANCE_MS,
   probeAgentSessionProcessIdentities,
@@ -94,7 +94,6 @@ describe('owner identity probe', () => {
   })
 
   it('catches pid reuse through the spawn token', async () => {
-    // The pid is live and started at the recorded time, but it is a different process.
     await expect(
       probeAgentSessionProcessIdentity({
         identity: IDENTITY,
@@ -151,8 +150,7 @@ describe('owner identity probe', () => {
   })
 
   it('fails closed when the pid is live but nothing PID-reuse-safe could be checked', async () => {
-    // The Windows case: no start time recorded and no token echo, so a bare pid match is all the
-    // host has — and a bare pid match is what mints a second writer.
+    // A live Windows PID without start time/token is inconclusive; treating it as a match could grant two writers.
     const probe = await probeAgentSessionProcessIdentity({
       identity: { ...IDENTITY, processStartTimeMs: null },
       deps: deps({ readEchoedSpawnToken: async () => null, platform: 'win32' })

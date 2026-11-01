@@ -19,7 +19,7 @@ import {
   isRetiredSessionTabsPublicationEpoch
 } from './publisher-identity-fences'
 import { scheduleRetiredEpochCensus } from './retired-epoch-census'
-import { applyWebSessionTabsSnapshot } from './snapshot-api'
+import { createWebSessionTabsSnapshotPatch } from './snapshot-api'
 import { applyWebSessionTabsStorePatch } from './store-patch'
 import {
   hostSessionMirrorSettleForPatchlessFrame,
@@ -41,7 +41,6 @@ export type GlobalSessionEventArgs = {
   coordinator: VisibilityResumeCoordinator
 }
 
-/** Apply one event from the all-worktrees stream, including visibility inventory fencing. */
 export function handleGlobalSessionEvent(args: GlobalSessionEventArgs): void {
   const {
     environmentId,
@@ -154,7 +153,7 @@ export function handleGlobalSessionEvent(args: GlobalSessionEventArgs): void {
       const decision = decideWebSessionTabsSnapshot(recovered, environmentId, runtimeId)
       if (decision.apply) {
         settleHydration = applyWebSessionTabsStorePatch(
-          (state) => applyWebSessionTabsSnapshot(state, recovered, environmentId),
+          createWebSessionTabsSnapshotPatch(recovered, environmentId),
           {
             frames: [
               {

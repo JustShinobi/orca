@@ -4,6 +4,7 @@ import type {
   AutomationRunOutputSnapshot
 } from '../../shared/automations-types'
 import type { AutomationRunTargetResult } from './run-target-resolution'
+import type { AutomationRunFailureCodeFields } from '../../shared/automation-run-failure-copy'
 
 const MAX_HEADLESS_OUTPUT_SNAPSHOT_CHARS = 256 * 1024
 export const DEFAULT_CODEX_HEADLESS_LAUNCH_TIMEOUT_MS = 2 * 60 * 1000
@@ -13,6 +14,8 @@ export type HeadlessAutomationLaunchReady =
   | ((launchDeadlineAt: number) => Promise<void>)
 
 export type HeadlessAutomationDispatchLaunch = {
+  sessionKind?: 'terminal' | 'chat'
+  chatSessionId?: string | null
   workspaceId: string
   workspaceDisplayName?: string | null
   terminalSessionId: string | null
@@ -22,11 +25,13 @@ export type HeadlessAutomationDispatchLaunch = {
   launchReady?: HeadlessAutomationLaunchReady
   /** Stops an active launch that failed to produce its launch postcondition. */
   cleanup?: () => Promise<void>
-  completion?: Promise<{
-    status: 'completed' | 'dispatch_failed'
-    outputSnapshot?: AutomationRunOutputSnapshot | null
-    error?: string | null
-  }>
+  completion?: Promise<
+    {
+      status: 'completed' | 'dispatch_failed'
+      outputSnapshot?: AutomationRunOutputSnapshot | null
+      error?: string | null
+    } & AutomationRunFailureCodeFields
+  >
 }
 
 export type HeadlessAutomationDispatcher = (request: {
@@ -34,6 +39,15 @@ export type HeadlessAutomationDispatcher = (request: {
   run: AutomationRun
   target: Extract<AutomationRunTargetResult, { ok: true }>
 }) => Promise<HeadlessAutomationDispatchLaunch>
+
+export class AutomationRunLaunchError extends Error {
+  constructor(
+    message: string,
+    readonly target?: HeadlessAutomationDispatchLaunch
+  ) {
+    super(message)
+  }
+}
 
 export function createHeadlessAutomationOutputSnapshotBuffer(): {
   append: (chunk: string) => void

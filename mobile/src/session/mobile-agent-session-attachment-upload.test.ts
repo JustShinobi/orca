@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   AGENT_SESSION_ATTACHMENT_CHUNK_BASE64_CHARS,
   AGENT_SESSION_ATTACHMENT_CHUNK_BYTES
-} from '../../../src/shared/agent-session-attachments'
+} from '../../../src/shared/agent-session/agent-session-attachments'
 import type { RpcClient } from '../transport/rpc-client'
 import type { RpcFailure, RpcResponse, RpcSuccess } from '../transport/types'
 import { uploadMobileAgentSessionAttachment } from './mobile-agent-session-attachment-upload'
@@ -21,7 +21,6 @@ function fail(message: string): RpcFailure {
   }
 }
 
-/** A host that answers by method, recording what reached it. */
 function fakeHost(answer: (method: string, params: unknown) => RpcResponse) {
   const calls: { method: string; params: Record<string, unknown> }[] = []
   const client: Pick<RpcClient, 'sendRequest'> = {

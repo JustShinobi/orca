@@ -1,5 +1,5 @@
 /* eslint-disable no-control-regex -- Why: terminal quota detection must strip ANSI and control bytes before matching provider output. */
-import type { ResumableTuiAgent } from './agent-session-resume'
+import type { ResumableTuiAgent } from './agent-session/lifecycle/agent-session-resume'
 
 export type AutoSwitchRateLimitAgent = Extract<ResumableTuiAgent, 'claude' | 'codex'>
 
