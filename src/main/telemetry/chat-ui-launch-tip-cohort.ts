@@ -1,8 +1,13 @@
 import { randomInt } from 'node:crypto'
 import type { Store } from '../persistence/loading-store/store'
+import type { GlobalSettings } from '../../shared/global-settings-types'
 import { resolveConsent } from './consent'
+import type {
+  ChatUiLaunchTipCohort,
+  ChatUiLaunchTipTargeting
+} from '../../shared/telemetry-settings-types'
 
-export type ChatUiLaunchTipCohort = 'control' | 'treatment'
+export type { ChatUiLaunchTipCohort }
 
 // Decided once per launch with the cohort, so the tip and its enrollment read the same consent; contributor builds never set it.
 let deferredForConsent = false
@@ -18,23 +23,47 @@ export function ensureChatUiLaunchTipCohort(store: Store): ChatUiLaunchTipCohort
     const settings = store.getSettings()
     const telemetry = settings.telemetry
     const saved = telemetry?.chatUiLaunchTipCohort
-    if (saved === 'control' || saved === 'treatment') {
+    const rollout = telemetry?.chatUiLaunchTipRolloutCohort
+    if (rollout === 'control' || rollout === 'treatment') {
+      return rollout
+    }
+    if (
+      saved === 'treatment' ||
+      saved === 'treatment-live-switch' ||
+      saved === 'treatment-swapped-buttons' ||
+      saved === 'treatment-center'
+    ) {
       return saved
     }
     if (
       !telemetry ||
       store.getChatUiLaunchTipVariant() === 'none' ||
-      store.getUI().featureTipsSeenIds?.includes('chat-ui-here')
+      (saved !== 'control' && store.getUI().featureTipsSeenIds?.includes('chat-ui-here'))
     ) {
-      return undefined
+      return saved === 'control' ? saved : undefined
     }
     const consent = resolveConsent(settings).effective
     if (consent !== 'enabled') {
       deferredForConsent = consent === 'pending_banner'
-      return undefined
+      return saved === 'control' ? saved : undefined
     }
-    const cohort: ChatUiLaunchTipCohort = randomInt(2) === 0 ? 'control' : 'treatment'
-    store.updateSettings({ telemetry: { ...telemetry, chatUiLaunchTipCohort: cohort } })
+    // Promote 3/7 of the old 70% control group once: 30% + 70% × 3/7 = 60% treatment.
+    const draw = randomInt(saved === 'control' ? 7 : 10)
+    const cohort: ChatUiLaunchTipCohort = draw < 4 ? 'control' : 'treatment'
+    const targeting =
+      cohort === 'control' ? undefined : assignTargeting(settings.agentDefaultSurface)
+    store.updateSettings({
+      telemetry: {
+        ...telemetry,
+        chatUiLaunchTipRolloutCohort: cohort,
+        ...(targeting
+          ? {
+              chatUiLaunchTipTargeting: targeting,
+              chatUiLaunchTipButtonEmphasis: randomInt(2) === 0 ? 'normal' : 'swapped'
+            }
+          : {})
+      }
+    })
     return cohort
   } catch (err) {
     // Startup must not fail over an experiment; unenrolled profiles see the tip as before.
@@ -46,4 +75,13 @@ export function ensureChatUiLaunchTipCohort(store: Store): ChatUiLaunchTipCohort
 /** True when this launch holds the tip back until the telemetry banner is resolved. */
 export function isChatUiLaunchTipDeferredForConsent(): boolean {
   return deferredForConsent
+}
+
+function assignTargeting(
+  defaultSurface: GlobalSettings['agentDefaultSurface']
+): ChatUiLaunchTipTargeting {
+  if (randomInt(2) === 0) {
+    return { mode: 'all' }
+  }
+  return { mode: 'not-switched', eligible: defaultSurface !== 'chat' }
 }

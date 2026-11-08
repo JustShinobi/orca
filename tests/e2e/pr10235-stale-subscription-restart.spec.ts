@@ -4,7 +4,10 @@ import os from 'node:os'
 import path from 'node:path'
 import type { Page, TestInfo } from '@stablyai/playwright-test'
 import { RuntimeClient } from '../../src/cli/runtime/client'
-import { decodePairingOffer, encodePairingOffer } from '../../src/shared/pairing'
+import {
+  decodePairingOffer,
+  encodePairingOffer
+} from '../../src/shared/remote-runtime/pairing/pairing'
 import { expect, test } from './helpers/orca-app'
 import { launchHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
 import {

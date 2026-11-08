@@ -2,8 +2,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import os from 'node:os'
 import path from 'node:path'
 import type { Page } from '@stablyai/playwright-test'
-import { PROTOCOL_VERSION } from '../../src/main/daemon/types'
-import { toWebTerminalSurfaceTabId } from '../../src/shared/terminal-surface-id'
+import { PROTOCOL_VERSION } from '../../src/main/daemon/protocol/daemon-protocol-version'
+import { toWebTerminalSurfaceTabId } from '../../src/shared/workspace-layout/terminal-surface-id'
 import { expect, test } from './helpers/orca-app'
 import { launchHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
 import { createPairedWebClientUrl } from './helpers/paired-web-client-url'
@@ -138,7 +138,7 @@ test('reattaches a hidden terminal in the same browser document after headless s
     const beforeRestart = await page.evaluate(() => {
       const state = window.__store?.getState()
       const environmentId =
-        state?.settings.activeRuntimeEnvironmentId ??
+        state?.settings?.activeRuntimeEnvironmentId ??
         state?.allWorktrees()[0]?.runtimeOwnerEnvironmentId ??
         state?.runtimeEnvironments[0]?.id ??
         null
@@ -151,7 +151,7 @@ test('reattaches a hidden terminal in the same browser document after headless s
         runtimeId: status?.status?.runtimeId ?? null,
         connectionGeneration: status?.connectionGeneration ?? 0,
         diagnostics: {
-          activeRuntimeEnvironmentId: state?.settings.activeRuntimeEnvironmentId ?? null,
+          activeRuntimeEnvironmentId: state?.settings?.activeRuntimeEnvironmentId ?? null,
           runtimeEnvironments: state?.runtimeEnvironments ?? [],
           runtimeStatuses: Array.from(state?.runtimeStatusByEnvironmentId.entries() ?? []),
           worktreeRuntimeOwnerEnvironmentId:
@@ -164,6 +164,7 @@ test('reattaches a hidden terminal in the same browser document after headless s
         `Paired Web client did not publish its initial runtime identity: ${JSON.stringify(beforeRestart.diagnostics)}`
       )
     }
+    const restartEnvironmentId = beforeRestart.environmentId
 
     await clickTerminalTab(page, decoy.webTabId)
     await expect.poll(() => getTerminalContent(page), { timeout: 30_000 }).toContain('READY:decoy')
@@ -208,7 +209,7 @@ test('reattaches a hidden terminal in the same browser document after headless s
             (environmentId) =>
               window.__store?.getState().runtimeStatusByEnvironmentId.get(environmentId)?.status
                 ?.runtimeId ?? null,
-            beforeRestart.environmentId
+            restartEnvironmentId
           ),
         {
           timeout: 60_000,
@@ -223,7 +224,7 @@ test('reattaches a hidden terminal in the same browser document after headless s
             (environmentId) =>
               window.__store?.getState().runtimeStatusByEnvironmentId.get(environmentId)
                 ?.connectionGeneration ?? 0,
-            beforeRestart.environmentId
+            restartEnvironmentId
           ),
         {
           timeout: 60_000,

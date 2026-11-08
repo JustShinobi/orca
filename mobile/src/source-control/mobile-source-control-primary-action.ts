@@ -1,16 +1,17 @@
-import { translate } from '../i18n/mobile-i18n'
 import { getMobilePrimaryActionHint } from './mobile-source-control-actions'
+import { getMobilePrimaryActionLabel } from './mobile-source-control-primary-action-label'
 import { getMobileForcePushBlockedReason } from './mobile-source-control-review-copy'
-import type { SourceControlPrimaryActionDecisionInputs } from '../../../src/shared/source-control-primary-action-decision-types'
-import {
-  resolveSourceControlCommitAreaPrimaryActionDecision,
-  type SourceControlCommitAreaPrimaryActionDecision,
-  type SourceControlRemoteOpKind
-} from '../../../src/shared/source-control-primary-action-decision'
+import type {
+  SourceControlPrimaryActionDecisionInputs,
+  SourceControlCommitAreaPrimaryActionDecision,
+  SourceControlRemoteOpKind
+} from '../../../src/shared/source-control/decisions/source-control-primary-action-decision-types'
+import { resolveSourceControlCommitAreaPrimaryActionDecision } from '../../../src/shared/source-control/decisions/source-control-primary-action-decision'
+
 import {
   hasResolvableHostedReviewPushTargetLink,
   resolveHostedReviewPushTargetForActions
-} from '../../../src/shared/hosted-review-push-target'
+} from '../../../src/shared/source-control/hosted-review/hosted-review-push-target'
 import type { PRState } from '../../../src/shared/github/pull-request-types'
 import type { GitPushTarget } from '../../../src/shared/worktree/types'
 import type { PrSidebarState } from '../session/mobile-pr-sidebar-state'
@@ -136,8 +137,8 @@ export function buildMobileSourceControlPrimaryAction(
 
   return {
     kind: decision.kind,
-    label: getMobilePrimaryActionLabel(decision),
-    accessibilityLabel: getMobilePrimaryActionLabel(decision),
+    label: getMobilePrimaryActionLabel(decision, args.stagedCount),
+    accessibilityLabel: getMobilePrimaryActionLabel(decision, args.stagedCount),
     accessibilityHint: forcePushBlockedReason ?? getMobilePrimaryActionHint(decision),
     disabled,
     loading: isLoadingDecision(decision, args.busyAction),
@@ -177,7 +178,7 @@ export function buildMobileBranchRemoteAction(
     decision.requiresForceWithLease === true &&
     getMobileForcePushBlockedReason(args.review) !== undefined
   return {
-    label: getMobilePrimaryActionLabel(decision),
+    label: getMobilePrimaryActionLabel(decision, 0),
     disabled: decision.disabled || ioBusy || forcePushBlocked,
     loading: isLoadingDecision(decision, args.busyAction),
     run: () => runMobilePrimaryAction(decision, args.handlers)
@@ -225,26 +226,6 @@ export function getMobileBranchCommitsAhead(
   }
   const upstream = args.status?.upstreamStatus
   return upstream?.hasUpstream ? upstream.ahead : undefined
-}
-
-function getMobilePrimaryActionLabel(decision: MobileSourceControlPrimaryActionDecision): string {
-  if (decision.requiresForceWithLease) {
-    return translate('sourceControl.primaryAction.forcePush', 'Force Push')
-  }
-  switch (decision.kind) {
-    case 'commit':
-      return translate('sourceControl.primaryAction.commit', 'Commit')
-    case 'stage':
-      return translate('sourceControl.primaryAction.stageAll', 'Stage All')
-    case 'push':
-      return translate('sourceControl.primaryAction.push', 'Push')
-    case 'pull':
-      return translate('sourceControl.primaryAction.pull', 'Pull')
-    case 'sync':
-      return translate('sourceControl.primaryAction.sync', 'Sync')
-    case 'publish':
-      return translate('sourceControl.primaryAction.publishBranch', 'Publish Branch')
-  }
 }
 
 function isLoadingDecision(

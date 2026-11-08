@@ -24,13 +24,16 @@ export const WORKTREE_SET_COMMAND_SPEC: CommandSpec = {
   ],
   notes: [
     'Workspace status ids match the board columns (defaults: todo, in-progress, in-review, completed); custom statuses use their configured id.',
+    'Pass --comment "" (or --comment=) to clear the comment.',
     'Pass --linear-issue null to clear the Linear issue link.',
     'Pass --pr null, --gitlab-issue null, or --gitlab-mr null to clear only the matching link.',
-    'Each link flag updates its own field and leaves unrelated links unchanged. GitLab URLs must match the stored source project or remote; they cannot select a foreign project.'
+    'Each link flag updates its own field and leaves unrelated links unchanged. GitLab URLs must match the stored source project or remote; they cannot select a foreign project.',
+    'On a folder workspace (folder:<id>, or a path:/name: selector that matches one), only --display-name, --comment, --workspace-status and --unread/--read apply. Parent and link flags are refused; link it with orca reference add.'
   ],
   examples: [
     'orca worktree set --worktree active --linear-issue STA-335 --json',
     'orca worktree set --worktree active --linear-issue null --json',
+    'orca worktree set --worktree active --comment "" --json',
     'orca worktree set --worktree active --workspace-status in-review --unread --json'
   ]
 }

@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { formatScreenshot, saveBrowserScreenshot } from './browser-format'
+import { formatScreenshot, saveBrowserScreenshot } from './browser/browser-format'
 import type { RuntimeRpcSuccess } from './runtime-client'
 import type { BrowserScreenshotResult } from '../shared/runtime-types'
 

@@ -21,11 +21,7 @@ import type {
   PluginInstallSource,
   PluginLockEntry
 } from '../../../shared/plugins/installation/plugin-install-lockfile'
-import {
-  validateDeclaredPluginArtifacts,
-  validatePluginInstallContent,
-  type PluginArtifactValidationResult
-} from '../plugin-artifact-validation'
+import { validatePluginInstallTree } from '../plugin-artifact-validation'
 import { renamePluginFileWithWindowsRetry } from './plugin-atomic-file-write'
 import { hashPluginTree } from '../plugin-content-hash'
 import { publishPluginInstall } from './plugin-install-publication'
@@ -54,14 +50,6 @@ export type PluginInstallInspection =
       consentFingerprint: string
     }
   | { ok: false; error: string }
-
-async function validatePluginInstallTree(
-  rootDir: string,
-  manifest: PluginManifest
-): Promise<PluginArtifactValidationResult> {
-  const declared = await validateDeclaredPluginArtifacts(rootDir, manifest)
-  return declared.ok ? validatePluginInstallContent(rootDir, manifest) : declared
-}
 
 async function readInstallManifest(
   rootDir: string,
@@ -285,10 +273,18 @@ export async function installStagedPluginTree(input: {
     pluginKey,
     version: manifest.version,
     source: input.source,
+    ...(input.source.kind === 'marketplace' &&
+    !input.release?.sourceUnavailable &&
+    input.release?.repository
+      ? { authorRepository: input.release.repository }
+      : {}),
     resolvedCommit: input.resolvedCommit,
     contentHash: sourceInspection.contentHash,
     consentFingerprint,
-    installedAt: Date.now()
+    // Why kept on update: install order decides which plugin replaces a built-in action.
+    installedAt:
+      (await readPluginLockfile(input.pluginsDir).catch(() => null))?.plugins[pluginKey]
+        ?.installedAt ?? Date.now()
   }
   try {
     await publishPluginInstall({ pluginsDir: input.pluginsDir, pluginDir, entry })

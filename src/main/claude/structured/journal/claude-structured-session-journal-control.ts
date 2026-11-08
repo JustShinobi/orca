@@ -5,7 +5,7 @@ import {
 import type {
   StructuredAgentSessionEventSink,
   StructuredAgentSessionSinkAdmission
-} from '../../../native-chat/agent-session-wire/structured-agent-session-event-sink'
+} from '../../../native-chat/agent-session-wire/journal-ingress/structured-agent-session-event-sink'
 import type { ClaudeStreamJsonConnection } from '../../claude-stream-json-connection'
 import type { ClaudeJournalTranslator } from '../../claude-journal-translator-contract'
 import { createClaudeJournalTranslator } from './claude-structured-journal-translation'
@@ -20,7 +20,8 @@ export function createClaudeSessionJournalTranslator(
   sink: StructuredAgentSessionEventSink | undefined,
   fallbackIdPrefix: string,
   failure: Parameters<typeof createClaudeJournalFailureHandler>[0],
-  currentSession: () => ClaudeSession | null
+  currentSession: () => ClaudeSession | null,
+  acceptStartupFailure: (message: Record<string, unknown>) => boolean
 ): ClaudeJournalTranslator | null {
   const { attempt } = failure
   return sink
@@ -41,7 +42,8 @@ export function createClaudeSessionJournalTranslator(
           currentSession()?.backgroundTasks.goalBackgroundWork ?? 'unverifiable',
         onBackgroundTaskJournalFailure: createClaudeJournalFailureHandler(failure),
         bindPromptItemId: (itemId, promptKey) =>
-          attempt.prompts.bindJournalItemId(itemId, promptKey)
+          attempt.prompts.bindJournalItemId(itemId, promptKey),
+        acceptStartupFailure
       })
     : null
 }

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { isFinalAutomationRunStatus } from '../../../shared/automations-types'
-import { invalidateLocalWorktreeMetadataPruneInputs } from '../../local-worktree-metadata-prune-gate'
+import { normalizeSetupSkippedContent } from './automation-setup-skipped-content'
+import { invalidateLocalWorktreeMetadataPruneInputs } from '../../workspaces/catalog/local-worktree-metadata-prune-gate'
 import type {
   Automation,
   AutomationDispatchResult,
@@ -235,7 +236,14 @@ export function updateAutomationRun(
       : (current.launchDeadlineAt ?? null),
     launchEvidenceAt: Object.hasOwn(result, 'launchEvidenceAt')
       ? (result.launchEvidenceAt ?? null)
-      : (current.launchEvidenceAt ?? null)
+      : (current.launchEvidenceAt ?? null),
+    // Later updates (completion) keep the dispatch's note.
+    ...(result.setupSkippedReason === 'setup-changed'
+      ? {
+          setupSkippedReason: result.setupSkippedReason,
+          ...normalizeSetupSkippedContent(result.setupSkippedContent)
+        }
+      : {})
   }
   // Replace the array to invalidate identity-keyed list projections.
   operations.state.automationRuns = operations.state.automationRuns.map((run) =>

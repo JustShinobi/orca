@@ -19,11 +19,11 @@ import {
 } from '../../../../orchestration/worker-dispatch-stages'
 import { releaseRetriedWorkerTerminal } from '../worker/retried-worker-terminal-release'
 import { withWorkerStartNext } from '../receipt-next'
-import { prepareWorkerStartCard } from '../../../../orchestration/worker-start-card'
+import { prepareWorkerStartCard } from '../../../../orchestration/workers/launch/worker-start-card'
 import {
   recordWorkerLaunchObservation,
   workerLaunchAgent
-} from '../../../../orchestration/worker-launch-observation'
+} from '../../../../orchestration/workers/launch/worker-launch-observation'
 import { preflightFederatedWorkerStart } from './federated-worker-start-preflight'
 
 export async function startFederatedWorker(args: FederatedWorkerStartRequest): Promise<unknown> {
@@ -36,10 +36,16 @@ export async function startFederatedWorker(args: FederatedWorkerStartRequest): P
     server,
     pairingFence,
     budgets,
+    childParent,
     federationProtocolVersion,
     status,
     mutation
-  } = await preflightFederatedWorkerStart(params, runtime, orchestrationMutation)
+  } = await preflightFederatedWorkerStart(
+    params,
+    runtime,
+    orchestrationMutation,
+    args.callerSession
+  )
 
   const setupDecision = createsWorktree ? (params.setup ?? 'run') : 'not_applicable'
   const runId = args.bindRunId()
@@ -100,7 +106,11 @@ export async function startFederatedWorker(args: FederatedWorkerStartRequest): P
           // Carry home dispatch depth so remote workers cannot re-enter as roots when nesting.
           depth: started.dispatch.depth,
           protocolVersion: federationProtocolVersion,
-          worktree,
+          // A server creates new-child as top-level plus this parent, so older servers parse it too.
+          worktree: createsWorktree ? 'new-top-level' : worktree,
+          ...(childParent && 'crossStoreParent' in childParent
+            ? { crossStoreParent: childParent.crossStoreParent }
+            : {}),
           name: params.name,
           repo: params.repo,
           baseBranch: params.baseBranch,
@@ -178,7 +188,8 @@ export async function startFederatedWorker(args: FederatedWorkerStartRequest): P
           launch,
           timeoutMs: budgets.readinessTimeoutMs,
           effects: remote.effects ?? [],
-          residualResources: remote.residualResources ?? []
+          residualResources: remote.residualResources ?? [],
+          ...(childParent && 'warning' in childParent ? { warning: childParent.warning } : {})
         },
         reportsTurnStops
           ? undefined

@@ -3,14 +3,14 @@ import type { AgentProviderSessionMetadata } from '../../../shared/agent-session
 import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
-} from '../../../shared/tui-agent-launch-defaults'
+} from '../../../shared/agent-launch/choices/tui-agent-launch-defaults'
 import { useAppStore } from '@/store'
-import { sendRuntimePtyInputVerified } from '@/runtime/runtime-terminal-verified-input'
-import { getRemoteRuntimePtyEnvironmentId } from '@/runtime/runtime-terminal-stream'
-import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
+import { sendRuntimePtyInputVerified } from '@/runtime/hosted-terminals/input/runtime-terminal-verified-input'
+import { getRemoteRuntimePtyEnvironmentId } from '@/runtime/hosted-terminals/identity/remote-runtime-pty-owner'
+import { callRuntimeRpc } from '@/runtime/rpc/calls/runtime-rpc-call'
 import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
 import { translate } from '@/i18n/i18n'
-import { buildAgentResumeStartupPlan } from './tui-agent-startup'
+import { buildAgentResumeStartupPlan } from '../../../shared/agent-launch/startup/tui-agent-resume-startup'
 import {
   selectAutoSwitchAccount,
   type AutoSwitchAccountCandidate,

@@ -16,14 +16,14 @@ import { PluginUpdateReviewNotices } from '../plugins/catalog/plugin-update-revi
 import { isPluginAutoUpdateOn } from '../../shared/plugins/catalog/plugin-update-policy'
 import { PluginBundledBootstrapCoordinator } from '../plugins/plugin-bundled-bootstrap-coordinator'
 import { getPluginsDataDir } from '../plugins/plugin-discovery'
-import { resolveBundledPluginRoot } from '../plugins/plugin-bundled-bootstrap'
+import { bundledPluginRootForApp } from '../plugins/plugin-bundled-bootstrap'
+import { approveBundledPluginsFromStore } from '../plugins/plugin-bundled-approval'
 import { resolvePluginHostEntryPath } from '../plugins/workers/plugin-host-process'
-import { applyPluginConsent, applyPluginEnablement } from '../plugins/plugin-enablement'
+import { applyPluginConsent, revokePluginConsent } from '../plugins/plugin-enablement'
 import { clearRemovedPluginSettings } from '../plugins/plugin-removal-settings'
 import { clearPluginFrameStorage } from '../plugins/panels/plugin-frame-guest-sessions'
-import { setPluginServiceForRpc } from '../runtime/rpc/methods/plugins'
+import { bindPluginRpcServices } from './main-process-plugin-rpc'
 import { bindPluginDesktopViews } from '../plugins/view/plugin-view-desktop-binding'
-import { openPluginFrameGuestDevTools } from '../plugins/panels/plugin-frame-guest-diagnostics'
 import {
   normalizePluginConsents,
   normalizePluginIdList
@@ -36,13 +36,16 @@ import { rebuildSystemTrayMenu } from '../tray/system-tray'
 import { logStartupMilestone } from './startup-diagnostics'
 import { agentHookServer } from '../agent-hooks/server'
 import {
+  bindPluginRuntime,
   createPluginAgentStatusForwarder,
-  pluginRuntimeDelegate,
   watchPluginWorkspaceContext
 } from '../plugins/plugin-runtime-binding'
 import { emitPluginWorktreeLifecycle } from './main-process-pty-startup'
 import { mainProcessState as state } from './main-process-state'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import { PluginStatusBarState } from '../plugins/status-bar/plugin-status-bar-state'
+import { createDesktopPluginAppearance } from '../plugins/appearance/desktop-plugin-appearance'
+import { ALL_RPC_METHODS } from '../runtime/rpc/methods/rpc-method-registry'
 
 const PLUGIN_AUTO_UPDATE_STARTUP_DELAY_MS = 60_000
 // Why: the official catalog fetch must not compete with first paint; opening the marketplace seeds sooner.
@@ -100,8 +103,11 @@ export async function initializeMainProcessPlugins(runtime: OrcaRuntimeService):
     userDataPath: app.getPath('userData'),
     hostVersion: pluginHostVersion(app.getVersion()),
     blockedPluginReason: (pluginKey) => state.pluginKillListService?.reason(pluginKey) ?? null,
-    imageCache: pluginImageCache
+    imageCache: pluginImageCache,
+    revokeConsent: (pluginKey) =>
+      revokePluginConsent({ store, pluginService: state.pluginService, pluginKey })
   })
+  const bundledPluginRoot = bundledPluginRootForApp(app)
   state.pluginService = new PluginService({
     userDataPath: app.getPath('userData'),
     hostVersion: pluginHostVersion(app.getVersion()),
@@ -114,7 +120,10 @@ export async function initializeMainProcessPlugins(runtime: OrcaRuntimeService):
     getKeybindings: () => state.keybindings?.getOverrides() ?? {},
     getPluginKillListEntry: (pluginKey) => state.pluginKillListService?.find(pluginKey) ?? null,
     hostEntryPath: resolvePluginHostEntryPath(app.getAppPath(), app.isPackaged),
-    getDesktopFrameServices: getPluginDesktopFrameServices
+    getDesktopFrameServices: getPluginDesktopFrameServices,
+    statusBar: new PluginStatusBarState(),
+    appearance: createDesktopPluginAppearance(store, () => state.pluginService),
+    bundledPluginRoot
   })
   const pluginService = state.pluginService
   const pluginAutoUpdater = new PluginAutoUpdater({
@@ -172,14 +181,12 @@ export async function initializeMainProcessPlugins(runtime: OrcaRuntimeService):
   }
   installPluginImageProtocolHandler({
     cache: pluginImageCache,
-    findValidPlugin: (pluginKey) => state.pluginService?.findValidPlugin(pluginKey) ?? null
+    findValidPlugin: (pluginKey) => state.pluginService?.findValidPlugin(pluginKey) ?? null,
+    findApprovedPlugin: (pluginKey) =>
+      state.pluginService?.findApprovedPlugin(pluginKey, true) ?? null
   })
   const bundledPluginBootstrap = new PluginBundledBootstrapCoordinator({
-    root: resolveBundledPluginRoot({
-      isPackaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      appPath: app.getAppPath()
-    }),
+    root: bundledPluginRoot,
     userDataPath: app.getPath('userData'),
     hostVersion: pluginHostVersion(app.getVersion()),
     isEnabled: () => state.store?.getSettings().pluginSystemEnabled === true,
@@ -187,7 +194,9 @@ export async function initializeMainProcessPlugins(runtime: OrcaRuntimeService):
     // Why: a retired bundled plugin must not leave consent, theme choices or frame storage behind.
     beforeRetire: (pluginKey) => clearRemovedPluginSettings(store, pluginKey),
     afterRetire: (pluginKey) => clearPluginFrameStorage(pluginKey),
-    refreshPlugins: () => state.pluginService?.refresh() ?? Promise.resolve()
+    refreshPlugins: () => state.pluginService?.refresh() ?? Promise.resolve(),
+    approveContentPlugins: (pluginKeys) =>
+      approveBundledPluginsFromStore(store, pluginService, pluginKeys)
   })
   const requestBundledPluginBootstrap = (): void => {
     void bundledPluginBootstrap
@@ -232,19 +241,10 @@ export async function initializeMainProcessPlugins(runtime: OrcaRuntimeService):
     }
   })
   // Bound here, not in the IPC handlers: a headless serve never opens a window to register them.
-  const pluginDelegate = pluginRuntimeDelegate(runtime, () => agentHookServer.getStatusSnapshot())
-  pluginService.setRuntimeDelegate(pluginDelegate)
-  // Headless RPC resolves this service too; consent shares the desktop hash-keyed write path.
-  setPluginServiceForRpc(state.pluginService, {
-    applyConsent: (request) =>
-      applyPluginConsent({ store, pluginService: state.pluginService!, ...request }),
-    applyEnablement: (pluginKey, enabled) =>
-      applyPluginEnablement({ store, pluginService: state.pluginService!, pluginKey, enabled }),
-    setPluginSystemEnabled: (pluginSystemEnabled) =>
-      store.updateSettings({ pluginSystemEnabled }, { notifyListeners: true }),
-    setDevPluginPaths: (devPluginPaths) =>
-      store.updateSettings({ devPluginPaths }, { notifyListeners: true }),
-    openFrameDevTools: openPluginFrameGuestDevTools
+  const pluginDelegate = bindPluginRuntime(pluginService, runtime, agentHookServer, ALL_RPC_METHODS)
+  bindPluginRpcServices(store, pluginService, {
+    marketplace: state.pluginMarketplaceService,
+    installer: state.pluginMarketplaceInstaller
   })
   bindPluginDesktopViews(state.isServeMode, pluginService, () => state.mainWindow)
   // Initialization discovers manifests only; workers/panel reads wait for explicit triggers.

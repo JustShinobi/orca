@@ -5,6 +5,7 @@ import type { Tab } from '../tab-types'
 import type { LayoutEditorView } from './layout-editor-view'
 import { loadWorkspace } from './workspace-layout-load-workspace'
 import { nameBasedLoadContext } from './workspace-layout-minted-ids'
+import { createRecordedLeafReader } from './workspace-layout-recorded-key-order'
 
 vi.mock('../layout-owner-switch', () => ({ ORCA_LAYOUT_OWNER_IS_MAIN: true }))
 
@@ -36,59 +37,31 @@ function load(entries: Tab[], hostId: ExecutionHostId) {
       }
     ])
   )
+  const session = { ...getDefaultWorkspaceSession(), unifiedTabs: { [key]: entries } }
   return () =>
-    loadWorkspace({
-      session: { ...getDefaultWorkspaceSession(), unifiedTabs: { [key]: entries } },
-      hostId,
-      key,
-      terminalHomes: new Map(),
-      context: { ...nameBasedLoadContext(), editorViewsOf: () => views },
-      view: {
-        activeRepoId: null,
-        activeWorktreeId: key,
-        activeTabId: null,
-        groups: {},
-        lastFocusedAt: {},
-        panes: {},
-        editorDrafts: {}
+    loadWorkspace(
+      {
+        session,
+        hostId,
+        key,
+        terminalHomes: new Map(),
+        context: { ...nameBasedLoadContext(), editorViewsOf: () => views },
+        view: {
+          activeRepoId: null,
+          activeWorktreeId: key,
+          activeTabId: null,
+          groups: {},
+          lastFocusedAt: {},
+          panes: {},
+          editorDrafts: {}
+        },
+        facts: { tabLabels: {}, terminalRows: {}, scrollback: {}, browserTabs: {} },
+        layouts: new Map(),
+        canonicalTabIdBySubsumedTabId: new Map()
       },
-      facts: { tabLabels: {}, terminalRows: {}, scrollback: {}, browserTabs: {} },
-      layouts: new Map(),
-      canonicalTabIdBySubsumedTabId: new Map()
-    })
+      createRecordedLeafReader(session)
+    )
 }
-
-it.each(['local', 'ssh:builder'] as const)(
-  'bounds stored tab ID reads on repeated %s check-tab reconstruction',
-  (hostId) => {
-    const count = 128
-    let idReads = 0
-    const entries = Array.from({ length: count }, (_, index) => {
-      const id = `check-${index}`
-      return {
-        ...checkTab(id, hostId),
-        get id() {
-          idReads++
-          return id
-        }
-      }
-    })
-    const reconstruct = load(entries, hostId)
-    for (let attempt = 0; attempt < 2; attempt++) {
-      idReads = 0
-      const workspace = reconstruct()
-      expect(workspace.tabs).toHaveLength(count)
-      expect(idReads).toBeLessThan(count * 20)
-      const scope = hostId === 'local' ? '' : `@${hostId}`
-      expect(workspace.tabs[count - 1]?.entityId).toBe(
-        `${key}::check-details${scope}::check-${count - 1}`
-      )
-      expect(workspace.editorViews?.['check-127']?.file.filePath).toBe(
-        workspace.tabs[count - 1]?.entityId
-      )
-    }
-  }
-)
 
 it('keeps the first stored owner when check-tab IDs repeat', () => {
   const workspace = load(

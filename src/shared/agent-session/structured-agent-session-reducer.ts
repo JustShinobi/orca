@@ -1,3 +1,4 @@
+import { trimStructuredAgentSessionHistory } from './structured-agent-session-history-retention'
 import type { AgentSessionCurrentRequestsMarker } from './requests/agent-session-current-requests-wire'
 import {
   hostClockField,
@@ -11,7 +12,7 @@ import {
   applyCurrentRequestsMarker,
   type AgentSessionCurrentRequestsState
 } from './requests/agent-session-current-requests'
-import type { AgentJournalCursor } from '../agent-session-journal-identity'
+import type { AgentJournalCursor } from './journal/agent-session-journal-identity'
 import type {
   AgentJournalRenderItem,
   AgentJournalSubmission
@@ -101,6 +102,7 @@ export type StructuredAgentSessionState = AgentSessionCurrentRequestsState & {
 
 export type StructuredAgentSessionAction =
   | { type: 'loading' }
+  | { type: 'trim-history' }
   | { type: 'requests-marker'; marker: AgentSessionCurrentRequestsMarker }
   | {
       type: 'requests-complete'
@@ -139,6 +141,9 @@ export function reduceStructuredAgentSession(
   action: StructuredAgentSessionAction,
   receivedAt: number = Date.now()
 ): StructuredAgentSessionState {
+  if (action.type === 'trim-history') {
+    return trimStructuredAgentSessionHistory(state)
+  }
   if (action.type === 'requests-marker') {
     return { ...state, ...applyCurrentRequestsMarker(state, action.marker) }
   }
@@ -267,7 +272,10 @@ export function reduceStructuredAgentSession(
   const merged = journalUnchanged
     ? state.items
     : mergeItems(state.items, liveItems, event.batch.removedItemIds)
-  const items = trimRetainedItems(merged, state.retainedOwnItemLimit, state.retainedItemCap)
+  // Retained items already fit the limits, which only grow, so an unchanged journal skips the scan.
+  const items = journalUnchanged
+    ? merged
+    : trimRetainedItems(merged, state.retainedOwnItemLimit, state.retainedItemCap)
   const outsideWindow = [
     ...(liveItems.length < event.batch.items.length
       ? event.batch.items.filter((item) => !liveItems.includes(item))

@@ -1,5 +1,5 @@
 import type { AgentPromptSubmitOutcome } from './agent-prompt-submission'
-import type { WriteSettlement } from './pty-write-settlement'
+import type { WriteSettlement } from './terminal/pty/lifecycle/pty-write-settlement'
 
 export type RuntimeTerminalSend = {
   handle: string

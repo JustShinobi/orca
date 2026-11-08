@@ -1,0 +1,103 @@
+import { useCallback, useMemo } from 'react'
+import { isPairedWebClientWindow } from '@/lib/desktop-window-chrome'
+import {
+  resolveOwner,
+  runtimeEnvironmentIdUnlessTwin,
+  runtimeTargetForWorkspaceOwner
+} from '@/lib/resolve-owner'
+import { runtimeTargetForOwnerEnvironment } from '@/runtime/rpc/targets/runtime-client-target'
+import type { RuntimeClientTarget } from '../../../../../../shared/runtime-client-target'
+import { useAppStore } from '@/store/index'
+import type { AppState } from '@/store/types'
+import { UNRESOLVED_GIT_HOST_ERROR } from '@/store/slices/editor/git/git-operation-target'
+import { selectRuntimeAwareSshStatus } from '@/store/slices/ssh/runtime-environment-ssh-selectors'
+import type { AttachedWorktreeOwner } from '../../folder-workspace-attached-worktrees'
+
+export function sourceControlFileWatchRuntimeEnvironmentId(
+  state: AppState,
+  owner: AttachedWorktreeOwner
+): string | null | undefined {
+  const match = resolveOwner(state, {
+    workspaceId: owner.worktreeId,
+    ...(owner.worktree.hostId ? { hostId: owner.executionHostId } : {})
+  })
+  // A runtime proxy to nested SSH cannot watch that filesystem either.
+  if (match.kind !== 'resolved' || match.owner.at !== 'local') {
+    return undefined
+  }
+  const endpoint = match.owner.endpoint
+  return endpoint.kind === 'environment' ? endpoint.environmentId : null
+}
+
+function ownerTargetFor(
+  state: AppState,
+  worktreeId: string | null | undefined
+): RuntimeClientTarget | null {
+  return worktreeId ? runtimeTargetForWorkspaceOwner(state, { workspaceId: worktreeId }) : null
+}
+
+/** Resolve the worktree owner, never mutable host focus; missing/disagreeing rows return null. */
+export function getWorktreeGitOwnerTarget(
+  worktreeId: string | null | undefined
+): RuntimeClientTarget | null {
+  return ownerTargetFor(useAppStore.getState(), worktreeId)
+}
+
+/** {@link getWorktreeGitOwnerTarget} as a hook with a stable identity per owner. */
+export function useWorktreeGitOwnerTarget(
+  worktreeId: string | null | undefined
+): RuntimeClientTarget | null {
+  // Subscribe by primitive owner key; fresh resolver objects would rerender every write.
+  const ownerKey = useAppStore((state) => {
+    const target = ownerTargetFor(state, worktreeId)
+    return target ? (target.kind === 'environment' ? `env:${target.environmentId}` : 'local') : null
+  })
+  return useMemo(
+    () =>
+      ownerKey === null
+        ? null
+        : runtimeTargetForOwnerEnvironment(ownerKey === 'local' ? null : ownerKey.slice(4)),
+    [ownerKey]
+  )
+}
+
+/** The owner transport for a git call, or the unresolved-host refusal the caller already surfaces. */
+export function requireGitOwnerTarget(target: RuntimeClientTarget | null): RuntimeClientTarget {
+  if (!target) {
+    throw new Error(UNRESOLVED_GIT_HOST_ERROR)
+  }
+  return target
+}
+
+export function useWorktreeGitSshConnectionReady(
+  activeWorktreeId: string | null
+): (connectionId: string | null | undefined, worktreeId?: string | null) => boolean {
+  const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
+  const sshStateByEnvironment = useAppStore((s) => s.sshStateByEnvironment)
+  const runtimeStatusByEnvironmentId = useAppStore((s) => s.runtimeStatusByEnvironmentId)
+  return useCallback(
+    (connectionId: string | null | undefined, worktreeId = activeWorktreeId): boolean => {
+      if (!connectionId) {
+        return true
+      }
+      const state = useAppStore.getState()
+      const sshOwnerEnvironmentId =
+        worktreeId && !isPairedWebClientWindow()
+          ? runtimeEnvironmentIdUnlessTwin(state, worktreeId)
+          : null
+      return (
+        selectRuntimeAwareSshStatus(
+          {
+            ...state,
+            runtimeStatusByEnvironmentId,
+            sshConnectionStates,
+            sshStateByEnvironment
+          },
+          sshOwnerEnvironmentId,
+          connectionId
+        ) === 'connected'
+      )
+    },
+    [activeWorktreeId, runtimeStatusByEnvironmentId, sshConnectionStates, sshStateByEnvironment]
+  )
+}

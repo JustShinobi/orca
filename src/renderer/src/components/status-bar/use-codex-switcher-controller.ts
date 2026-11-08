@@ -1,21 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useMountedRef } from '@/hooks/useMountedRef'
 import type { CodexRateLimitAccountsState } from '../../../../shared/managed-account-types'
 import type { ProviderRateLimits } from '../../../../shared/rate-limit-types'
 import { useAppStore } from '../../store'
-import { selectAccountOwnerRateLimits } from '../../store/slices/rate-limits'
 import { defaultScopeHost } from '@/lib/default-creation-host'
-import { useActiveAccountOwner } from '@/runtime/use-worktree-runtime-target'
-import { runtimeTargetEnvironmentId } from '@/runtime/runtime-client-target'
+import { useActiveAccountOwner } from '@/runtime/provider-accounts/ownership/use-active-account-owner'
+import { runtimeTargetEnvironmentId } from '@/runtime/rpc/targets/runtime-client-target'
 import {
   fetchProviderAccountsSnapshot,
   selectCodexProviderAccount
-} from '@/runtime/runtime-provider-accounts-client'
-import { translate } from '@/i18n/i18n'
+} from '@/runtime/provider-accounts/observations/runtime-provider-accounts-client'
+import { useTranslate } from '@/i18n/use-translate'
 import {
   markLiveCodexSessionsForRestart,
   resolveCodexRestartPromptAccountLabel
-} from '@/lib/codex-session-restart'
+} from '@/lib/agent-session/accounts/codex/codex-session-restart'
 import {
   getWindowsTerminalCapabilityOwnerKey,
   useWindowsTerminalCapabilities
@@ -38,8 +36,8 @@ import {
 import { signInCodexAccount } from './codex-sign-in-action'
 
 export function useCodexSwitcherController(codex: ProviderRateLimits) {
+  const t = useTranslate()
   const [open, setOpen] = useState(false)
-  const [accountsExpanded, setAccountsExpanded] = useState(false)
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
   const [skipFutureResetConfirm, setSkipFutureResetConfirm] = useState(false)
   const [accounts, setAccounts] = useState<CodexRateLimitAccountsState>({
@@ -49,16 +47,8 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
   const [isSwitching, setIsSwitching] = useState(false)
   const [isRedeemingReset, setIsRedeemingReset] = useState(false)
   const [reauthenticatingAccountId, setReauthenticatingAccountId] = useState<string | null>(null)
-  const mountedRef = useMountedRef()
-  const accountsExpandedRef = useRef(accountsExpanded)
-  // Why: Radix item-select is separate from the nested button click, so stopPropagation alone won't prevent the row switch.
-  const suppressNextAccountSelectRef = useRef(false)
-  const suppressNextAccountSelect = useCallback(() => {
-    suppressNextAccountSelectRef.current = true
-    window.setTimeout(() => {
-      suppressNextAccountSelectRef.current = false
-    }, 0)
-  }, [])
+  const mountedRef = useRef(true)
+  const menuOpenRef = useRef(open)
   const openSettingsPage = useAppStore((s) => s.openSettingsPage)
   const openSettingsTarget = useAppStore((s) => s.openSettingsTarget)
   const fetchSettings = useAppStore((s) => s.fetchSettings)
@@ -67,10 +57,8 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
   const refreshCodexRateLimitsForTarget = useAppStore((s) => s.refreshCodexRateLimitsForTarget)
   const consumeCodexRateLimitResetCredit = useAppStore((s) => s.consumeCodexRateLimitResetCredit)
   const fetchInactiveCodexAccountUsage = useAppStore((s) => s.fetchInactiveCodexAccountUsage)
-  const inactiveCodexAccounts = useAppStore(
-    (s) => selectAccountOwnerRateLimits(s).inactiveCodexAccounts
-  )
-  const codexTarget = useAppStore((s) => selectAccountOwnerRateLimits(s).codexTarget)
+  const inactiveCodexAccounts = useAppStore((s) => s.rateLimits.inactiveCodexAccounts)
+  const codexTarget = useAppStore((s) => s.rateLimits.codexTarget)
   const settings = useAppStore((s) => s.settings)
   const runtimeEnvironments = useAppStore((s) => s.runtimeEnvironments)
   const { target: runtimeTarget, wslHostDistro } = useActiveAccountOwner(defaultScopeHost(settings))
@@ -78,8 +66,7 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
   const hasActiveRuntimeEnvironment = activeRuntimeEnvironmentId !== null
   const providerAccountHostLabel = hasActiveRuntimeEnvironment
     ? (runtimeEnvironments.find((environment) => environment.id === activeRuntimeEnvironmentId)
-        ?.name ??
-      translate('auto.components.status.bar.StatusBar.remoteServerLabel', 'Remote server'))
+        ?.name ?? t('auto.components.status.bar.StatusBar.remoteServerLabel', 'Remote server'))
     : undefined
   const windowsTerminalCapabilities = useWindowsTerminalCapabilities(
     navigator.userAgent.includes('Windows') || hasActiveRuntimeEnvironment,
@@ -105,11 +92,18 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
     if (mountedRef.current) {
       setAccounts(snapshot.codex)
     }
-  }, [mountedRef, runtimeTarget])
+  }, [runtimeTarget])
 
   useEffect(() => {
-    accountsExpandedRef.current = accountsExpanded
-  }, [accountsExpanded])
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    menuOpenRef.current = open
+  }, [open])
 
   useEffect(() => {
     // Load on demand at mount and resync account mutations without fetching again on submenu expansion.
@@ -161,10 +155,6 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
           // Why: clearing a distro-less WSL row nulls every distro slot at once.
           clearsEveryWslDistro: accountId === null
         })
-        // Why: collapse to the summary row (not close) so the follow-up "restart open tabs" prompt appears in the same flow.
-        if (mountedRef.current) {
-          setAccountsExpanded(false)
-        }
       }
     } catch (error) {
       console.error('Failed to switch Codex account from status bar:', error)
@@ -181,7 +171,7 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
   ): Promise<void> =>
     signInCodexAccount(accountId, target, {
       accountState,
-      accountsExpandedRef,
+      menuOpenRef,
       fetchInactiveCodexAccountUsage,
       fetchSettings,
       isSwitching,
@@ -189,7 +179,6 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
       reauthenticatingAccountId,
       recordFeatureInteraction,
       setAccounts,
-      setAccountsExpanded,
       setReauthenticatingAccountId
     })
 
@@ -200,7 +189,6 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
     if (group.key === currentKey) {
       return
     }
-    setAccountsExpanded(false)
     try {
       await refreshCodexRateLimitsForTarget(group.runtimeTarget)
     } catch (error) {
@@ -251,21 +239,15 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
     }
   }
 
-  const handleOpenChange = useCallback((nextOpen: boolean): void => {
-    setOpen(nextOpen)
-    if (!nextOpen) {
-      setAccountsExpanded(false)
-    }
-  }, [])
-
-  const handleAccountsExpandedToggle = useCallback((): void => {
-    const nextExpanded = !accountsExpanded
-    setAccountsExpanded(nextExpanded)
-    if (nextExpanded && !hasActiveRuntimeEnvironment) {
-      // Why: fetch inactive-account usage only on switcher expansion; remote-owned accounts have no local cache to fill.
-      void fetchInactiveCodexAccountUsage()
-    }
-  }, [accountsExpanded, fetchInactiveCodexAccountUsage, hasActiveRuntimeEnvironment])
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean): void => {
+      setOpen(nextOpen)
+      if (nextOpen && !hasActiveRuntimeEnvironment) {
+        void fetchInactiveCodexAccountUsage()
+      }
+    },
+    [fetchInactiveCodexAccountUsage, hasActiveRuntimeEnvironment]
+  )
 
   const selectedRuntimeKey = getCodexStatusRuntimeKey(
     normalizeCodexStatusRuntimeTarget(accountState, toCodexStatusRuntimeTarget(codexTarget))
@@ -288,12 +270,10 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
   const selectedGroup =
     switchGroups.find((group) => group.key === selectedRuntimeKey) ?? switchGroups[0]
   const activeTarget = selectedGroup?.targets.find((target) => target.active)
-  const resetProjection = getCodexResetProjection(codex, hasActiveRuntimeEnvironment)
+  const resetProjection = getCodexResetProjection(codex, hasActiveRuntimeEnvironment, t)
 
   return {
-    accountsExpanded,
     activeTarget,
-    handleAccountsExpandedToggle,
     handleConfirmReset,
     handleOpenChange,
     handleResetMenuSelect,
@@ -315,8 +295,6 @@ export function useCodexSwitcherController(codex: ProviderRateLimits) {
     setResetConfirmOpen,
     setSkipFutureResetConfirm,
     skipFutureResetConfirm,
-    suppressNextAccountSelect,
-    suppressNextAccountSelectRef,
     switchGroups
   }
 }

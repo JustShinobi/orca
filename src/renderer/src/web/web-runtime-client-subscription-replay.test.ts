@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { isRuntimeSubscriptionReplayResponse } from '../../../shared/runtime-subscription-replay'
-import type { PairedE2EEClientHandshake } from '../../../shared/paired-e2ee-client-handshake'
-import { createFixedKeyLegacyHandshakeForTest } from '../../../shared/paired-e2ee-fixed-key-test-fixture'
+import type { PairedE2EEClientHandshake } from '../../../shared/remote-runtime/e2ee/paired-e2ee-client-handshake'
+import { createFixedKeyLegacyHandshakeForTest } from '../../../shared/remote-runtime/e2ee/paired-e2ee-fixed-key-test-fixture'
 import { WebRuntimeClient } from './web-runtime-client'
 
 const fakeSockets: FakeWebSocket[] = []

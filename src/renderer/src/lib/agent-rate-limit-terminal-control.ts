@@ -1,7 +1,7 @@
 import type { AutoSwitchRateLimitAgent } from '../../../shared/agent-rate-limit-detection'
-import { isExpectedAgentProcess } from '../../../shared/agent-process-recognition'
-import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
-import { sendRuntimePtyInputVerified } from '@/runtime/runtime-terminal-verified-input'
+import { isExpectedAgentProcess } from '../../../shared/agent-status/process/agent-process-recognition'
+import { inspectRuntimeTerminalProcess } from '@/runtime/hosted-terminals/inspection/runtime-terminal-process-inspection'
+import { sendRuntimePtyInputVerified } from '@/runtime/hosted-terminals/input/runtime-terminal-verified-input'
 
 const AGENT_STOP_ATTEMPTS = 3
 const AGENT_STOP_WAIT_MS = 1400

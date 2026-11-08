@@ -1,12 +1,13 @@
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 // Share Settings/Cmd+J visibility without Settings pane UI imports; an architecture test enforces this boundary.
+// Share Settings/Cmd+J visibility without Settings pane UI imports; an architecture test enforces this boundary.
 import {
   getRuntimeEnvironmentsSearchEntry,
   getWebRuntimeEnvironmentsSearchEntry
-} from '@/components/settings/runtime-environments-search'
-import { getTerminalPaneSearchEntries } from '@/components/settings/terminal-search'
-import { isMacUserAgent, isWindowsUserAgent } from '@/components/terminal-pane/pane-helpers'
+} from '@/components/settings/runtime-environments/catalog/runtime-environments-search'
+import { getTerminalPaneSearchEntries } from '@/components/settings/terminal/terminal-search'
+import { isMacUserAgent, isWindowsUserAgent } from '@/lib/user-agent-platform'
 import { useLinearProviderConnected } from '@/hooks/useLinearProviderConnected'
 import { getClientCreationActionPolicy } from '@/lib/client-creation-action-policy'
 import type { SettingsNavSection } from '@/lib/settings-navigation-types'
@@ -17,11 +18,11 @@ import {
 } from '@/lib/windows-terminal-capabilities'
 import { defaultScopeHost } from '@/lib/default-creation-host'
 import { useAppStore } from '@/store'
-import { useProjectHostSetupProjection } from '@/store/selectors'
+import { useProjectHostSetupProjection } from '@/store/projects/use-project-host-setup-projection'
 import {
   useChatSettingsOwnPermissions,
   useStructuredAgentSessionHostQueuesMessages
-} from '@/runtime/structured-agent-session-host-capability'
+} from '@/runtime/native-chat/host-capabilities/structured-agent-session-host-capability'
 import type { ProjectGroupingModel } from '../../../shared/project-section-grouping'
 import type { Repo } from '../../../shared/repo-types'
 import {

@@ -1,5 +1,5 @@
 import type { RateLimitRuntimeTarget } from '../../../shared/rate-limit-types'
-import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
+import { callRuntimeRpc } from '@/runtime/rpc/calls/runtime-rpc-call'
 import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
 import { CLIENT_PLATFORM } from '@/lib/new-workspace'
 

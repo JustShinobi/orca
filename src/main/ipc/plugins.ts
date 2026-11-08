@@ -5,18 +5,18 @@ import type { PluginHostCallOutcome } from '../../shared/plugins/frames/plugin-p
 import { getUserPluginsDir, getPluginsDataDir } from '../plugins/plugin-discovery'
 import {
   installPluginFromGit,
-  installPluginFromLocalPath,
-  readPluginLockfile,
-  removeInstalledPlugin
+  installPluginFromLocalPath
 } from '../plugins/installation/plugin-install'
+import { uninstallInstalledPlugin } from '../plugins/installation/plugin-uninstall'
 import { applyPluginConsent, applyPluginEnablement } from '../plugins/plugin-enablement'
-import { clearRemovedPluginSettings } from '../plugins/plugin-removal-settings'
 import { readApprovedPluginNewFileTemplate } from '../plugins/plugin-new-file-template'
 import { handlePluginPanelStateRequest } from '../plugins/panels/plugin-panel-state'
 import type { PluginService } from '../plugins/plugin-service'
 import { registerPluginFrameEntryHandlers, rendererPanelOwner } from './plugin-frame-entry-ipc'
 import { registerPluginPanelPushHandlers } from './plugin-panel-push-ipc'
 import { registerPluginSettingsHandlers } from './plugin-settings-ipc'
+import { registerPluginStatusBarHandlers } from './plugin-status-bar-ipc'
+import { registerPluginEditorSaveHookHandler } from './plugin-editor-save-hook-ipc'
 import { readPluginPanelImage } from '../plugins/panels/plugin-panel-image'
 import {
   bindPluginFrameGuests,
@@ -26,8 +26,7 @@ import { isQualifiedPluginKey } from '../../shared/plugins/manifest/plugin-manif
 import { pluginConsentRequestSchema } from '../../shared/plugins/approval/plugin-consent-request'
 import {
   isAllowedPluginGitUrl,
-  PLUGIN_COMMIT_PATTERN,
-  type PluginLockfile
+  PLUGIN_COMMIT_PATTERN
 } from '../../shared/plugins/installation/plugin-install-lockfile'
 import { resolvePluginGitSource } from '../plugins/installation/plugin-git-ref-resolution'
 import {
@@ -52,7 +51,9 @@ const readNewFileTemplateArgsSchema = z.object({
 const invokeCommandArgsSchema = z.object({
   pluginKey: z.string().min(1),
   commandId: z.string().min(1),
-  args: z.unknown().optional()
+  args: z.unknown().optional(),
+  /** Run only if the worker can start it within this many ms (a replacement's fallback). */
+  timeoutMs: z.number().int().positive().max(60_000).optional()
 })
 
 const installArgsSchema = z.discriminatedUnion('kind', [
@@ -83,17 +84,6 @@ const logsArgsSchema = z.object({ pluginKey: z.string().min(1) })
 
 // Preserve import compatibility; runtime RPC uses the Electron-free client-list module.
 import { listPluginsForClients, readInstalledPluginManifest } from '../plugins/plugin-client-list'
-
-export function canRemoveInstalledPlugin(
-  pluginService: PluginService,
-  pluginKey: string,
-  lock?: PluginLockfile
-): boolean {
-  return (
-    lock?.plugins[pluginKey]?.source.kind !== 'bundled' &&
-    pluginService.getDiscovered().some((plugin) => plugin.pluginKey === pluginKey && !plugin.isDev)
-  )
-}
 
 export function registerPluginHandlers(
   store: Store,
@@ -152,6 +142,8 @@ export function registerPluginHandlers(
   bindPluginFrameGuests(pluginService)
   registerPluginFrameEntryHandlers(store, pluginService)
   registerPluginPanelPushHandlers(pluginService)
+  registerPluginStatusBarHandlers(pluginService)
+  registerPluginEditorSaveHookHandler()
   registerPluginSettingsHandlers(pluginService)
 
   ipcMain.handle('plugins:readNewFileTemplate', async (_event, args: unknown) => {
@@ -199,9 +191,12 @@ export function registerPluginHandlers(
   })
 
   ipcMain.handle('plugins:invokeCommand', async (_event, args: unknown) => {
+    // Why before whenReady: the caller's deadline started when it asked, not when plugins loaded.
+    const askedAt = Date.now()
     await pluginService.whenReady()
     const parsed = invokeCommandArgsSchema.parse(args)
-    return pluginService.invokeCommand(parsed.pluginKey, parsed.commandId, parsed.args)
+    const startBy = parsed.timeoutMs === undefined ? undefined : askedAt + parsed.timeoutMs
+    return pluginService.invokeCommand(parsed.pluginKey, parsed.commandId, parsed.args, startBy)
   })
 
   ipcMain.handle('plugins:resolveGitSource', async (_event, args: unknown) =>
@@ -240,22 +235,15 @@ export function registerPluginHandlers(
   ipcMain.handle('plugins:remove', async (_event, args: unknown) => {
     await pluginService.whenReady()
     const parsed = removeArgsSchema.parse(args)
-    const pluginsDir = getUserPluginsDir(pluginService.options.userDataPath)
-    const lock = await readPluginLockfile(pluginsDir)
-    if (!canRemoveInstalledPlugin(pluginService, parsed.pluginKey, lock)) {
+    const removed = await uninstallInstalledPlugin({
+      pluginService,
+      store,
+      pluginKey: parsed.pluginKey,
+      afterRemove: clearPluginFrameStorage
+    })
+    if (!removed) {
       throw new Error(`cannot remove protected or non-installed plugin ${parsed.pluginKey}`)
     }
-    await pluginService.removePlugin(parsed.pluginKey, () =>
-      removeInstalledPlugin({
-        pluginsDir,
-        pluginsDataDir: getPluginsDataDir(pluginService.options.userDataPath),
-        pluginKey: parsed.pluginKey,
-        // Why before deletion: a crash mid-delete must not leave an approved half-removed plugin.
-        beforeRemove: () => clearRemovedPluginSettings(store, parsed.pluginKey)
-      })
-    )
-    await clearPluginFrameStorage(parsed.pluginKey)
-    await pluginService.refresh()
     return listPluginsForClients(pluginService)
   })
 

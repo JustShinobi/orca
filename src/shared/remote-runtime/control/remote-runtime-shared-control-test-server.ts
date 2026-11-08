@@ -1,7 +1,7 @@
 import {
   pairedRuntimeConnectionFromOffer,
   type PairedRuntimeConnection
-} from '../../paired-runtime-connection'
+} from '../pairing/paired-runtime-connection'
 import type { AddressInfo } from 'node:net'
 import { WebSocketServer, type WebSocket } from 'ws'
 import {
@@ -11,9 +11,9 @@ import {
   generateKeyPair,
   publicKeyFromBase64,
   publicKeyToBase64
-} from '../../e2ee-crypto'
-import { encodePairingOffer, parsePairingCode } from '../../pairing'
-import type { PairingOffer } from '../../mobile-relay-pairing-offer'
+} from '../e2ee/node/e2ee-crypto'
+import { encodePairingOffer, parsePairingCode } from '../pairing/pairing'
+import type { PairingOffer } from '../pairing/mobile-relay-pairing-offer'
 
 export type SharedControlTestServer = {
   pairing: PairedRuntimeConnection
@@ -83,11 +83,8 @@ export async function createSharedControlTestServer(
   servers.push(wss)
 
   wss.on('connection', (ws) => {
-    connectionCount += 1
-    // Why: captured per connection — the outer count keeps moving, so reading it
-    // at hello time would mis-suppress a first socket that raced a second connect.
-    const connectionIndex = connectionCount
-    const isFirstConnection = connectionIndex === 1
+    let connectionIndex = 0
+    let isFirstConnection = false
     let goneSilent = false
     let sharedKey: Uint8Array | null = null
     let authenticated = false
@@ -97,7 +94,15 @@ export async function createSharedControlTestServer(
       }
       const frame = data.toString()
       if (!sharedKey) {
-        const hello = JSON.parse(frame) as { publicKeyB64: string }
+        const hello: { publicKeyB64?: string } = JSON.parse(frame)
+        if (!hello.publicKeyB64) {
+          // Legacy-only host: refuses a v2 hello the way hosts before v2 do.
+          ws.close(4001, 'Invalid e2ee_hello')
+          return
+        }
+        connectionCount += 1
+        connectionIndex = connectionCount
+        isFirstConnection = connectionIndex === 1
         sharedKey = deriveSharedKey(
           serverKeyPair.secretKey,
           publicKeyFromBase64(hello.publicKeyB64)

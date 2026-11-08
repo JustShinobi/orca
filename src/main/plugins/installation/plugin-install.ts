@@ -83,8 +83,13 @@ export async function installBundledPlugin(input: {
   expectedPluginKey: string
   blockedPluginReason?: (pluginKey: string) => string | null
 }): Promise<PluginInstallResult> {
-  return serializePluginMutation(input.pluginsDir, () =>
-    installStagedPluginTree({
+  return serializePluginMutation(input.pluginsDir, async () => {
+    const locked = (await readPluginLockfile(input.pluginsDir)).plugins[input.expectedPluginKey]
+    // Why inside the queue: a catalog install that just finished must not be downgraded.
+    if (locked && locked.source.kind !== 'bundled') {
+      return { ok: false, error: 'a catalog install of this plugin is kept' }
+    }
+    return installStagedPluginTree({
       pluginsDir: input.pluginsDir,
       stagingDir: input.sourcePath,
       hostVersion: input.hostVersion,
@@ -94,7 +99,7 @@ export async function installBundledPlugin(input: {
       repairCorruptedVersion: true,
       blockedPluginReason: input.blockedPluginReason
     })
-  )
+  })
 }
 
 export async function installPluginFromGit(input: {
@@ -281,7 +286,7 @@ export async function rollbackInstalledPlugin(input: {
 }
 
 /** Publisher of an existing install from the same source, so reinstalling keeps its key. */
-async function installedPublisherFor(
+export async function installedPublisherFor(
   pluginsDir: string,
   sameSource: (source: PluginLockEntry['source']) => boolean
 ): Promise<string | null> {
@@ -290,7 +295,7 @@ async function installedPublisherFor(
   return entry ? (splitQualifiedPluginKey(entry.pluginKey)?.publisher ?? null) : null
 }
 
-async function declaredPublisher(rootDir: string): Promise<string | undefined> {
+export async function declaredPublisher(rootDir: string): Promise<string | undefined> {
   try {
     const raw: unknown = JSON.parse(await readPluginManifestText(rootDir))
     const publisher =

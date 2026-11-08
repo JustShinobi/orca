@@ -5,12 +5,12 @@ import {
   ORCHESTRATION_FEDERATION_RUNTIME_CAPABILITY
 } from '../../../../../../shared/protocol-version'
 import { OrcaRuntimeService } from '../../../../orca-runtime'
-import { OrchestrationDb } from '../../../../orchestration/db'
+import { OrchestrationDb } from '../../../../orchestration/db/orchestration-db'
 import {
   WORKER_INPUT_ACCEPTED_STAGE,
   WORKER_PROMPT_SUBMITTED_STAGE
 } from '../../../../orchestration/worker-dispatch-stages'
-import { ORCHESTRATION_METHODS } from '../../orchestration'
+import { ORCHESTRATION_METHODS } from '../orchestration'
 import { startFederatedWorker } from './federated-worker-start'
 
 type AttachStartResponse = Record<string, unknown>

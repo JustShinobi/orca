@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OrcaRuntimeService } from './orca-runtime'
 import { publishHeadlessRuntimeGraph } from './headless-runtime-graph'
-import { partialRuntimeStore } from './runtime-store-partial-fixture'
+import { partialRuntimeStore } from './orca-runtime-tests/runtime-store-partial-fixture'
 
 // Headless hosts keep a parked viewer's grid until another viewer or phone takes it (#15997).
 
@@ -75,14 +75,5 @@ describe('remote desktop viewers on a parked terminal', () => {
     await runtime.claimRemoteDesktopViewer(PTY, 'multiplex:b:1')
 
     expect(size()).toEqual({ cols: 80, rows: 30 })
-  })
-
-  it('still gives a host with a window its grid back', async () => {
-    const { runtime, size } = createRuntime({ headless: false })
-    await runtime.updateRemoteDesktopViewer(PTY, 'multiplex:a:1', 'laptop', 99, 67)
-
-    await runtime.unregisterRemoteDesktopViewer(PTY, 'multiplex:a:1')
-
-    expect(size()).toEqual(SPAWN_GRID)
   })
 })

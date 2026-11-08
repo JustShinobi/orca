@@ -19,7 +19,7 @@ export function getVisibleRightSidebarActivityItems(
 ): ActivityBarItem[] {
   return items.filter(
     (item) =>
-      (!item.gitOnly || !isFolder) &&
+      (!item.gitOnly || !isFolder || (isFolderWorkspace && item.id === 'source-control')) &&
       (!item.folderOnly || isFolderWorkspace) &&
       // Why: ports were SSH-only because a local workspace's ports are already
       // reachable. A live preview proxy breaks that — it mints a shareable URL

@@ -14,7 +14,7 @@ import type {
   CodexSharedRuntimeAuthProvenanceStatus,
   CodexSystemDefaultSnapshot
 } from './runtime-home-service-types'
-import type { CodexSessionBackfillDate } from '../codex/codex-session-backfill-types'
+import type { CodexSessionBackfillDate } from '../codex/history/backfill/codex-session-backfill-types'
 import type { CodexAccountSelectionTarget } from './runtime-selection'
 import type { LegacyWslRuntimeAuthDestination } from './legacy-wsl-runtime-auth-drain'
 import type { WslCodexAuthRead } from './wsl-codex-auth-batch-reader'
@@ -106,8 +106,10 @@ export abstract class CodexRuntimeHomeState {
     target: CodexAccountSelectionTarget,
     runtimeHomePath: string | null
   ): void
+  /** `pinnedWslDistro`: the distro a background poll gated, read as launch reads its named target. */
   abstract prepareForRateLimitFetch(
-    target?: CodexAccountSelectionTarget
+    target?: CodexAccountSelectionTarget,
+    pinnedWslDistro?: string
   ): CodexRateLimitHomeResolution
   abstract syncForCurrentSelection(
     target?: CodexAccountSelectionTarget,

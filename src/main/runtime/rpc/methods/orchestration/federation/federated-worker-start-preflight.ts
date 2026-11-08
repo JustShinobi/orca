@@ -1,8 +1,9 @@
 import type { WorkerStartInput } from '../worker/worker-start-schema'
 import type { WorkerStartMutation } from '../worker/worker-start-mutation'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
+import type { OrchestrationSessionCaller } from '../../../../orchestration/addressing/orchestration-caller-identity'
 import type { RuntimeStatus } from '../../../../../../shared/runtime-types'
-import { isTuiAgent } from '../../../../../../shared/tui-agent-config'
+import { isTuiAgent } from '../../../../../../shared/agent-launch/catalog/tui-agent-config'
 import {
   ORCHESTRATION_CONTRACT_RUNTIME_CAPABILITY,
   ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION,
@@ -22,6 +23,7 @@ import {
 import { validateFederatedWorkerStartPlacement } from '../worker/worker-start-validation'
 import { resolveFederatedWorkerStartBudgets } from '../worker/worker-start-budgets'
 import { isWorkerStartTimeoutWithinTimerLimit } from '../../../../../../shared/orchestration-timing-budgets'
+import { resolveFederatedChildParent } from './federated-worker-child-parent'
 
 export type FederatedWorkerPreflightResult = {
   worktree: string
@@ -30,6 +32,7 @@ export type FederatedWorkerPreflightResult = {
   server: ReturnType<OrcaRuntimeService['resolveOrchestrationWorkerServer']>
   pairingFence: { expectedEnvironmentPairingRevision: number | undefined }
   budgets: ReturnType<typeof resolveFederatedWorkerStartBudgets>
+  childParent: Awaited<ReturnType<typeof resolveFederatedChildParent>> | undefined
   federationProtocolVersion: number
   status: RuntimeStatus
   mutation: WorkerStartMutation
@@ -38,7 +41,8 @@ export type FederatedWorkerPreflightResult = {
 export async function preflightFederatedWorkerStart(
   params: WorkerStartInput,
   runtime: OrcaRuntimeService,
-  orchestrationMutation: WorkerStartMutation | undefined
+  orchestrationMutation: WorkerStartMutation | undefined,
+  callerSession?: OrchestrationSessionCaller
 ): Promise<FederatedWorkerPreflightResult> {
   if (!isWorkerStartTimeoutWithinTimerLimit(params.timeoutMs)) {
     throw new OrchestrationError(
@@ -53,13 +57,13 @@ export async function preflightFederatedWorkerStart(
     )
   }
   const worktree = params.worktree ?? 'current'
-  if (worktree === 'current' || worktree === 'new-child') {
+  if (worktree === 'current') {
     throw new OrchestrationError(
       'invalid_argument',
-      '--on requires an exact remote worktree selector or new-top-level.'
+      '--on requires an exact remote worktree selector, new-child or new-top-level.'
     )
   }
-  const createsWorktree = worktree === 'new-top-level'
+  const createsWorktree = worktree === 'new-top-level' || worktree === 'new-child'
   assertWorkerLaunchPreferencesCreateTerminal(params)
   validateFederatedWorkerStartPlacement(params, createsWorktree)
   const requestedLaunch = createPendingWorkerLaunchReceipt({
@@ -97,6 +101,16 @@ export async function preflightFederatedWorkerStart(
     capabilities: status.capabilities,
     serverName: server.name
   })
+  const childParent =
+    worktree === 'new-child'
+      ? await resolveFederatedChildParent({
+          runtime,
+          from: params.from,
+          callerSession,
+          serverCapabilities: status.capabilities,
+          serverName: server.name
+        })
+      : undefined
   const supportsControlMail = status.capabilities?.includes(
     ORCHESTRATION_FEDERATION_CONTROL_MAIL_RUNTIME_CAPABILITY
   )
@@ -115,6 +129,7 @@ export async function preflightFederatedWorkerStart(
     server,
     pairingFence,
     budgets,
+    childParent,
     federationProtocolVersion,
     status,
     mutation: orchestrationMutation

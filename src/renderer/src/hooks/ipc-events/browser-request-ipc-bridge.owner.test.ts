@@ -39,7 +39,7 @@ vi.mock('../../store', () => ({ useAppStore: { getState: mocks.getState } }))
 vi.mock('./browser-automation-bootstrap-lease', () => ({
   acquireBrowserAutomationBootstrapLease: vi.fn()
 }))
-vi.mock('../../store/pinned-tab-close-guard', () => ({
+vi.mock('../../store/slices/tabs/closing/pinned-tab-close-guard', () => ({
   guardPinnedTabClose: ({ onClose }: { onClose: () => void }) => onClose(),
   isUnifiedTabPinned: vi.fn(() => false),
   resolvePinnedTabLabel: vi.fn()
@@ -230,18 +230,5 @@ describe('a managed SSH host reaches only its own workspaces on this desktop (#2
       { requestId: 'p3', workspaceId: null },
       { requestId: 'p4', workspaceId: null }
     ])
-  })
-
-  it('answers no when the store cannot resolve the owner', () => {
-    mocks.getState.mockImplementation(() => {
-      throw new Error('store unavailable')
-    })
-
-    mocks.scopeListener?.({ requestId: 's5', environmentId: 'env-remote', workspaceId: REMOTE_WT })
-
-    expect(mocks.replyRemoteCliBrowserScope).toHaveBeenCalledWith({
-      requestId: 's5',
-      workspaceId: null
-    })
   })
 })

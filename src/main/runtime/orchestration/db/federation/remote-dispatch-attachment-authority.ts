@@ -1,6 +1,6 @@
 import type { AgentPromptSubmitOutcome } from '../../../../../shared/agent-prompt-submission'
 import { workerReadyStage } from '../../worker-dispatch-stages'
-import type { RemoteDispatchAttachmentRow } from '../../types'
+import type { RemoteDispatchAttachmentRow } from '../orchestration-records'
 import { OrchestrationError } from '../../orchestration-error'
 import { isEquivalentPaneKey } from '../pane-key-match'
 import type { OrchestrationDb } from '../orchestration-db'

@@ -25,7 +25,7 @@ export type SharedControlTransportSnapshot = {
 }
 
 export function requestRuntimeControl<TResult>(args: {
-  beforeSend?: () => void
+  send?: Pick<Parameters<typeof requestSharedControl>[0], 'beforeSend' | 'prepareRequest'>
   pendingRequests: Map<string, SharedControlPendingRequest<unknown>>
   deviceToken: string
   method: string
@@ -38,7 +38,7 @@ export function requestRuntimeControl<TResult>(args: {
   signal?: AbortSignal
 }): ReturnType<typeof requestSharedControl<TResult>> {
   return requestSharedControl<TResult>({
-    beforeSend: args.beforeSend,
+    ...args.send,
     pendingRequests: args.pendingRequests,
     deviceToken: args.deviceToken,
     method: args.method,

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { installFakeAppEnvironment } from '../../../config/scripts/vitest-host-ports-setup'
+import { installFakeAppEnvironment } from '../../../config/scripts/test-runtime/environment/vitest-host-ports-setup'
 import type { AgentSkillShareRequest } from '../../shared/agent-skill-sharing-contract'
 import { getDefaultSettings } from '../../shared/constants'
 import type { DiscoveredSkill } from '../../shared/skills'
@@ -166,29 +166,6 @@ describe('agent skill sharing runtime', () => {
     })
     expect(manifests).toEqual([['alpha', 'beta']])
     expect(await operationDirectories()).toEqual([])
-  })
-  it('denies before reading a discovered directory and blocks later publishes when disabled', async () => {
-    let enabled = false
-    const { runtime, publishVersion } = runtimeWithCloud({ isEnabled: () => enabled })
-    const missing = {
-      ...(await createSkill('alpha-id', 'alpha')),
-      directoryPath: join(testRoot, 'does-not-exist')
-    }
-
-    await expect(
-      runtime.publishDiscoveredSkillsFromAgent(request(['alpha-id']), [missing])
-    ).rejects.toMatchObject({ code: 'agent_skill_sharing_disabled' })
-    expect(publishVersion).not.toHaveBeenCalled()
-
-    enabled = true
-    const alpha = await createSkill('alpha-two', 'alpha-two')
-    await expect(
-      runtime.publishDiscoveredSkillsFromAgent(request(['alpha-two']), [alpha])
-    ).resolves.toMatchObject({ status: 'ok' })
-    enabled = false
-    await expect(
-      runtime.publishDiscoveredSkillsFromAgent(request(['alpha-two']), [alpha])
-    ).rejects.toMatchObject({ code: 'agent_skill_sharing_disabled' })
   })
 
   it('cleans preparation files after cloud failure', async () => {

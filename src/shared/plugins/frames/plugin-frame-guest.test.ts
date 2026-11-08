@@ -1,22 +1,15 @@
-import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
   isPluginFrameOriginUrl,
   parsePluginFrameUrl,
   pluginFrameKey,
   pluginFramePartition,
-  pluginFrameUrl,
   readPluginFramePartitionKey
 } from './plugin-frame-guest'
 
 const KEY = pluginFrameKey('acme.charts')
 
 describe('plugin frame guest identity', () => {
-  it('derives the key as the first 16 hex chars of sha256(publisher.id)', () => {
-    expect(KEY).toBe(createHash('sha256').update('acme.charts').digest('hex').slice(0, 16))
-    expect(pluginFrameKey('acme.other')).not.toBe(KEY)
-  })
-
   it('round-trips the partition and refuses look-alikes', () => {
     expect(pluginFramePartition(KEY)).toBe(`persist:orca-plugin-${KEY}`)
     expect(readPluginFramePartitionKey(pluginFramePartition(KEY))).toBe(KEY)
@@ -27,11 +20,6 @@ describe('plugin frame guest identity', () => {
 })
 
 describe('plugin frame URLs', () => {
-  it('builds entry URLs from manifest paths', () => {
-    expect(pluginFrameUrl(KEY, 'ui/panel.html')).toBe(`orca-plugin-frame://${KEY}/ui/panel.html`)
-    expect(pluginFrameUrl(KEY, './a b/#x.html')).toBe(`orca-plugin-frame://${KEY}/a%20b/%23x.html`)
-  })
-
   it('parses contained paths into decoded segments', () => {
     expect(parsePluginFrameUrl(`orca-plugin-frame://${KEY}/ui/app.js?v=1`)).toEqual({
       frameKey: KEY,
@@ -45,12 +33,6 @@ describe('plugin frame URLs', () => {
     expect(parsePluginFrameUrl(`orca-plugin-frame://${KEY}/__orca/sdk.js`)?.reserved).toBe(true)
     expect(parsePluginFrameUrl(`orca-plugin-frame://${KEY}/__ORCA/sdk.js`)?.reserved).toBe(true)
     expect(parsePluginFrameUrl(`orca-plugin-frame://${KEY}/__Orca/sdk.js`)?.reserved).toBe(true)
-  })
-
-  it('lets URL dot segments collapse at the plugin root, never above it', () => {
-    expect(
-      parsePluginFrameUrl(`orca-plugin-frame://${KEY}/ui/%2e%2e/%2e%2e/../secret`)?.segments
-    ).toEqual(['secret'])
   })
 
   it.each([

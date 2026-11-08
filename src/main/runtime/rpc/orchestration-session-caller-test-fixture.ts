@@ -1,4 +1,4 @@
-import { agentSessionConversationView } from '../../../shared/agent-session-conversation-view'
+import { agentSessionConversationView } from '../../../shared/agent-session/lifecycle/agent-session-conversation-view'
 import { vi } from 'vitest'
 import type {
   AgentSessionLease,
@@ -13,11 +13,16 @@ import { ORCHESTRATION_CONTRACT_VERSION } from '../../../shared/protocol-version
 import { formatOrcaSessionAddress } from '../../../shared/orca-session-address'
 import { testOrcaSessionId } from '../../../shared/orca-session-address-test-fixture'
 import { OrcaRuntimeService } from '../orca-runtime'
-import { OrchestrationDb } from '../orchestration/db'
-import { structuredWorkerIdentities } from '../structured-worker-identity'
+import type { TerminalIdentityReadContext } from '../terminal/query/terminal-identity-read-context'
+import { OrchestrationDb } from '../orchestration/db/orchestration-db'
+import '../orchestration/db/contract-constants'
+import '../orchestration/db/messages/mailbox-routing-page'
+import '../orchestration/db/dispatch-row-writer'
+import '../orchestration/db/attempt-outcome-projection'
+import { structuredWorkerIdentities } from '../orchestration/terminal-authority/structured-sessions/structured-worker-identity'
 import type { RpcRequest, RpcResponse } from './core'
 import { RpcDispatcher } from './dispatcher'
-import { ORCHESTRATION_METHODS } from './methods/orchestration'
+import { ORCHESTRATION_METHODS } from './methods/orchestration/orchestration'
 import { claudeProviderHandle } from '../../../shared/agent-session/lifecycle/agent-session-provider-handle-encoding'
 
 export const SESSION_X = testOrcaSessionId('4a1f6c2e-8b3d-4e7a-9c15-0d2b6e8f1a37')
@@ -53,8 +58,17 @@ export function sessionRecord(
   }
 }
 
+class SessionCallerRuntime extends OrcaRuntimeService {
+  public override getPaneKeyForTerminalHandle(
+    handle: string,
+    context?: TerminalIdentityReadContext
+  ): string | null {
+    return super.getPaneKeyForTerminalHandle(handle, context)
+  }
+}
+
 export type SessionCallerHarness = {
-  runtime: OrcaRuntimeService
+  runtime: SessionCallerRuntime
   db: OrchestrationDb
   dispatcher: RpcDispatcher
   records: Map<string, AgentSessionRecord>
@@ -73,7 +87,7 @@ export function createSessionCallerHarness(
   })
 ): SessionCallerHarness {
   const db = new OrchestrationDb(':memory:')
-  const runtime = new OrcaRuntimeService()
+  const runtime = new SessionCallerRuntime()
   runtime.setOrchestrationDb(db)
   vi.spyOn(runtime, 'ensureStructuredAgentSessionHost').mockResolvedValue()
   vi.spyOn(runtime, 'getTerminalPaneKey').mockImplementation((handle) =>

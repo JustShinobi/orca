@@ -1,19 +1,19 @@
 import type { AppState } from '@/store/types'
 import { translate } from '@/i18n/i18n'
-import { findWorktreeById } from '@/store/slices/worktree-helpers'
+import { findFirstIndexedWorktree } from '@/lib/workspace/ownership/worktree-runtime-owner-index'
 import type { Worktree } from '../../../../shared/worktree/types'
 import type { SshConnectionStatus } from '../../../../shared/ssh-types'
 import { runtimeEnvironmentIdUnlessTwin } from '@/lib/resolve-owner'
-import { selectRuntimeAwareSshStatus } from '@/store/slices/runtime-environment-ssh'
+import { selectRuntimeAwareSshStatus } from '@/store/slices/ssh/runtime-environment-ssh-selectors'
 import { isPairedWebClientWindow } from '@/lib/desktop-window-chrome'
 import { getClientCreationActionPolicy } from '@/lib/client-creation-action-policy'
 import {
   canRunNativeChatSplitTarget,
   resolveActiveNativeChatSplitTarget,
   runActiveNativeChatSplit
-} from '@/components/native-chat/native-chat-layout-actions'
-import type { NativeChatSplitDirection } from '@/components/native-chat/native-chat-split-shortcut'
-import { selectWorktreesByRepo } from '@/store/workspace-record-selectors'
+} from '@/components/native-chat/pane/routing/native-chat-layout-actions'
+import type { NativeChatSplitDirection } from '@/components/native-chat/pane/routing/native-chat-pane-shortcut'
+import { selectWorktreesByRepo } from '@/store/workspaces/catalog/workspace-record-fields'
 import type { TabSplitDirection } from '@/store/slices/tabs/tabs-slice-contract'
 
 export type CmdJUnavailableReason =
@@ -169,7 +169,7 @@ export function buildCmdJQuickActionContext(args: {
 }): CmdJQuickActionContext {
   const activeWorktreeId = args.state.activeWorktreeId
   const activeWorktree = activeWorktreeId
-    ? (findWorktreeById(selectWorktreesByRepo(args.state), activeWorktreeId) ?? null)
+    ? (findFirstIndexedWorktree(selectWorktreesByRepo(args.state), activeWorktreeId) ?? null)
     : null
   const activeGroupId = resolveCmdJActiveGroupId(
     args.state,

@@ -10,9 +10,9 @@ import type {
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
-import { SearchableSetting } from './SearchableSetting'
-import { SettingsSegmentedControl, SettingsSwitchRow } from './SettingsFormControls'
-import { translate } from '@/i18n/i18n'
+import { SearchableSetting } from './section-layout/SearchableSetting'
+import { SettingsSegmentedControl, SettingsSwitchRow } from './form-controls/SettingsFormControls'
+import { useTranslate } from '@/i18n/use-translate'
 
 type PreviewProxySettingsSectionProps = {
   settings: Pick<GlobalSettings, 'previewProxy'>
@@ -71,6 +71,7 @@ export function PreviewProxySettingsSection({
   settings,
   updateSettings
 }: PreviewProxySettingsSectionProps): React.JSX.Element {
+  const t = useTranslate()
   const preview = settings.previewProxy
   const enabled = preview?.enabled === true
   const [draft, setDraft] = useState<PreviewProxyDraft>(() => draftFromSettings(preview))
@@ -110,7 +111,7 @@ export function PreviewProxySettingsSection({
     updateSettings({ previewProxy: settingsFromDraft(draft, nextEnabled) })
   }
 
-  const title = translate(
+  const title = t(
     'auto.components.settings.PreviewProxySettingsSection.a6d49f6741',
     'Workspace Preview Proxy'
   )
@@ -119,7 +120,7 @@ export function PreviewProxySettingsSection({
   return (
     <SearchableSetting
       title={title}
-      description={translate(
+      description={t(
         'auto.components.settings.PreviewProxySettingsSection.bfadb61ecf',
         'Expose workspace dev servers through one host-routed listener, so browsers and paired clients open them directly.'
       )}
@@ -127,14 +128,14 @@ export function PreviewProxySettingsSection({
     >
       <SettingsSwitchRow
         label={title}
-        description={translate(
+        description={t(
           'auto.components.settings.PreviewProxySettingsSection.c5b96de11c',
           "Requests to <workspace>.<domain> are forwarded to that workspace's dev server. Point a wildcard DNS record and reverse-proxy route at the listener port."
         )}
         checked={enabled}
         disabled={!enabled && !canApply}
         onChange={() => apply(!enabled)}
-        ariaLabel={translate(
+        ariaLabel={t(
           'auto.components.settings.PreviewProxySettingsSection.a4a7afac96',
           'Enable preview proxy'
         )}
@@ -142,14 +143,11 @@ export function PreviewProxySettingsSection({
       <div className="grid grid-cols-2 gap-3 pb-2">
         <label className="col-span-2 block space-y-1">
           <Label className="text-xs text-muted-foreground">
-            {translate(
-              'auto.components.settings.PreviewProxySettingsSection.29f99ff349',
-              'Public domain'
-            )}
+            {t('auto.components.settings.PreviewProxySettingsSection.29f99ff349', 'Public domain')}
           </Label>
           <Input
             value={draft.domain}
-            placeholder={translate(
+            placeholder={t(
               'auto.components.settings.PreviewProxySettingsSection.fe1fbcd16f',
               'https://preview.example.com'
             )}
@@ -158,10 +156,7 @@ export function PreviewProxySettingsSection({
         </label>
         <label className="block space-y-1">
           <Label className="text-xs text-muted-foreground">
-            {translate(
-              'auto.components.settings.PreviewProxySettingsSection.fa3d3820e3',
-              'Listener port'
-            )}
+            {t('auto.components.settings.PreviewProxySettingsSection.fa3d3820e3', 'Listener port')}
           </Label>
           <Input
             inputMode="numeric"
@@ -174,10 +169,7 @@ export function PreviewProxySettingsSection({
         </label>
         <label className="block space-y-1">
           <Label className="text-xs text-muted-foreground">
-            {translate(
-              'auto.components.settings.PreviewProxySettingsSection.3743f05344',
-              'Bind address'
-            )}
+            {t('auto.components.settings.PreviewProxySettingsSection.3743f05344', 'Bind address')}
           </Label>
           <Input
             value={draft.bindHost}
@@ -187,10 +179,7 @@ export function PreviewProxySettingsSection({
         </label>
         <div className="block space-y-1">
           <Label className="text-xs text-muted-foreground">
-            {translate(
-              'auto.components.settings.PreviewProxySettingsSection.e54c382974',
-              'Authentication'
-            )}
+            {t('auto.components.settings.PreviewProxySettingsSection.e54c382974', 'Authentication')}
           </Label>
           <div>
             <SettingsSegmentedControl
@@ -200,21 +189,21 @@ export function PreviewProxySettingsSection({
               options={[
                 {
                   value: 'auto',
-                  label: translate(
+                  label: t(
                     'auto.components.settings.PreviewProxySettingsSection.bcee22a1ea',
                     'Auto'
                   )
                 },
                 {
                   value: 'open',
-                  label: translate(
+                  label: t(
                     'auto.components.settings.PreviewProxySettingsSection.ab818db66b',
                     'Open'
                   )
                 },
                 {
                   value: 'token',
-                  label: translate(
+                  label: t(
                     'auto.components.settings.PreviewProxySettingsSection.33b8314a61',
                     'Token'
                   )
@@ -225,10 +214,7 @@ export function PreviewProxySettingsSection({
         </div>
         <label className="block space-y-1">
           <Label className="text-xs text-muted-foreground">
-            {translate(
-              'auto.components.settings.PreviewProxySettingsSection.b2e49d6552',
-              'Token value'
-            )}
+            {t('auto.components.settings.PreviewProxySettingsSection.b2e49d6552', 'Token value')}
           </Label>
           {/* Why: the token is a bearer credential for every workspace behind
               the listener — it stays masked until asked for, so a shared screen
@@ -245,11 +231,11 @@ export function PreviewProxySettingsSection({
               variant="ghost"
               aria-label={
                 tokenRevealed
-                  ? translate(
+                  ? t(
                       'auto.components.settings.PreviewProxySettingsSection.0f2ac1de77',
                       'Hide token'
                     )
-                  : translate(
+                  : t(
                       'auto.components.settings.PreviewProxySettingsSection.7e1b0b4b0c',
                       'Show token'
                     )
@@ -261,7 +247,7 @@ export function PreviewProxySettingsSection({
           </div>
           {draft.token.trim() !== '' && !isValidPreviewToken(draft.token.trim()) && (
             <p className="text-xs text-destructive">
-              {translate(
+              {t(
                 'auto.components.settings.PreviewProxySettingsSection.ce9623628c',
                 'Tokens may only use letters, digits, and . _ ~ - (up to 512 characters).'
               )}
@@ -272,23 +258,23 @@ export function PreviewProxySettingsSection({
       <div className="flex items-center justify-between gap-3 pb-2">
         <p className="min-w-0 flex-1 select-text text-xs text-muted-foreground">
           {managedByFlags
-            ? translate(
+            ? t(
                 'auto.components.settings.PreviewProxySettingsSection.ccdbfdffff',
                 'Configured by orca serve --preview-* flags; these settings apply after the server restarts without them.'
               )
             : status?.error
-              ? translate(
+              ? t(
                   'auto.components.settings.PreviewProxySettingsSection.448276c164',
                   'Preview proxy error: {{value0}}',
                   { value0: status.error }
                 )
               : status?.running && status.origin
-                ? translate(
+                ? t(
                     'auto.components.settings.PreviewProxySettingsSection.1d15aae5bc',
                     'Running at {{value0}}',
                     { value0: status.origin }
                   )
-                : translate(
+                : t(
                     'auto.components.settings.PreviewProxySettingsSection.28c4ebe2b2',
                     'Anyone who can reach the listener and pass its auth mode can reach your dev servers. Keep token auth on untrusted networks. Use a dedicated subdomain: the auth cookie is sent to every host under the domain you configure.'
                   )}
@@ -300,13 +286,13 @@ export function PreviewProxySettingsSection({
           disabled={!dirty || !canApply}
           onClick={() => apply(enabled)}
         >
-          {translate('auto.components.settings.PreviewProxySettingsSection.e759090f76', 'Apply')}
+          {t('auto.components.settings.PreviewProxySettingsSection.e759090f76', 'Apply')}
         </Button>
       </div>
       {status?.running && status.auth === 'token' && status.token && !preview?.token && (
         <div className="flex items-center gap-2 pb-2">
           <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-            {translate(
+            {t(
               'auto.components.settings.PreviewProxySettingsSection.9a7c1f2e63',
               'A session token was generated for this run. It is not stored in settings.'
             )}
@@ -319,10 +305,7 @@ export function PreviewProxySettingsSection({
               void window.api.ui.writeClipboardText(status.token ?? '')
             }}
           >
-            {translate(
-              'auto.components.settings.PreviewProxySettingsSection.3d0a5c8b41',
-              'Copy token'
-            )}
+            {t('auto.components.settings.PreviewProxySettingsSection.3d0a5c8b41', 'Copy token')}
           </Button>
         </div>
       )}

@@ -6,6 +6,7 @@ import {
   pluginPanelCallerSchema
 } from '../plugins/workers/plugin-panel-bridge-protocol'
 import { pluginShotActsSchema } from '../plugins/view/plugin-shot-acts'
+import { pluginEditorShotActsSchema } from '../plugins/view/plugin-editor-shot-acts'
 import { PLUGIN_DECLARATIVE_RENDER_LANE } from '../plugins/declarative/plugin-declarative-limits'
 
 // Why optional: only `approval_required` hands it out; older hosts strip it and older callers omit it.
@@ -74,6 +75,9 @@ export const PluginDevEmitParams = z
     message: 'pass exactly one of path or pluginKey'
   })
 
+/** `orca plugin dev hook`: one hook through a development plugin's worker alone. */
+export const PluginDevHookParams = PluginDevEmitParams
+
 /** `orca plugin dev request`: one `plugin.request` to a development plugin's worker. */
 export const PluginDevRequestParams = z
   .object({
@@ -132,6 +136,30 @@ export const PluginShotParams = z.object({
   acts: pluginShotActsSchema.optional()
 })
 
+export const PLUGIN_SHOT_MIN_HEIGHT = 120
+export const PLUGIN_SHOT_MAX_HEIGHT = 4000
+
+/** `orca plugin shot --editor`: its own method, so an older host fails `method_not_found`
+ *  instead of quietly shooting the plugin's panel. */
+export const PluginShotEditorParams = z.object({
+  pluginKey: pluginKeyParam,
+  /** Absolute path on the host. */
+  filePath: devFolderPathParam,
+  colorScheme: z.enum(['light', 'dark']).optional(),
+  width: z.number().int().min(PLUGIN_SHOT_MIN_WIDTH).max(PLUGIN_SHOT_MAX_WIDTH).optional(),
+  height: z.number().int().min(PLUGIN_SHOT_MIN_HEIGHT).max(PLUGIN_SHOT_MAX_HEIGHT).optional(),
+  acts: pluginEditorShotActsSchema.optional(),
+  /** With acts: act on the file itself instead of a temporary copy. */
+  inPlace: z.boolean().optional()
+})
+
+/** `orca plugin shot --status-bar` / `--window`: Orca's own chrome, where plugins draw too. */
+export const PluginShotChromeParams = z.object({
+  pluginKey: pluginKeyParam,
+  region: z.enum(['status-bar', 'window']),
+  colorScheme: z.enum(['light', 'dark']).optional()
+})
+
 // Why the render lane's cap: the same bytes a live panel may send Orca for one tree.
 export const PLUGIN_SHOT_REPLAY_MAX_TREE_BYTES = PLUGIN_DECLARATIVE_RENDER_LANE.maxBytes
 
@@ -160,3 +188,39 @@ export const PluginShotReplayParams = z.object({
   colorScheme: z.enum(['light', 'dark']).optional(),
   width: z.number().int().min(PLUGIN_SHOT_MIN_WIDTH).max(PLUGIN_SHOT_MAX_WIDTH).optional()
 })
+
+// Why raw strings: the host parses Git inputs and catalog names so every client reads them alike.
+const installInputParam = z.string().trim().min(1).max(4096)
+
+export const PluginInstallParams = z.object({
+  source: z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('catalog'),
+      pluginKey: pluginKeyParam,
+      catalog: installInputParam.optional()
+    }),
+    z.object({ kind: z.literal('git'), input: installInputParam }),
+    z.object({ kind: z.literal('local-path'), path: devFolderPathParam })
+  ]),
+  approvalFingerprint: approvalFingerprintParam
+})
+
+export const PluginUpdateParams = z
+  .object({
+    pluginKey: pluginKeyParam.optional(),
+    all: z.literal(true).optional(),
+    approvalFingerprint: approvalFingerprintParam
+  })
+  .refine((params) => (params.pluginKey === undefined) !== (params.all === undefined), {
+    message: 'pass exactly one of pluginKey or all'
+  })
+
+export const PluginUninstallParams = z.object({ pluginKey: pluginKeyParam })
+
+export const PluginCatalogAddParams = z.object({
+  input: installInputParam,
+  ref: installInputParam.optional(),
+  approvalFingerprint: approvalFingerprintParam
+})
+
+export const PluginCatalogRemoveParams = z.object({ catalog: installInputParam })

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, vi } from 'vitest'
-import * as views from '../../shared/agent-session-conversation-view'
+import * as views from '../../shared/agent-session/lifecycle/agent-session-conversation-view'
 import * as handles from '../../shared/agent-session/lifecycle/agent-session-provider-handle'
 import { claudeProviderHandle } from '../../shared/agent-session/lifecycle/agent-session-provider-handle-encoding'
 import {
@@ -13,14 +13,14 @@ import {
   openTestJournalHostDatabase,
   closeTestJournalHostDatabases,
   createTrackedJournalOpener
-} from '../native-chat/agent-session-journal/journal-host-database-test-support'
+} from '../native-chat/agent-session-journal/store-lifecycle/journal-host-database-test-support'
 import {
   seedTestAgentSessionRecordStore,
   editPersistedTestAgentSessionStore,
   openTestAgentSessionRecordStore
 } from './agent-session/records/agent-session-record-store-test-harness'
 import type { AgentSessionRecordStore } from './agent-session/records/agent-session-record-store'
-import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
+import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/host/structured-agent-session-registry'
 
 const roots: string[] = []
 export const journals = createTrackedJournalOpener()

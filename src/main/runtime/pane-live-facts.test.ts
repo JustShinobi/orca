@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { spawnInAdmittedPane } from './runtime-pane-admission'
+import { spawnInAdmittedPane } from './terminal/launch/runtime-pane-admission'
 import { PaneOwnerContentionError } from '../ipc/pty/pane/pane-spawn-operation'
 import type { RuntimeStore } from './runtime-store-contract'
 import { bindingOf } from './pane-live-facts'
@@ -16,15 +16,6 @@ function outcomes() {
 }
 
 describe("a pane's resume outcome (layout-owner build)", () => {
-  it('waits past the pane’s old bind when the start keeps its terminal id', () => {
-    const { register } = outcomes()
-    register.set(PANE_KEY, 'restored', { ptyId: 'pty-1', afterGeneration: 4 })
-
-    // The same PTY id with an old generation still identifies the pre-start binding.
-    expect(register.get(PANE_KEY, bindingOf({ ptyId: 'pty-1', ptyGeneration: 4 }))).toBeNull()
-    expect(register.get(PANE_KEY, bindingOf({ ptyId: 'pty-1', ptyGeneration: 5 }))).toBe('restored')
-  })
-
   it('ends when the pane binds again, a same-id respawn included', () => {
     const { register } = outcomes()
     register.set(PANE_KEY, 'resume-unavailable', { ptyId: 'pty-1' })

@@ -1,12 +1,12 @@
 import type { AgentPromptSubmitOutcome } from '../../../../../shared/agent-prompt-submission'
 import { workerReadyStage } from '../../worker-dispatch-stages'
-import type { WorkerDispatchRow } from '../../types'
+import type { WorkerDispatchRow } from '../orchestration-records'
 import { OrchestrationError } from '../../orchestration-error'
 import type { OrchestrationDb } from '../orchestration-db'
 import { transitionLifecycleWithDb } from '../lifecycle-transition'
 import { recordFailedStartDispatchIdentity } from '../worker-terminal/failed-start-dispatch-identity'
 import { DISPATCH_CIRCUIT_BREAK_FAILURES } from '../dispatch-context/dispatch-circuit-breaker'
-import { mergeWorkerLaunchObservation } from '../../worker-launch-observation'
+import { mergeWorkerLaunchObservation } from '../../workers/launch/worker-launch-observation'
 
 export function retainWorkerLaunchObservation(
   this: OrchestrationDb,
