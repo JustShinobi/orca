@@ -120,10 +120,10 @@ export function NativeChatSubagentEntries({
                 <ChevronRight
                   aria-hidden
                   className={cn(
-                    'size-3.5 shrink-0 text-chat-foreground-faint transition-all motion-reduce:transition-none',
+                    'size-3.5 shrink-0 text-chat-foreground-faint transition-[opacity,rotate] motion-reduce:transition-none',
                     sectionOpen
-                      ? 'rotate-90 opacity-100'
-                      : 'opacity-0 group-hover/subagent-entry:opacity-100'
+                      ? 'rotate-90'
+                      : 'can-hover:opacity-0 group-hover/subagent-entry:opacity-100 group-focus-visible/subagent-entry:opacity-100'
                   )}
                 />
               </button>
@@ -193,9 +193,12 @@ export function NativeChatSubagentRun({
           {header.tokens !== null ? ` · ${header.tokens}` : null}
         </span>
         <ChevronRight
+          aria-hidden
           className={cn(
-            'size-3.5 shrink-0 text-chat-foreground-faint transition-all motion-reduce:transition-none',
-            open ? 'rotate-90 opacity-100' : 'opacity-0 group-hover/subagent-run:opacity-100'
+            'size-3.5 shrink-0 text-chat-foreground-faint transition-[opacity,rotate] motion-reduce:transition-none',
+            open
+              ? 'rotate-90'
+              : 'can-hover:opacity-0 group-hover/subagent-run:opacity-100 group-focus-visible/subagent-run:opacity-100'
           )}
         />
       </button>

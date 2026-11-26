@@ -70,7 +70,7 @@ export function NativeChatAwaitingInputRow({
         <ChevronRight
           aria-hidden
           className={cn(
-            'size-3.5 shrink-0 text-chat-foreground-faint transition-all motion-reduce:transition-none',
+            'size-3.5 shrink-0 text-chat-foreground-faint transition-[opacity,rotate] motion-reduce:transition-none',
             open
               ? 'rotate-90'
               : 'can-hover:opacity-0 group-hover/ask-row:opacity-100 group-focus-visible/ask-row:opacity-100'
