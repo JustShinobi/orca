@@ -150,7 +150,8 @@ jobs:
         run: pnpm run build:release
 
       - name: Prepare Electron native runtime
-        run: node config/scripts/ensure-native-runtime.mjs --runtime=electron
+        run: |
+          node $(if (Test-Path config/scripts/native-build/node-addons/ensure-native-runtime.mjs) { "config/scripts/native-build/node-addons/ensure-native-runtime.mjs" } else { "config/scripts/ensure-native-runtime.mjs" }) --runtime=electron
 
       - name: Package NSIS installer (unsigned)
         env:
