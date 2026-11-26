@@ -30,10 +30,11 @@ export function connectableLoopbackHost(hostname: string): string {
   if (bare === '0.0.0.0') {
     return '127.0.0.1'
   }
-  if (bare === '::') {
+  if (bare === '::' || bare === '::1') {
     return '::1'
   }
-  return hostname
+  // URL.hostname preserves brackets around IPv6 literals, which Node dialers treat as DNS names.
+  return hostname.startsWith('[') && hostname.endsWith(']') ? bare : hostname
 }
 
 export type LocalhostWorktreeLabelInput = {
