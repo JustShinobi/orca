@@ -68,7 +68,7 @@ export class LocalhostWorktreeLabelProxy {
     }
 
     const server = http.createServer((request, response) => {
-      void this.handleRequest(request, response)
+      this.handleRequest(request, response)
     })
     server.on('upgrade', (request, socket, head) => {
       this.handleUpgrade(request, socket, head)
@@ -118,7 +118,7 @@ export class LocalhostWorktreeLabelProxy {
     return url.toString()
   }
 
-  private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  private handleRequest(request: IncomingMessage, response: ServerResponse): void {
     const route = this.routeForRequest(request)
     if (!route) {
       response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
@@ -127,21 +127,50 @@ export class LocalhostWorktreeLabelProxy {
     }
 
     const target = targetUrlForRequest(route.target, request)
+    if (!target) {
+      response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
+      response.end('Invalid request URL.')
+      return
+    }
+
     const proxyRequest = requestForTarget(target, {
       method: request.method,
       headers: requestHeadersForTarget(request, route.target)
     })
 
-    // Downstream errors must release upstream work rather than leak requests or crash main.
-    request.on('error', () => proxyRequest.destroy())
-    response.on('error', () => proxyRequest.destroy())
+    let activeProxyResponse: IncomingMessage | null = null
+    const abortUpstream = (): void => {
+      if (!proxyRequest.destroyed) {
+        proxyRequest.destroy()
+      }
+      if (activeProxyResponse && !activeProxyResponse.destroyed) {
+        activeProxyResponse.destroy()
+      }
+    }
+
+    // Premature closes (not only errors) must release upstream requests and streaming bodies.
+    request.on('error', abortUpstream)
+    response.on('error', abortUpstream)
+    response.on('close', () => {
+      if (!response.writableFinished) {
+        abortUpstream()
+      }
+    })
 
     proxyRequest.on('response', (proxyResponse) => {
+      activeProxyResponse = proxyResponse
+      if (response.destroyed || !response.writable) {
+        proxyResponse.destroy()
+        return
+      }
       proxyResponse.on('error', () => response.destroy())
       response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers)
       proxyResponse.pipe(response)
     })
     proxyRequest.on('error', (error) => {
+      if (response.destroyed || !response.writable) {
+        return
+      }
       // After headers are sent, destroy the response instead of attempting a 502.
       if (response.headersSent) {
         response.destroy(error)
@@ -161,8 +190,17 @@ export class LocalhostWorktreeLabelProxy {
     }
 
     const target = targetUrlForRequest(route.target, request)
+    if (!target) {
+      socket.destroy()
+      return
+    }
+
     const targetPort = Number(target.port || (target.protocol === 'https:' ? 443 : 80))
     const targetSocket = net.connect(targetPort, connectableLoopbackHost(target.hostname), () => {
+      if (socket.destroyed) {
+        targetSocket.destroy()
+        return
+      }
       const headers = requestHeadersForTarget(request, route.target)
       targetSocket.write(
         `${request.method ?? 'GET'} ${target.pathname}${target.search} HTTP/${request.httpVersion}\r\n`
@@ -184,7 +222,13 @@ export class LocalhostWorktreeLabelProxy {
       socket.pipe(targetSocket)
     })
     targetSocket.on('error', () => socket.destroy())
+    targetSocket.on('close', (hadError) => {
+      if (hadError || !socket.writableEnded) {
+        socket.destroy()
+      }
+    })
     socket.on('error', () => targetSocket.destroy())
+    socket.on('close', () => targetSocket.destroy())
   }
 
   private routeForRequest(request: IncomingMessage): RegisteredRoute | null {
@@ -225,9 +269,14 @@ function requestForTarget(
   return target.protocol === 'https:' ? https.request(requestOptions) : http.request(requestOptions)
 }
 
-function targetUrlForRequest(target: URL, request: IncomingMessage): URL {
+function targetUrlForRequest(target: URL, request: IncomingMessage): URL | null {
+  let incomingUrl: URL
+  try {
+    incomingUrl = new URL(request.url || '/', target)
+  } catch {
+    return null
+  }
   const url = new URL(target.toString())
-  const incomingUrl = new URL(request.url || '/', target)
   url.pathname = incomingUrl.pathname
   url.search = incomingUrl.search
   return url
