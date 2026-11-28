@@ -188,7 +188,7 @@ export function createWsOutboundBackpressureQueue<TFrame>(
     }
     const index = queue.indexOf(entry, queueHead)
     if (index !== -1) {
-      queue[index] = undefined
+      queue.splice(index, 1)
     }
     advanceQueueHead()
     if (queuedFrames === 0) {
