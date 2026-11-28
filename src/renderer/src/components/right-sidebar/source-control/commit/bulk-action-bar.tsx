@@ -76,6 +76,14 @@ export function BulkActionBar({
             variant="ghost"
             size="icon"
             className="h-7 w-7 ml-0.5 text-muted-foreground hover:text-foreground hover:bg-muted"
+            aria-label={t(
+              'auto.components.right.sidebar.BulkActionBar.clearSelection',
+              'Clear selection'
+            )}
+            title={t(
+              'auto.components.right.sidebar.BulkActionBar.clearSelection',
+              'Clear selection'
+            )}
             onClick={onClear}
             disabled={isExecuting}
           >

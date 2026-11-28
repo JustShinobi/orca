@@ -13826,7 +13826,8 @@
             "selectedCount_one": "{{count}} selected",
             "selectedCount_other": "{{count}} selected",
             "stageCount": "Stage ({{count}})",
-            "unstageCount": "Unstage ({{count}})"
+            "unstageCount": "Unstage ({{count}})",
+            "clearSelection": "Clear selection"
           },
           "ChecksPanel": {
             "2ef90c9819": "Started an AI agent for the broken checks.",
